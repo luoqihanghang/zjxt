@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>网络智慧教务平台</title>
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="config.js"></script>
+<script src="github-service.js"></script>
+</head>
+<body>
+
+<!-- 登录页 -->
+<div id="loginPage" class="login-page">
+  <!-- 左侧图片区域 -->
+  <div class="login-left">
+    <div class="login-left-inner">
+      <div class="login-left-badge">🎓 网络智慧教务</div>
+      <h1 class="login-left-title">数字化教育管理<br/>让教学更高效</h1>
+      <p class="login-left-desc">集成绩管理、教师排行、智能分析于一体的现代化教务平台，覆盖教学全流程，助力学校管理升级。</p>
+      <div class="login-left-features">
+        <div class="login-feature-item">
+          <span class="lf-icon">📊</span>
+          <span>成绩智能分析</span>
+        </div>
+        <div class="login-feature-item">
+          <span class="lf-icon">🏆</span>
+          <span>教师排行榜</span>
+        </div>
+        <div class="login-feature-item">
+          <span class="lf-icon">📈</span>
+          <span>多维度数据对比</span>
+        </div>
+        <div class="login-feature-item">
+          <span class="lf-icon">📢</span>
+          <span>消息实时播报</span>
+        </div>
+        <div class="login-feature-item">
+          <span class="lf-icon">📥</span>
+          <span>Excel 成绩导入</span>
+        </div>
+        <div class="login-feature-item">
+          <span class="lf-icon">🔐</span>
+          <span>权限分级管理</span>
+        </div>
+      </div>
+      <div class="login-left-stats">
+        <div class="ls-item"><span class="ls-num">4</span><span class="ls-label">种角色</span></div>
+        <div class="ls-divider"></div>
+        <div class="ls-item"><span class="ls-num">∞</span><span class="ls-label">数据全平台</span></div>
+        <div class="ls-divider"></div>
+        <div class="ls-item"><span class="ls-num">100%</span><span class="ls-label">本地化存储</span></div>
+      </div>
+    </div>
+    <div class="login-left-bg-shapes">
+      <div class="shape shape-1"></div>
+      <div class="shape shape-2"></div>
+      <div class="shape shape-3"></div>
+    </div>
+  </div>
+
+  <!-- 右侧登录表单 -->
+  <div class="login-right">
+    <div class="login-box">
+      <div class="login-header">
+        <div class="login-brand">
+          <span class="login-brand-icon">🎓</span>
+          <div>
+            <h1 class="login-brand-name">智慧教务平台</h1>
+            <p class="login-brand-sub">Smart Educational Administration</p>
+          </div>
+        </div>
+      </div>
+      <div class="login-form">
+        <h2 class="login-form-title">欢迎登录</h2>
+        <p class="login-form-tip">请输入您的账号信息登录系统</p>
+        <div class="form-group">
+          <label>账号</label>
+          <div class="input-wrapper">
+            <span class="input-icon">👤</span>
+            <input type="text" id="loginUsername" placeholder="请输入账号" autocomplete="off" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="loginPassword" placeholder="请输入密码" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>角色</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🎭</span>
+            <select id="loginRole">
+              <option value="admin">管理员</option>
+              <option value="academic">教务老师</option>
+              <option value="teacher">任课教师</option>
+              <option value="headteacher">班主任</option>
+            </select>
+          </div>
+        </div>
+        <div class="login-options">
+          <label class="remember-me">
+            <input type="checkbox" id="rememberMe" />
+            <span>记住密码</span>
+          </label>
+          <span class="forgot-pwd">首次登录后可在个人设置中修改密码</span>
+        </div>
+        <button id="loginBtn" class="btn-primary login-btn">登 录 系 统</button>
+        <div id="loginError" class="error-msg"></div>
+      </div>
+      <div class="login-footer">© 2026 网络智慧教务平台 · 大一中</div>
+    </div>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="mainApp" class="main-app hidden">
+  <!-- 左侧导航 -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">🎓</div>
+      <div class="brand">
+        <div class="brand-title">智慧教务</div>
+        <div class="brand-sub">Smart Edu Platform</div>
+      </div>
+    </div>
+    <nav id="navMenu" class="nav-menu"></nav>
+    <div class="sidebar-footer">
+      <div id="currentUserInfo" class="user-info"></div>
+      <button id="logoutBtn" class="btn-logout">退出登录</button>
+    </div>
+  </aside>
+
+  <!-- 右侧内容 -->
+  <main class="content">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2 id="pageTitle">首页</h2>
+      </div>
+      <div class="topbar-right">
+        <div id="announcementBadge" class="announcement-badge hidden">
+          📢 <span id="announcementCount">0</span> 条新公告
+        </div>
+        <div id="topUserInfo"></div>
+      </div>
+    </header>
+
+    <!-- 消息播报滚动条 -->
+    <div id="announcementBar" class="announcement-bar hidden">
+      <span class="ab-icon">📢 播报：</span>
+      <div id="announcementContent" class="ab-content"></div>
+    </div>
+
+    <!-- 页面内容容器 -->
+    <section id="pageContent" class="page-content"></section>
+  </main>
+</div>
+
+<!-- 模态框 -->
+<div id="modal" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3 id="modalTitle">提示</h3>
+      <button id="modalClose" class="modal-close">×</button>
+    </div>
+    <div id="modalBody" class="modal-body"></div>
+    <div id="modalFooter" class="modal-footer">
+      <button id="modalOk" class="btn-primary">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast 提示 -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
