@@ -396,7 +396,7 @@ function renderNavMenu() {
   });
 }
 
-function navigate(pageId) {
+async function navigate(pageId) {
   currentPage = pageId;
   $("navMenu").querySelectorAll(".nav-item").forEach((el) => {
     el.classList.toggle("active", el.dataset.id === pageId);
@@ -404,6 +404,13 @@ function navigate(pageId) {
   const menus = NAV_MENUS[currentUser.role] || [];
   const menu = menus.find((m) => m.id === pageId);
   $("pageTitle").textContent = menu ? menu.text : "页面";
+
+  // 切换页面时自动刷新最新数据
+  const savedDB = localStorage.getItem(DB_KEY);
+  if (savedDB) {
+    try { DB = JSON.parse(savedDB); } catch (e) { /* 保持现有 DB */ }
+  }
+
   const render = PAGE_RENDERERS[pageId];
   if (render) render();
   else $("pageContent").innerHTML = `<div class="empty-state"><div class="es-icon">🚧</div><div class="es-title">功能建设中</div></div>`;
