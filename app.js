@@ -138,7 +138,9 @@ const NAV_MENUS = {
     { id: "my_scores", icon: "📖", text: "我的班级成绩" },
     { id: "my_ranking", icon: "🏅", text: "我的排行信息" },
     { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
-    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
+    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" },
+    { id: "group_scores", icon: "👥", text: "小组成绩分析" },
+    { id: "custom_analysis", icon: "⚙️", text: "自定义分析" }
   ],
   headteacher: [
     { id: "dashboard", icon: "📊", text: "工作首页" },
@@ -147,7 +149,8 @@ const NAV_MENUS = {
     { id: "class_ranking", icon: "🏆", text: "本班排名统计" },
     { id: "download_scores", icon: "📤", text: "下载Excel成绩" },
     { id: "headteacher_analysis", icon: "🔍", text: "本班智能对比分析" },
-    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
+    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" },
+    { id: "group_manage", icon: "👥", text: "学习小组管理" }
   ]
 };
 
@@ -455,7 +458,10 @@ const PAGE_RENDERERS = {
   my_ranking: renderMyRanking,
   teacher_analysis: renderTeacherAnalysis,
   exam_compare: renderExamCompare,
-  github_data: renderGithubData
+  github_data: renderGithubData,
+  group_manage: renderGroupManage,
+  group_scores: renderGroupScores,
+  custom_analysis: renderCustomAnalysis
 };
 
 // ========== 平台概览 ==========
@@ -2291,7 +2297,7 @@ window.downloadTeacherAnalysis = function () {
   showToast("分析报告已下载", "success");
 };
 
-// ========== 多次考试对比分析（各角色通用） ==========
+// ========== 多次考试对比分析（重新设计） ==========
 function renderExamCompare() {
   const grade = currentUser.grade;
   const exams = getSortedExams(grade);
@@ -2303,390 +2309,1180 @@ function renderExamCompare() {
   const subjects = DB.subjects[grade] || [];
   const role = currentUser.role;
 
-  // 考试多选框
+  // 考试选择（支持多选）
   const examCheckboxes = exams.map((e, i) => `
-    <label class="checkbox-item"><input type="checkbox" name="exam_cb" value="${e.id}" ${i >= exams.length - 3 ? "checked" : ""}/><span>${esc(e.name)}</span></label>
+    <label class="exam-chip ${i >= exams.length - 3 ? "active" : ""}">
+      <input type="checkbox" name="exam_cb" value="${e.id}" ${i >= exams.length - 3 ? "checked" : ""}/>
+      <span>${esc(e.name)}</span>
+    </label>
   `).join("");
 
+  // Tab 配置
+  const tabs = [
+    { id: "tab_class", icon: "🏫", text: "班级综合对比" },
+    { id: "tab_student", icon: "👨‍🎓", text: "学生个人对比" },
+    { id: "tab_subject", icon: "📚", text: "学科详细分析" },
+    { id: "tab_trend", icon: "📈", text: "趋势图表" }
+  ];
+
   $("pageContent").innerHTML = `
-    <div class="card">
-      <div class="card-title">
-        <span>🔄 多次考试对比分析</span>
-        <span class="ct-actions">
-          <button class="btn btn-primary" onclick="toggleAllExams()">全选/取消</button>
-          <button class="btn btn-success" onclick="downloadExamCompare()">📥 下载对比报告</button>
-        </span>
+    <div class="compare-container">
+      <!-- 顶部工具栏 -->
+      <div class="compare-toolbar">
+        <div class="compare-exams">
+          <div class="toolbar-label">📋 选择考试（至少选2次）：</div>
+          <div class="exam-chips">${examCheckboxes}</div>
+          <button class="btn btn-sm btn-outline" onclick="cmpSelectRecent()">选最近3次</button>
+        </div>
+        <div class="compare-actions">
+          <button class="btn btn-success" onclick="downloadExamCompare()">📥 导出分析报告</button>
+        </div>
       </div>
-      <div style="padding:16px;background:#f8f9fc;border-radius:8px">
-        <p style="margin-bottom:12px;color:var(--text-light);font-size:13px">📋 请选择要对比的考试（可多选）：</p>
-        <div class="checkbox-group">${examCheckboxes}</div>
+
+      <!-- 标签页 -->
+      <div class="compare-tabs">
+        ${tabs.map((t) => `<button class="tab-btn active" data-tab="${t.id}" onclick="cmpSwitchTab('${t.id}')">${t.icon} ${t.text}</button>`).join("")}
       </div>
+
+      <!-- 内容区域 -->
+      <div id="compare_content" class="compare-content"></div>
     </div>
-    <div id="compare_result"></div>
   `;
 
-  $("pageContent").addEventListener("change", (e) => {
-    if (e.target.name === "exam_cb") refreshExamCompare();
+  // 绑定考试选择事件
+  $("compare_content").parentElement.addEventListener("change", (e) => {
+    if (e.target.name === "exam_cb") cmpRefreshContent();
   });
 
-  setTimeout(() => refreshExamCompare(), 50);
+  // 样式
+  addCompareStyles();
+
+  setTimeout(() => cmpRefreshContent(), 50);
 }
 
-function toggleAllExams() {
-  const checkboxes = document.querySelectorAll('input[name="exam_cb"]');
-  const allChecked = Array.from(checkboxes).every((c) => c.checked);
-  checkboxes.forEach((c) => { c.checked = !allChecked; });
-  refreshExamCompare();
+function cmpSelectRecent() {
+  const checks = document.querySelectorAll('input[name="exam_cb"]');
+  checks.forEach((c, i) => { c.checked = i >= checks.length - 3; });
+  cmpRefreshContent();
 }
 
-function refreshExamCompare() {
+function cmpSwitchTab(tabId) {
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
+  cmpRefreshContent();
+}
+
+function cmpRefreshContent() {
   const grade = currentUser.grade;
   const subjects = DB.subjects[grade] || [];
   const role = currentUser.role;
   const selectedExamIds = Array.from(document.querySelectorAll('input[name="exam_cb"]:checked')).map((c) => c.value);
 
   if (selectedExamIds.length < 2) {
-    $("compare_result").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">⚠️</div><div class="es-title">请至少选择 2 次考试</div></div></div>`;
+    $("compare_content").innerHTML = `<div class="cmp-empty"><div class="es-icon">⚠️</div><div class="es-title">请至少选择 2 次考试</div></div>`;
     return;
   }
 
   const selectedExams = DB.exams.filter((e) => selectedExamIds.includes(e.id)).sort((a, b) => a.createdAt - b.createdAt);
   const examLabels = selectedExams.map((e) => e.name);
+  const activeTab = document.querySelector(".tab-btn.active")?.dataset.tab || "tab_class";
 
-  let resultHTML = "";
-
-  // 根据角色显示不同内容
-  if (role === "academic") {
-    // 教务：全年级对比
-    resultHTML += renderAcademicExamCompare(grade, subjects, selectedExams, examLabels);
-  } else if (role === "headteacher") {
-    // 班主任：本班对比
-    const classNo = currentUser.classNo;
-    resultHTML += renderHeadteacherExamCompare(grade, classNo, subjects, selectedExams, examLabels);
-  } else if (role === "teacher") {
-    // 任课教师：所任教科目的对比
-    const mySubjects = currentUser.subjects || [];
-    resultHTML += renderTeacherExamCompare(grade, mySubjects, subjects, selectedExams, examLabels);
+  let html = "";
+  switch (activeTab) {
+    case "tab_class":
+      html = cmpRenderClassTab(grade, subjects, selectedExams, examLabels, role);
+      break;
+    case "tab_student":
+      html = cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role);
+      break;
+    case "tab_subject":
+      html = cmpRenderSubjectTab(grade, subjects, selectedExams, examLabels, role);
+      break;
+    case "tab_trend":
+      html = cmpRenderTrendTab(grade, subjects, selectedExams, examLabels, role);
+      break;
   }
 
-  $("compare_result").innerHTML = resultHTML;
-
-  // 渲染图表
-  setTimeout(() => drawCompareCharts(grade, subjects, selectedExams, examLabels, role), 100);
+  $("compare_content").innerHTML = html;
+  setTimeout(() => cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeTab), 100);
 }
 
-function renderAcademicExamCompare(grade, subjects, selectedExams, examLabels) {
-  let html = `<div class="card"><div class="card-title">📈 各学科多次考试均分对比</div><div class="chart-box"><canvas id="cmp_chart1"></canvas></div></div>`;
+// ========== Tab 1: 班级综合对比 ==========
+function cmpRenderClassTab(grade, subjects, selectedExams, examLabels, role) {
+  const classNo = role === "headteacher" ? currentUser.classNo : null;
+  const classes = classNo ? [classNo] : [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
 
-  // 班级对比表格
-  html += `<div class="card"><div class="card-title">🏫 各班总分均分对比</div><div class="table-wrap"><table class="data-table"><thead><tr><th>班级</th>${examLabels.map((e) => `<th>${e}</th>`).join("")}<th>最大涨幅</th></tr></thead><tbody>`;
-
-  const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
-  classes.forEach((c) => {
-    const row = [`<td><b>${esc(c)}</b></td>`];
-    const avgs = [];
+  // 计算各班各次考试数据
+  const classData = classes.map((c) => {
+    const data = { classNo: c, exams: [], stats: [] };
     selectedExams.forEach((e) => {
       const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
       if (recs.length) {
-        const avg = +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
-        avgs.push(avg);
-        row.push(`<td><b>${avg}</b></td>`);
+        const totals = recs.map((r) => r.total);
+        const avg = +fmt(totals.reduce((a, b) => a + b, 0) / totals.length, 2);
+        const max = Math.max(...totals);
+        const min = Math.min(...totals);
+        const std = +fmt(mathStdDev(totals), 2);
+        const st = aggregateStats(recs, subjects.filter((s) => s));
+        const passRate = totals.filter((t) => t >= (subjects[0]?.pass || 60)).length / totals.length;
+        data.exams.push({ exam: e, count: recs.length, avg, max, min, std, passRate, passCount: Math.round(passRate * totals.length) });
       } else {
-        avgs.push(null);
-        row.push("<td>-</td>");
+        data.exams.push(null);
       }
     });
-    // 计算最大涨幅
-    if (avgs.filter((v) => v != null).length >= 2) {
-      let maxDiff = 0;
-      for (let i = 1; i < avgs.length; i++) {
-        if (avgs[i] != null && avgs[i - 1] != null) {
-          maxDiff = Math.max(maxDiff, avgs[i] - avgs[i - 1]);
-        }
+    return data;
+  }).filter((d) => d.exams.some((e) => e != null));
+
+  // 生成表格
+  let tableHTML = `<div class="cmp-table-wrap"><table class="cmp-table">
+    <thead><tr><th rowspan="2">班级</th><th rowspan="2">考试人数</th>${examLabels.map((e) => `<th colspan="5">${esc(e)}</th>`).join("")}</tr>
+    <tr>${examLabels.map(() => `<th>均分</th><th>最高</th><th>最低</th><th>标准差</th><th>及格率</th>`).join("")}</tr></thead>
+    <tbody>`;
+
+  classData.forEach((d) => {
+    tableHTML += `<tr><td class="class-name"><b>${esc(d.classNo)}</b></td>`;
+    let firstCount = d.exams.find((e) => e)?.count || "-";
+    tableHTML += `<td>${firstCount}</td>`;
+    d.exams.forEach((e) => {
+      if (e) {
+        tableHTML += `<td><b>${e.avg}</b></td><td>${e.max}</td><td>${e.min}</td><td>${e.std}</td><td>${fmtPct(e.passRate)}</td>`;
+      } else {
+        tableHTML += `<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>`;
       }
-      row.push(`<td>${maxDiff > 0 ? `📈 +${fmt(maxDiff, 2)}` : "-"}</td>`);
-    } else {
-      row.push("<td>-</td>");
+    });
+    tableHTML += `</tr>`;
+  });
+  tableHTML += `</tbody></table></div>`;
+
+  // 涨幅排名
+  let rankHTML = `<div class="cmp-section-title">📊 各班成绩涨幅排名（首次 → 最近）</div><div class="cmp-table-wrap"><table class="cmp-table">
+    <thead><tr><th>班级</th><th>首次均分</th><th>最近均分</th><th>涨幅</th><th>趋势</th></tr></thead><tbody>`;
+
+  classData.forEach((d) => {
+    const validExams = d.exams.filter((e) => e != null);
+    if (validExams.length >= 2) {
+      const first = validExams[0].avg;
+      const last = validExams[validExams.length - 1].avg;
+      const diff = +fmt(last - first, 2);
+      const trend = diff > 0 ? "📈" : diff < 0 ? "📉" : "➡️";
+      const color = diff > 0 ? "var(--success)" : diff < 0 ? "var(--danger)" : "var(--text-light)";
+      rankHTML += `<tr><td><b>${esc(d.classNo)}</b></td><td>${first}</td><td>${last}</td><td style="color:${color};font-weight:bold">${diff > 0 ? "+" : ""}${diff}</td><td>${trend}</td></tr>`;
     }
-    html += `<tr>${row.join("")}</tr>`;
   });
-  html += `</tbody></table></div></div>`;
+  rankHTML += `</tbody></table></div>`;
 
-  // 详细统计对比
-  html += `<div class="card"><div class="card-title">📋 各学科详细统计对比</div><div class="table-wrap"><table class="data-table"><thead><tr><th>学科</th>${examLabels.map((e) => `<th colspan="4">${e}</th>`).join("")}</tr><tr><th></th>${examLabels.map(() => `<th>均分</th><th>及格率</th><th>优秀率</th><th>低分率</th>`).join("")}</tr></thead><tbody>`;
-
-  subjects.forEach((s) => {
-    const row = [`<td><b>${esc(s.name)}</b></td>`];
-    selectedExams.forEach((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
-      if (recs.length) {
-        const st = aggregateStats(recs, [s])[s.name];
-        row.push(`<td>${fmt(st.avg, 2)}</td><td>${fmtPct(st.passPct)}</td><td>${fmtPct(st.excellentPct)}</td><td>${fmtPct(st.lowPct)}</td>`);
-      } else {
-        row.push("<td>-</td><td>-</td><td>-</td><td>-</td>");
-      }
-    });
-    html += `<tr>${row.join("")}</tr>`;
-  });
-  html += `</tbody></table></div></div>`;
-
-  return html;
+  return `<div class="cmp-panel">${tableHTML}${rankHTML}</div>`;
 }
 
-function renderHeadteacherExamCompare(grade, classNo, subjects, selectedExams, examLabels) {
-  let html = `<div class="card"><div class="card-title">📈 ${esc(classNo)} 各学科多次考试均分对比</div><div class="chart-box"><canvas id="cmp_chart1"></canvas></div></div>`;
-
-  // 本班 vs 年级对比
-  html += `<div class="card"><div class="card-title">📊 ${esc(classNo)} vs 年级总分均分</div><div class="chart-box"><canvas id="cmp_chart2"></canvas></div></div>`;
-
-  // 学生进步榜（基于首次和最后一次考试）
+// ========== Tab 2: 学生个人对比 ==========
+function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
+  const classNo = role === "headteacher" ? currentUser.classNo : null;
   const firstExam = selectedExams[0];
   const lastExam = selectedExams[selectedExams.length - 1];
+
+  // 获取学生数据
   const firstMap = {};
-  DB.records.filter((r) => r.examId === firstExam.id && r.classNo === classNo).forEach((r) => { firstMap[r.studentId] = r; });
-  const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && r.classNo === classNo);
-  const studentProgress = lastRecs.map((r) => {
+  DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).forEach((r) => { firstMap[r.studentId] = r; });
+
+  const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
+  const students = lastRecs.map((r) => {
     const first = firstMap[r.studentId];
-    return {
-      id: r.studentId,
-      name: r.studentName,
-      first: first?.total || null,
-      last: r.total,
-      diff: first ? r.total - first.total : null,
-      rankChange: null
-    };
+    const firstTotal = first && typeof first.total === 'number' ? first.total : null;
+    const diff = firstTotal !== null ? r.total - firstTotal : null;
+    return { ...r, firstTotal, diff };
   }).sort((a, b) => (b.diff || 0) - (a.diff || 0));
 
-  // 计算排名变化
-  const allFirstRecs = DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade);
-  const allLastRecs = DB.records.filter((r) => r.examId === lastExam.id && r.grade === grade);
-  studentProgress.forEach((s) => {
-    const firstRank = allFirstRecs.sort((a, b) => b.total - a.total).findIndex((x) => x.studentId === s.id) + 1;
-    const lastRank = allLastRecs.sort((a, b) => b.total - a.total).findIndex((x) => x.studentId === s.id) + 1;
-    s.rankChange = firstRank && lastRank ? firstRank - lastRank : null;
+  // 计算班级/年级排名
+  const allFirst = DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).sort((a, b) => b.total - a.total);
+  const allLast = DB.records.filter((r) => r.examId === lastExam.id && r.grade === grade).sort((a, b) => b.total - a.total);
+
+  students.forEach((s) => {
+    const firstIdx = allFirst.findIndex((x) => x.studentId === s.studentId);
+    const lastIdx = allLast.findIndex((x) => x.studentId === s.studentId);
+    s.firstRank = firstIdx >= 0 ? firstIdx + 1 : null;
+    s.lastRank = lastIdx >= 0 ? lastIdx + 1 : null;
+    s.rankChange = s.firstRank && s.lastRank ? s.firstRank - s.lastRank : null;
   });
 
-  html += `<div class="card"><div class="card-title">🏆 学生进步榜（${esc(firstExam.name)} → ${esc(lastExam.name)}）</div><div class="table-wrap"><table class="data-table"><thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>首次总分</th><th>最近总分</th><th>进步幅度</th><th>排名变化</th></tr></thead><tbody>`;
-  studentProgress.forEach((s, idx) => {
-    const color = s.diff > 0 ? "green" : s.diff < 0 ? "red" : "#999";
-    html += `<tr><td>${idx + 1}</td><td>${esc(s.id)}</td><td><b>${esc(s.name)}</b></td><td>${s.first || "-"}</td><td><b>${s.last}</b></td>
-      <td style="color:${color};font-weight:bold">${s.diff == null ? "-" : (s.diff > 0 ? "+" : "") + s.diff}</td>
-      <td>${s.rankChange == null ? "-" : s.rankChange > 0 ? `📈 +${s.rankChange}` : s.rankChange < 0 ? `📉 ${s.rankChange}` : "—"}</td></tr>`;
+  // 进步榜
+  let html = `<div class="cmp-section-title">🏆 进步最快 TOP 10（${esc(firstExam.name)} → ${esc(lastExam.name)}）</div>`;
+  html += `<div class="cmp-table-wrap"><table class="cmp-table">
+    <thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>首次</th><th>最近</th><th>涨幅</th><th>首次排名</th><th>最近排名</th><th>排名变化</th></tr></thead><tbody>`;
+  students.slice(0, 10).forEach((s, idx) => {
+    const color = s.diff > 0 ? "var(--success)" : s.diff < 0 ? "var(--danger)" : "var(--text-light)";
+    const rankColor = s.rankChange > 0 ? "var(--success)" : s.rankChange < 0 ? "var(--danger)" : "var(--text-light)";
+    html += `<tr>
+      <td>${idx + 1}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td>
+      <td>${s.firstTotal || "-"}</td><td><b>${s.total}</b></td>
+      <td style="color:${color};font-weight:bold">${s.diff != null ? (s.diff > 0 ? "+" : "") + s.diff : "-"}</td>
+      <td>${s.firstRank || "-"}</td><td>${s.lastRank || "-"}</td>
+      <td style="color:${rankColor};font-weight:bold">${s.rankChange != null ? (s.rankChange > 0 ? "↑" + s.rankChange : s.rankChange < 0 ? "↓" + Math.abs(s.rankChange) : "—") : "-"}</td>
+    </tr>`;
   });
-  html += `</tbody></table></div></div>`;
+  html += `</tbody></table></div>`;
 
-  return html;
+  // 退步榜
+  html += `<div class="cmp-section-title" style="margin-top:24px">⚠️ 需关注学生 TOP 10（退步较大）</div>`;
+  html += `<div class="cmp-table-wrap"><table class="cmp-table">
+    <thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>首次</th><th>最近</th><th>跌幅</th><th>首次排名</th><th>最近排名</th><th>排名变化</th></tr></thead><tbody>`;
+  students.slice(-10).reverse().forEach((s, idx) => {
+    const color = "var(--danger)";
+    const rankColor = s.rankChange > 0 ? "var(--success)" : s.rankChange < 0 ? "var(--danger)" : "var(--text-light)";
+    html += `<tr>
+      <td>${idx + 1}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td>
+      <td>${s.firstTotal || "-"}</td><td><b>${s.total}</b></td>
+      <td style="color:${color};font-weight:bold">${s.diff != null ? s.diff : "-"}</td>
+      <td>${s.firstRank || "-"}</td><td>${s.lastRank || "-"}</td>
+      <td style="color:${rankColor};font-weight:bold">${s.rankChange != null ? (s.rankChange > 0 ? "↑" + s.rankChange : s.rankChange < 0 ? "↓" + Math.abs(s.rankChange) : "—") : "-"}</td>
+    </tr>`;
+  });
+  html += `</tbody></table></div>`;
+
+  // 稳定榜（波动小）
+  const stableStudents = students.filter((s) => s.diff != null && Math.abs(s.diff) <= 5).sort((a, b) => Math.abs(a.diff) - Math.abs(b.diff));
+  html += `<div class="cmp-section-title" style="margin-top:24px">🎯 成绩稳定学生（波动 ≤5分）</div>`;
+  html += `<div class="cmp-table-wrap"><table class="cmp-table">
+    <thead><tr><th>学号</th><th>姓名</th><th>首次</th><th>最近</th><th>波动</th><th>趋势</th></tr></thead><tbody>`;
+  stableStudents.slice(0, 10).forEach((s) => {
+    html += `<tr><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td><td>${s.firstTotal || "-"}</td><td>${s.total}</td><td>${Math.abs(s.diff)}</td><td>➡️</td></tr>`;
+  });
+  html += `</tbody></table></div>`;
+
+  return `<div class="cmp-panel">${html}</div>`;
 }
 
-function renderTeacherExamCompare(grade, mySubjects, allSubjects, selectedExams, examLabels) {
+// ========== Tab 3: 学科详细分析 ==========
+function cmpRenderSubjectTab(grade, subjects, selectedExams, examLabels, role) {
+  const classNo = role === "headteacher" ? currentUser.classNo : null;
+
   let html = "";
+  subjects.forEach((s) => {
+    html += `<div class="cmp-subject-card">
+      <div class="cmp-section-title">📚 ${esc(s.name)} 各考试详细分析</div>
+      <div class="cmp-table-wrap"><table class="cmp-table">
+        <thead><tr><th>考试</th><th>均分</th><th>最高</th><th>最低</th><th>标准差</th><th>及格率</th><th>及格人数</th><th>优秀率</th><th>优秀人数</th><th>良好率</th><th>良好人数</th><th>低分率</th><th>低分人数</th><th>考试人数</th></tr></thead>
+        <tbody>`;
 
-  mySubjects.forEach((subjectName) => {
-    const subject = allSubjects.find((s) => s.name === subjectName);
-    if (!subject) return;
-    html += `<div class="card"><div class="card-title">📊 ${esc(subjectName)} - 各班级多次考试均分对比</div><div class="chart-box"><canvas id="cmp_chart_${esc(subjectName)}"></canvas></div></div>`;
-  });
-
-  // 任教班级对比表格
-  html += `<div class="card"><div class="card-title">🏫 任教班级${mySubjects.join("、")}均分对比</div><div class="table-wrap"><table class="data-table"><thead><tr><th>班级</th>${examLabels.map((e) => `<th>${e}</th>`).join("")}<th>最大涨幅</th></tr></thead><tbody>`;
-
-  const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
-  classes.forEach((c) => {
-    const row = [`<td><b>${esc(c)}</b></td>`];
-    const avgs = [];
-    mySubjects.forEach((subjectName) => {
-      selectedExams.forEach((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
-        const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
-        if (vals.length) {
-          const avg = +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
-          avgs.push(avg);
-          row.push(`<td>${avg}</td>`);
-        } else {
-          avgs.push(null);
-          row.push("<td>-</td>");
-        }
-      });
-    });
-    // 计算最大涨幅
-    if (avgs.filter((v) => v != null).length >= 2) {
-      let maxDiff = 0;
-      for (let i = 1; i < avgs.length; i++) {
-        if (avgs[i] != null && avgs[i - 1] != null) {
-          maxDiff = Math.max(maxDiff, avgs[i] - avgs[i - 1]);
-        }
+    selectedExams.forEach((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      if (recs.length) {
+        const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
+        const avg = vals.length ? +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-";
+        const max = vals.length ? Math.max(...vals) : "-";
+        const min = vals.length ? Math.min(...vals) : "-";
+        const std = vals.length ? +fmt(mathStdDev(vals), 2) : "-";
+        const st = aggregateStats(recs, [s])[s.name];
+        html += `<tr><td><b>${esc(e.name)}</b></td><td><b>${avg}</b></td><td>${max}</td><td>${min}</td><td>${std}</td>
+          <td>${fmtPct(st.passPct)}</td><td>${st.passCount}</td>
+          <td>${fmtPct(st.excellentPct)}</td><td>${st.excellent}</td>
+          <td>${fmtPct(st.goodPct)}</td><td>${st.good}</td>
+          <td>${fmtPct(st.lowPct)}</td><td>${st.low}</td><td>${vals.length}</td></tr>`;
+      } else {
+        html += `<tr><td><b>${esc(e.name)}</b></td>${Array(13).fill("<td>-</td>").join("")}</tr>`;
       }
-      row.push(`<td>${maxDiff > 0 ? `📈 +${fmt(maxDiff, 2)}` : "-"}</td>`);
-    } else {
-      row.push("<td>-</td>");
-    }
-    html += `<tr>${row.join("")}</tr>`;
+    });
+    html += `</tbody></table></div></div>`;
   });
-  html += `</tbody></table></div></div>`;
 
-  return html;
+  return `<div class="cmp-panel">${html}</div>`;
 }
 
-function drawCompareCharts(grade, subjects, selectedExams, examLabels, roleParam) {
-  const role = roleParam || currentUser.role;
-  const classNo = currentUser.classNo;
-  const mySubjects = currentUser.subjects || [];
+// ========== Tab 4: 趋势图表 ==========
+function cmpRenderTrendTab(grade, subjects, selectedExams, examLabels, role) {
+  const classNo = role === "headteacher" ? currentUser.classNo : null;
 
-  if (role === "academic") {
-    // 学科均分趋势
-    const datasets = subjects.map((s) => ({
-      label: s.name,
-      data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
-        if (!recs.length) return null;
-        return +fmt(aggregateStats(recs, [s])[s.name].avg, 2);
-      })
-    }));
-    drawChart("cmp_chart1", "line", examLabels, datasets);
-  } else if (role === "headteacher") {
-    // 学科均分趋势（本班）
-    const datasets = subjects.map((s) => ({
-      label: s.name,
-      data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === classNo);
-        if (!recs.length) return null;
-        return +fmt(aggregateStats(recs, [s])[s.name].avg, 2);
-      })
-    }));
-    drawChart("cmp_chart1", "line", examLabels, datasets);
+  // 图表1: 总分趋势
+  let html = `<div class="cmp-chart-grid">
+    <div class="cmp-chart-card"><div class="cmp-chart-title">📈 总分均分趋势</div><div class="cmp-chart-box"><canvas id="cmp_trend_total"></canvas></div></div>
+    <div class="cmp-chart-card"><div class="cmp-chart-title">📊 及格率趋势</div><div class="cmp-chart-box"><canvas id="cmp_trend_pass"></canvas></div></div>
+    <div class="cmp-chart-card"><div class="cmp-chart-title">🏆 优秀率趋势</div><div class="cmp-chart-box"><canvas id="cmp_trend_excellent"></canvas></div></div>
+    <div class="cmp-chart-card"><div class="cmp-chart-title">📉 标准差趋势（稳定性）</div><div class="cmp-chart-box"><canvas id="cmp_trend_std"></canvas></div></div>
+  </div>`;
 
-    // 本班 vs 年级
-    const classTotal = selectedExams.map((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === classNo);
+  // 学科趋势
+  if (subjects.length > 0) {
+    html += `<div class="cmp-section-title" style="margin-top:24px">📚 各学科均分趋势对比</div>`;
+    html += `<div class="cmp-chart-card" style="max-width:100%"><div class="cmp-chart-box" style="height:350px"><canvas id="cmp_trend_subjects"></canvas></div></div>`;
+  }
+
+  return `<div class="cmp-panel">${html}</div>`;
+}
+
+function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeTab) {
+  if (activeTab !== "tab_trend") return;
+
+  const classNo = role === "headteacher" ? currentUser.classNo : null;
+
+  // 总分趋势
+  const totalDatasets = [{
+    label: classNo || "全年级",
+    data: selectedExams.map((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
       if (!recs.length) return null;
       return +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
-    });
-    const gradeTotal = selectedExams.map((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
+    })
+  }];
+  drawChart("cmp_trend_total", "line", examLabels, totalDatasets);
+
+  // 及格率趋势
+  const passDatasets = [{
+    label: classNo || "全年级",
+    data: selectedExams.map((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
       if (!recs.length) return null;
-      return +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
-    });
-    drawChart("cmp_chart2", "line", examLabels, [
-      { label: `${classNo} 总分均分`, data: classTotal },
-      { label: "年级总分均分", data: gradeTotal }
-    ]);
-  } else if (role === "teacher") {
-    // 各任教科目班级对比
-    mySubjects.forEach((subjectName) => {
-      const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
-      const datasets = classes.map((c) => ({
-        label: c,
-        data: selectedExams.map((e) => {
-          const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
-          const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
-          if (!vals.length) return null;
-          return +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
-        })
-      }));
-      drawChart("cmp_chart_" + subjectName, "line", examLabels, datasets);
-    });
+      const passLine = subjects[0]?.pass || 60;
+      const passCount = recs.filter((r) => r.total >= passLine).length;
+      return +fmt(passCount / recs.length * 100, 1);
+    })
+  }];
+  drawChart("cmp_trend_pass", "line", examLabels, passDatasets);
+
+  // 优秀率趋势
+  const excDatasets = [{
+    label: classNo || "全年级",
+    data: selectedExams.map((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      if (!recs.length) return null;
+      const excLine = subjects[0]?.excellent || 90;
+      const excCount = recs.filter((r) => r.total >= excLine).length;
+      return +fmt(excCount / recs.length * 100, 1);
+    })
+  }];
+  drawChart("cmp_trend_excellent", "line", examLabels, excDatasets);
+
+  // 标准差趋势
+  const stdDatasets = [{
+    label: classNo || "全年级",
+    data: selectedExams.map((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      if (!recs.length) return null;
+      return +fmt(mathStdDev(recs.map((r) => r.total)), 2);
+    })
+  }];
+  drawChart("cmp_trend_std", "line", examLabels, stdDatasets);
+
+  // 学科趋势
+  if (subjects.length > 0) {
+    const subjDatasets = subjects.map((s) => ({
+      label: s.name,
+      data: selectedExams.map((e) => {
+        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+        if (!recs.length) return null;
+        const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
+        return vals.length ? +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : null;
+      })
+    }));
+    drawChart("cmp_trend_subjects", "line", examLabels, subjDatasets);
   }
 }
 
-// 下载多次考试对比报告
+// 标准差计算
+function mathStdDev(arr) {
+  if (arr.length < 2) return 0;
+  const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+  const variance = arr.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / arr.length;
+  return Math.sqrt(variance);
+}
+
+// 添加对比分析专用样式
+function addCompareStyles() {
+  if (document.getElementById("cmp_styles")) return;
+  const style = document.createElement("style");
+  style.id = "cmp_styles";
+  style.textContent = `
+    .compare-container { display: flex; flex-direction: column; gap: 16px; }
+    .compare-toolbar { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; padding: 16px; background: var(--card-bg); border-radius: 12px; }
+    .compare-exams { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .toolbar-label { font-size: 13px; color: var(--text-light); white-space: nowrap; }
+    .exam-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .exam-chip { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1.5px solid #e5e7eb; border-radius: 20px; font-size: 13px; cursor: pointer; transition: all 0.2s; background: #fff; }
+    .exam-chip input { display: none; }
+    .exam-chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .compare-tabs { display: flex; gap: 4px; background: var(--card-bg); padding: 6px; border-radius: 10px; }
+    .tab-btn { padding: 10px 20px; border: none; background: transparent; border-radius: 8px; font-size: 14px; cursor: pointer; color: var(--text-light); transition: all 0.2s; }
+    .tab-btn:hover { background: rgba(59,125,221,0.1); }
+    .tab-btn.active { background: var(--primary); color: #fff; font-weight: 600; }
+    .compare-content { min-height: 400px; }
+    .cmp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px; color: var(--text-light); }
+    .cmp-panel { display: flex; flex-direction: column; gap: 20px; }
+    .cmp-section-title { font-size: 15px; font-weight: 600; color: var(--text-dark); margin-bottom: 12px; }
+    .cmp-table-wrap { overflow-x: auto; border-radius: 10px; background: var(--card-bg); }
+    .cmp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .cmp-table th { background: #f8f9fc; padding: 12px 10px; text-align: center; font-weight: 600; color: var(--text-dark); border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
+    .cmp-table td { padding: 10px; text-align: center; border-bottom: 1px solid #f0f0f0; }
+    .cmp-table tr:hover td { background: #f8f9fc; }
+    .cmp-table .class-name { background: #f0f7ff; }
+    .cmp-subject-card { background: var(--card-bg); padding: 16px; border-radius: 10px; }
+    .cmp-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .cmp-chart-card { background: var(--card-bg); padding: 16px; border-radius: 10px; }
+    .cmp-chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-dark); }
+    .cmp-chart-box { height: 220px; position: relative; }
+    @media (max-width: 900px) { .cmp-chart-grid { grid-template-columns: 1fr; } .compare-toolbar { flex-direction: column; } }
+  `;
+  document.head.appendChild(style);
+}
+
+// 下载完整对比报告
 window.downloadExamCompare = function () {
   const grade = currentUser.grade;
   const subjects = DB.subjects[grade] || [];
   const role = currentUser.role;
   const selectedExamIds = Array.from(document.querySelectorAll('input[name="exam_cb"]:checked')).map((c) => c.value);
-
-  if (selectedExamIds.length < 2) {
-    showToast("请至少选择 2 次考试", "warning");
-    return;
-  }
+  if (selectedExamIds.length < 2) { showToast("请至少选择 2 次考试", "warning"); return; }
 
   const selectedExams = DB.exams.filter((e) => selectedExamIds.includes(e.id)).sort((a, b) => a.createdAt - b.createdAt);
   const examLabels = selectedExams.map((e) => e.name);
+  const classNo = role === "headteacher" ? currentUser.classNo : null;
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: 班级综合对比
+  const classes = classNo ? [classNo] : [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+  const classHeader1 = ["班级", "考试人数", ...examLabels.flatMap((e) => [e + "-均分", e + "-最高", e + "-最低", e + "-标准差", e + "-及格率"])];
+  const classData1 = [];
+  classes.forEach((c) => {
+    const row = [c];
+    let firstCount = 0;
+    selectedExams.forEach((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
+      if (recs.length) {
+        if (!firstCount) firstCount = recs.length;
+        const totals = recs.map((r) => r.total);
+        const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+        const passLine = subjects[0]?.pass || 60;
+        const passCount = totals.filter((t) => t >= passLine).length;
+        row.push(fmt(avg, 2), Math.max(...totals), Math.min(...totals), fmt(mathStdDev(totals), 2), fmt(passCount / totals.length * 100, 1) + "%");
+      } else {
+        row.push("-", "-", "-", "-", "-");
+      }
+    });
+    row[1] = firstCount;
+    classData1.push(row);
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([classHeader1, ...classData1]), "班级综合对比");
+
+  // Sheet 2: 学生个人对比
+  const firstExam = selectedExams[0];
+  const lastExam = selectedExams[selectedExams.length - 1];
+  const firstMap = {};
+  DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).forEach((r) => { firstMap[r.studentId] = r; });
+  const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
+  const studentHeader = ["学号", "姓名", `${firstExam.name}总分`, `${lastExam.name}总分`, "涨幅", "首次排名", "最近排名", "排名变化"];
+  const allFirst = DB.records.filter((x) => x.examId === firstExam.id && x.grade === grade).sort((a, b) => b.total - a.total);
+  const allLast = DB.records.filter((x) => x.examId === lastExam.id && x.grade === grade).sort((a, b) => b.total - a.total);
+  const studentData = lastRecs.map((r) => {
+    const first = firstMap[r.studentId];
+    const firstTotal = first && typeof first.total === 'number' ? first.total : null;
+    const diff = firstTotal !== null ? r.total - firstTotal : null;
+    const firstIdx = allFirst.findIndex((x) => x.studentId === r.studentId);
+    const lastIdx = allLast.findIndex((x) => x.studentId === r.studentId);
+    const firstRank = firstIdx >= 0 ? firstIdx + 1 : null;
+    const lastRank = lastIdx >= 0 ? lastIdx + 1 : null;
+    return [r.studentId, r.studentName, firstTotal !== null ? firstTotal : "-", r.total, diff !== null ? diff : "-", firstRank !== null ? firstRank : "-", lastRank !== null ? lastRank : "-", firstRank !== null && lastRank !== null ? firstRank - lastRank : "-"];
+  }).sort((a, b) => (b[4] === "-" ? -999 : b[4]) - (a[4] === "-" ? -999 : a[4]));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([studentHeader, ...studentData]), "学生个人对比");
+
+  // Sheet 3: 学科详细统计
+  const subjHeader = ["学科", ...selectedExams.flatMap((e) => [e.name + "-均分", e.name + "-及格率", e.name + "-优秀率", e.name + "-良好率", e.name + "-低分率", e.name + "-人数"])];
+  const subjData = subjects.map((s) => {
+    const row = [s.name];
+    selectedExams.forEach((e) => {
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      if (recs.length) {
+        const st = aggregateStats(recs, [s])[s.name];
+        row.push(fmt(st.avg, 2), fmtPct(st.passPct), fmtPct(st.excellentPct), fmtPct(st.goodPct), fmtPct(st.lowPct), st.total);
+      } else {
+        row.push("-", "-", "-", "-", "-", "0");
+      }
+    });
+    return row;
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([subjHeader, ...subjData]), "学科详细统计");
+
+  // Sheet 4: 趋势数据
+  const trendHeader = ["指标", ...examLabels];
+  const trendData = [
+    ["总分均分", ...selectedExams.map((e) => { const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)); return recs.length ? fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2) : "-"; })],
+    ["总分标准差", ...selectedExams.map((e) => { const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)); return recs.length ? fmt(mathStdDev(recs.map((r) => r.total)), 2) : "-"; })],
+    ...subjects.map((s) => [s.name + "均分", ...selectedExams.map((e) => { const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)); const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number"); return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-"; })])
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([trendHeader, ...trendData]), "趋势数据");
+
+  const prefix = role === "academic" ? grade : role === "headteacher" ? `${grade}_${classNo}` : currentUser.name;
+  XLSX.writeFile(wb, `${prefix}_多次考试对比分析_${selectedExams.length}次.xlsx`);
+  showToast("分析报告已下载", "success");
+};
+
+// ========== 班主任：学习小组管理 ==========
+function renderGroupManage() {
+  const grade = currentUser.grade;
+  const classNo = currentUser.classNo;
+  const exams = getSortedExams(grade);
+  const subjects = DB.subjects[grade] || [];
+
+  // 获取本班小组数据
+  if (!DB.groups) DB.groups = {};
+  if (!DB.groups[grade]) DB.groups[grade] = {};
+  if (!DB.groups[grade][classNo]) DB.groups[grade][classNo] = [];
+
+  const groups = DB.groups[grade][classNo] || [];
+
+  // 下载模板按钮
+  const downloadTemplate = () => {
+    const data = [["学号", "姓名", "小组名称"], ["001", "张三", "第一组"], ["002", "李四", "第一组"], ["003", "王五", "第二组"]];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), "小组名单");
+    XLSX.writeFile(wb, "小组名单模板.xlsx");
+    showToast("模板已下载", "success");
+  };
+
+  // 上传小组名单
+  const handleUpload = (input) => {
+    const file = input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (rows.length < 2) { showToast("文件内容为空", "error"); return; }
+        const header = rows[0].map((h) => String(h).trim());
+        const idxId = header.findIndex((h) => h.includes("学号"));
+        const idxName = header.findIndex((h) => h.includes("姓名"));
+        const idxGroup = header.findIndex((h) => h.includes("小组"));
+        if (idxId < 0 || idxName < 0 || idxGroup < 0) { showToast("表头必须包含：学号、姓名、小组名称", "error"); return; }
+
+        const newGroups = [];
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row[idxId] || !row[idxName] || !row[idxGroup]) continue;
+          newGroups.push({ studentId: String(row[idxId]).trim(), studentName: String(row[idxName]).trim(), groupName: String(row[idxGroup]).trim() });
+        }
+
+        if (newGroups.length === 0) { showToast("没有有效数据", "error"); return; }
+        DB.groups[grade][classNo] = newGroups;
+        saveDB();
+        showToast(`成功导入 ${newGroups.length} 名学生`, "success");
+        renderGroupManage();
+      } catch (err) { showToast("文件解析失败", "error"); }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // 考试选择
+  const examOptions = exams.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("");
+
+  // 渲染小组列表
+  const groupListHTML = groups.length > 0 ? `
+    <div class="card"><div class="card-title"><span>📋 小组名单（${groups.length}人）</span>
+      <button class="btn btn-sm btn-danger" onclick="clearAllGroups()">清空全部</button>
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>学号</th><th>姓名</th><th>小组</th><th>操作</th></tr></thead>
+      <tbody>${groups.map((g, i) => `<tr>
+        <td>${esc(g.studentId)}</td><td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td>
+        <td><button class="btn btn-sm btn-danger" onclick="deleteGroupMember(${i})">删除</button></td>
+      </tr>`).join("")}</tbody>
+    </table></div></div>
+    <div class="card"><div class="card-title">📊 小组统计</div>
+    ${renderGroupStats(groups)}
+    </div>` : "";
+
+  // 小组成绩分析区域
+  const scoreHTML = exams.length > 0 && groups.length > 0 ? `
+    <div class="card"><div class="card-title">📈 小组成绩分析</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <label>选择考试：</label>
+        <select id="htg_exam" class="form-control" style="width:200px">${examOptions}</select>
+        <button class="btn btn-primary" onclick="refreshHeadteacherGroupScores()">🔍 分析</button>
+        <button class="btn btn-success" onclick="downloadHeadteacherGroupAnalysis()">📥 导出报告</button>
+      </div>
+      <div id="htg_result"></div>
+    </div>` : "";
+
+  $("pageContent").innerHTML = `
+    <div class="card"><div class="card-title">👥 学习小组管理</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn btn-primary" onclick="downloadGroupTemplate()">📥 下载模板</button>
+        <label class="btn btn-success" style="cursor:pointer">📤 上传小组名单 <input type="file" accept=".xlsx,.xls" style="display:none" onchange="handleGroupUpload(this)"/></label>
+      </div>
+    </div>
+    ${groups.length > 0 ? groupListHTML : `<div class="card"><div class="empty-state"><div class="es-icon">👥</div><div class="es-title">暂无小组数据</div><div class="es-tip">请下载模板填写后上传</div></div></div>`}
+    ${scoreHTML}
+  `;
+
+  // 绑定函数到全局
+  window.downloadGroupTemplate = downloadTemplate;
+  window.handleGroupUpload = handleUpload;
+  window.deleteGroupMember = (idx) => {
+    DB.groups[grade][classNo].splice(idx, 1);
+    saveDB();
+    showToast("已删除", "success");
+    renderGroupManage();
+  };
+  window.clearAllGroups = () => {
+    if (confirm("确定清空所有小组数据？")) {
+      DB.groups[grade][classNo] = [];
+      saveDB();
+      showToast("已清空", "success");
+      renderGroupManage();
+    }
+  };
+
+  // 刷新小组成绩
+  window.refreshHeadteacherGroupScores = () => {
+    const examId = $("htg_exam").value;
+    const exam = DB.exams.find((e) => e.id === examId);
+    if (!exam) return;
+
+    // 按小组名分组
+    const groupMap = {};
+    groups.forEach((g) => {
+      if (!groupMap[g.groupName]) groupMap[g.groupName] = [];
+      groupMap[g.groupName].push(g);
+    });
+    const groupNames = Object.keys(groupMap).sort();
+
+    let html = `<div class="cmp-panel">`;
+
+    // 小组总分均分对比图表
+    const chartCanvas = `htg_chart_${Date.now()}`;
+    html += `<div class="cmp-section-title">📊 ${esc(exam.name)} - 小组总分均分对比</div>
+      <div class="cmp-chart-box" style="height:280px"><canvas id="${chartCanvas}"></canvas></div>`;
+
+    // 详细数据表
+    html += `<div class="cmp-section-title">📋 小组详细成绩</div>
+      <div class="cmp-table-wrap"><table class="cmp-table">
+      <thead><tr><th>小组</th><th>人数</th><th>总分均分</th><th>最高分</th><th>最低分</th><th>标准差</th>`;
+    subjects.forEach((s) => html += `<th>${esc(s.name)}均分</th>`);
+    html += `<th>及格率</th><th>优秀率</th></tr></thead><tbody>`;
+
+    groupNames.forEach((gn) => {
+      const members = groupMap[gn];
+      const memberIds = members.map((m) => m.studentId);
+      const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+      if (recs.length > 0) {
+        const totals = recs.map((r) => r.total);
+        const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+        const passLine = subjects[0]?.pass || 60;
+        const passCount = totals.filter((t) => t >= passLine).length;
+        const excLine = subjects[0]?.excellent || 90;
+        const excCount = totals.filter((t) => t >= excLine).length;
+        html += `<tr><td><b>${esc(gn)}</b></td><td>${recs.length}</td><td><b>${fmt(avg, 2)}</b></td><td>${Math.max(...totals)}</td><td>${Math.min(...totals)}</td><td>${fmt(mathStdDev(totals), 2)}</td>`;
+        subjects.forEach((s) => {
+          const subjVals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number");
+          html += `<td>${subjVals.length ? fmt(subjVals.reduce((a, b) => a + b, 0) / subjVals.length, 2) : "-"}</td>`;
+        });
+        html += `<td>${fmtPct(passCount / recs.length)}</td><td>${fmtPct(excCount / recs.length)}</td></tr>`;
+      } else {
+        html += `<tr><td><b>${esc(gn)}</b></td><td>${members.length}</td><td colspan="${6 + subjects.length}"><span style="color:#999">暂无成绩数据</span></td></tr>`;
+      }
+    });
+    html += `</tbody></table></div>`;
+
+    // 小组成员详情
+    html += `<div class="cmp-section-title">👨‍🎓 小组成员成绩明细</div>
+      <div class="cmp-table-wrap"><table class="cmp-table">
+      <thead><tr><th>学号</th><th>姓名</th><th>小组</th><th>总分</th>`;
+    subjects.forEach((s) => html += `<th>${esc(s.name)}</th>`);
+    html += `</tr></thead><tbody>`;
+
+    groups.forEach((g) => {
+      const rec = DB.records.find((r) => r.examId === examId && r.classNo === classNo && r.studentId === g.studentId);
+      html += `<tr><td>${esc(g.studentId)}</td><td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td><td><b>${rec?.total || "-"}</b></td>`;
+      subjects.forEach((s) => {
+        const score = rec?.scores[s.name];
+        html += `<td>${typeof score === "number" ? score : "-"}</td>`;
+      });
+      html += `</tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+
+    $("htg_result").innerHTML = html;
+
+    // 绘制图表
+    setTimeout(() => {
+      const datasets = [{
+        label: "小组总分均分",
+        data: groupNames.map((gn) => {
+          const members = groupMap[gn];
+          const memberIds = members.map((m) => m.studentId);
+          const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+          if (recs.length > 0) return +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
+          return null;
+        })
+      }];
+      drawChart(chartCanvas, "bar", groupNames, datasets);
+    }, 200);
+  };
+
+  // 导出小组分析报告
+  window.downloadHeadteacherGroupAnalysis = () => {
+    const examId = $("htg_exam")?.value;
+    if (!examId) { showToast("请先选择考试", "warning"); return; }
+    const exam = DB.exams.find((e) => e.id === examId);
+
+    const groupMap = {};
+    groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
+    const groupNames = Object.keys(groupMap).sort();
+
+    const wb = XLSX.utils.book_new();
+
+    // Sheet 1: 小组统计
+    const statHeader = ["小组", "人数", "总分均分", "最高分", "最低分", "标准差", ...subjects.map((s) => s.name + "均分"), "及格率", "优秀率"];
+    const statData = [];
+    groupNames.forEach((gn) => {
+      const members = groupMap[gn];
+      const memberIds = members.map((m) => m.studentId);
+      const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+      if (recs.length > 0) {
+        const totals = recs.map((r) => r.total);
+        const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+        const passLine = subjects[0]?.pass || 60;
+        const passCount = totals.filter((t) => t >= passLine).length;
+        const excLine = subjects[0]?.excellent || 90;
+        const excCount = totals.filter((t) => t >= excLine).length;
+        const subjAvgs = subjects.map((s) => {
+          const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number");
+          return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-";
+        });
+        statData.push([gn, recs.length, fmt(avg, 2), Math.max(...totals), Math.min(...totals), fmt(mathStdDev(totals), 2), ...subjAvgs, fmt(passCount / recs.length * 100, 1) + "%", fmt(excCount / recs.length * 100, 1) + "%"]);
+      } else {
+        statData.push([gn, members.length, "-", "-", "-", "-", ...subjects.map(() => "-"), "-", "-"]);
+      }
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([statHeader, ...statData]), "小组统计");
+
+    // Sheet 2: 成员明细
+    const memberHeader = ["学号", "姓名", "小组", "总分", ...subjects.map((s) => s.name)];
+    const memberData = groups.map((g) => {
+      const rec = DB.records.find((r) => r.examId === examId && r.classNo === classNo && r.studentId === g.studentId);
+      const scores = subjects.map((s) => rec?.scores[s.name] != null ? rec.scores[s.name] : "-");
+      return [g.studentId, g.studentName, g.groupName, rec?.total || "-", ...scores];
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([memberHeader, ...memberData]), "成员明细");
+
+    XLSX.writeFile(wb, `${grade}_${classNo}_${exam.name}_小组分析.xlsx`);
+    showToast("分析报告已下载", "success");
+  };
+
+  // 初始加载成绩分析
+  if (exams.length > 0 && groups.length > 0) {
+    setTimeout(() => refreshHeadteacherGroupScores(), 100);
+  }
+}
+
+function renderGroupStats(groups) {
+  const groupMap = {};
+  groups.forEach((g) => {
+    if (!groupMap[g.groupName]) groupMap[g.groupName] = [];
+    groupMap[g.groupName].push(g);
+  });
+  const groupNames = Object.keys(groupMap).sort();
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>小组名称</th><th>人数</th></tr></thead>
+    <tbody>${groupNames.map((n) => `<tr><td><b>${esc(n)}</b></td><td>${groupMap[n].length} 人</td></tr>`).join("")}</tbody>
+  </table></div>`;
+}
+
+// ========== 任课教师：小组成绩分析 ==========
+function renderGroupScores() {
+  const grade = currentUser.grade;
+  const mySubjects = currentUser.subjects || [];
+  const exams = getSortedExams(grade);
+
+  if (exams.length === 0) {
+    $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📝</div><div class="es-title">暂无考试数据</div></div></div>`;
+    return;
+  }
+
+  // 获取任教班级的所有小组数据
+  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  if (!DB.groups) DB.groups = {};
+  if (!DB.groups[grade]) DB.groups[grade] = {};
+  const allGroups = DB.groups[grade] || {};
+  const myGroups = {};
+  myClasses.forEach((c) => {
+    if (allGroups[c]) myGroups[c] = allGroups[c];
+  });
+
+  // 考试选择
+  const examOptions = exams.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("");
+
+  $("pageContent").innerHTML = `
+    <div class="card"><div class="card-title">👥 小组成绩分析</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <label>选择考试：</label>
+        <select id="gs_exam" class="form-control" style="width:200px">${examOptions}</select>
+        <button class="btn btn-primary" onclick="refreshGroupScores()">🔍 分析</button>
+        <button class="btn btn-success" onclick="downloadGroupAnalysis()">📥 导出分析报告</button>
+      </div>
+    </div>
+    <div id="gs_result"></div>
+  `;
+
+  $("gs_exam").addEventListener("change", () => refreshGroupScores());
+  setTimeout(() => refreshGroupScores(), 100);
+}
+
+function refreshGroupScores() {
+  const grade = currentUser.grade;
+  const mySubjects = currentUser.subjects || [];
+  const examId = $("gs_exam").value;
+  const exam = DB.exams.find((e) => e.id === examId);
+  if (!exam) return;
+
+  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  if (!DB.groups) DB.groups = {};
+  if (!DB.groups[grade]) DB.groups[grade] = {};
+  const allGroups = DB.groups[grade];
+  const subjects = DB.subjects[grade] || [];
+
+  let html = "";
+
+  myClasses.forEach((classNo) => {
+    const groups = allGroups[classNo] || [];
+    if (groups.length === 0) return;
+
+    // 按小组名分组
+    const groupMap = {};
+    groups.forEach((g) => {
+      if (!groupMap[g.groupName]) groupMap[g.groupName] = [];
+      groupMap[g.groupName].push(g);
+    });
+
+    const groupNames = Object.keys(groupMap).sort();
+
+    html += `<div class="card"><div class="card-title">🏫 ${esc(classNo)} - ${mySubjects.join("、")}小组成绩分析</div>`;
+
+    // 遍历每门任教科目
+    mySubjects.forEach((subjectName) => {
+      const subject = subjects.find((s) => s.name === subjectName);
+      if (!subject) return;
+
+      // 小组学科成绩对比图表
+      const chartCanvas = `gs_chart_${esc(classNo)}_${esc(subjectName)}`;
+      html += `<div class="cmp-section-title">📊 ${esc(subjectName)} - 小组均分对比</div>
+        <div class="cmp-chart-box" style="height:250px"><canvas id="${chartCanvas}"></canvas></div>`;
+
+      // 详细数据表
+      html += `<div class="cmp-section-title">📋 ${esc(subjectName)}详细数据</div>
+        <div class="cmp-table-wrap"><table class="cmp-table">
+        <thead><tr><th>小组</th><th>人数</th><th>均分</th><th>最高分</th><th>最低分</th><th>标准差</th><th>及格率</th><th>优秀率</th></tr></thead>
+        <tbody>`;
+
+      groupNames.forEach((gn) => {
+        const members = groupMap[gn];
+        const memberIds = members.map((m) => m.studentId);
+        const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+        if (recs.length > 0) {
+          const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
+          if (scores.length > 0) {
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            const max = Math.max(...scores);
+            const min = Math.min(...scores);
+            const passCount = scores.filter((s) => s >= subject.pass).length;
+            const excCount = scores.filter((s) => s >= subject.excellent).length;
+            html += `<tr><td><b>${esc(gn)}</b></td><td>${scores.length}</td><td><b>${fmt(avg, 2)}</b></td><td>${max}</td><td>${min}</td><td>${fmt(mathStdDev(scores), 2)}</td><td>${fmtPct(passCount / scores.length)}</td><td>${fmtPct(excCount / scores.length)}</td></tr>`;
+          } else {
+            html += `<tr><td><b>${esc(gn)}</b></td><td>${members.length}</td><td colspan="6"><span style="color:#999">暂无${esc(subjectName)}成绩</span></td></tr>`;
+          }
+        } else {
+          html += `<tr><td><b>${esc(gn)}</b></td><td>${members.length}</td><td colspan="6"><span style="color:#999">暂无成绩数据</span></td></tr>`;
+        }
+      });
+      html += `</tbody></table></div>`;
+    });
+
+    html += `</div>`;
+  });
+
+  if (!html) {
+    $("gs_result").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">👥</div><div class="es-title">暂无小组数据</div><div class="es-tip">请联系班主任设置学习小组</div></div></div>`;
+    return;
+  }
+
+  $("gs_result").innerHTML = `<div class="cmp-panel">${html}</div>`;
+
+  // 绘制图表
+  setTimeout(() => {
+    myClasses.forEach((classNo) => {
+      const groups = allGroups[classNo] || [];
+      if (groups.length === 0) return;
+      const groupMap = {};
+      groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
+      const groupNames = Object.keys(groupMap).sort();
+
+      mySubjects.forEach((subjectName) => {
+        const datasets = [{
+          label: `${subjectName}均分`,
+          data: groupNames.map((gn) => {
+            const members = groupMap[gn];
+            const memberIds = members.map((m) => m.studentId);
+            const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+            const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
+            if (scores.length > 0) return +fmt(scores.reduce((a, b) => a + b, 0) / scores.length, 2);
+            return null;
+          })
+        }];
+        drawChart(`gs_chart_${esc(classNo)}_${esc(subjectName)}`, "bar", groupNames, datasets);
+      });
+    });
+  }, 200);
+}
+
+window.downloadGroupAnalysis = function () {
+  const grade = currentUser.grade;
+  const mySubjects = currentUser.subjects || [];
+  const examId = $("gs_exam")?.value;
+  if (!examId) { showToast("请先选择考试", "warning"); return; }
+  const exam = DB.exams.find((e) => e.id === examId);
+  const subjects = DB.subjects[grade] || [];
+  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  if (!DB.groups) DB.groups = {};
+  if (!DB.groups[grade]) DB.groups[grade] = {};
+  const allGroups = DB.groups[grade];
 
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: 学科均分对比
-  const avgHeader = ["学科", ...examLabels];
-  const avgData = [];
+  myClasses.forEach((classNo) => {
+    const groups = allGroups[classNo] || [];
+    if (groups.length === 0) return;
+    const groupMap = {};
+    groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
+    const groupNames = Object.keys(groupMap).sort();
 
-  if (role === "academic") {
-    subjects.forEach((s) => {
-      const row = [s.name];
-      selectedExams.forEach((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
-        const st = aggregateStats(recs, [s])[s.name];
-        row.push(recs.length ? fmt(st.avg, 2) : "-");
-      });
-      avgData.push(row);
-    });
-  } else if (role === "headteacher") {
-    const classNo = currentUser.classNo;
-    subjects.forEach((s) => {
-      const row = [s.name];
-      selectedExams.forEach((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === classNo);
-        const st = aggregateStats(recs, [s])[s.name];
-        row.push(recs.length ? fmt(st.avg, 2) : "-");
-      });
-      avgData.push(row);
-    });
-  } else if (role === "teacher") {
-    const mySubjects = currentUser.subjects || [];
-    const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+    // 每个学科单独一个Sheet
     mySubjects.forEach((subjectName) => {
-      classes.forEach((c) => {
-        const row = [`${subjectName}-${c}`];
-        selectedExams.forEach((e) => {
-          const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
-          const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
-          row.push(vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-");
-        });
-        avgData.push(row);
+      const subject = subjects.find((s) => s.name === subjectName);
+      if (!subject) return;
+
+      const header = ["小组", "人数", `${subjectName}均分`, `${subjectName}最高分`, `${subjectName}最低分`, "标准差", "及格人数", "及格率", "优秀人数", "优秀率"];
+      const data = [];
+      groupNames.forEach((gn) => {
+        const members = groupMap[gn];
+        const memberIds = members.map((m) => m.studentId);
+        const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+        if (recs.length > 0) {
+          const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
+          if (scores.length > 0) {
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            const passCount = scores.filter((s) => s >= subject.pass).length;
+            const excCount = scores.filter((s) => s >= subject.excellent).length;
+            data.push([gn, scores.length, fmt(avg, 2), Math.max(...scores), Math.min(...scores), fmt(mathStdDev(scores), 2), passCount, fmt(passCount / scores.length * 100, 1) + "%", excCount, fmt(excCount / scores.length * 100, 1) + "%"]);
+          } else {
+            data.push([gn, members.length, "-", "-", "-", "-", "-", "-", "-", "-"]);
+          }
+        } else {
+          data.push([gn, members.length, "-", "-", "-", "-", "-", "-", "-", "-"]);
+        }
       });
-    });
-  }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([avgHeader, ...avgData]), "学科均分对比");
 
-  // Sheet 2: 详细统计
-  const statsHeader = ["学科", ...selectedExams.flatMap((e) => [`${e.name}-均分`, `${e.name}-及格率`, `${e.name}-优秀率`, `${e.name}-低分率`, `${e.name}-人数`])];
-  const statsData = [];
-
-  subjects.forEach((s) => {
-    const row = [s.name];
-    selectedExams.forEach((e) => {
-      let recs;
-      if (role === "headteacher") {
-        recs = DB.records.filter((r) => r.examId === e.id && r.classNo === currentUser.classNo);
-      } else {
-        recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
-      }
-      if (!recs.length) {
-        row.push("-", "-", "-", "-", "0");
-      } else {
-        const st = aggregateStats(recs, [s])[s.name];
-        row.push(fmt(st.avg, 2), fmtPct(st.passPct), fmtPct(st.excellentPct), fmtPct(st.lowPct), st.count);
-      }
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data]), `${classNo}_${subjectName}`);
     });
-    statsData.push(row);
   });
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([statsHeader, ...statsData]), "详细统计");
 
-  // Sheet 3: 学生进步（班主任专用）
-  if (role === "headteacher") {
-    const firstExam = selectedExams[0];
-    const lastExam = selectedExams[selectedExams.length - 1];
-    const firstMap = {};
-    DB.records.filter((r) => r.examId === firstExam.id && r.classNo === currentUser.classNo).forEach((r) => { firstMap[r.studentId] = r; });
-    const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && r.classNo === currentUser.classNo);
-    const studentData = lastRecs.map((r) => {
-      const first = firstMap[r.studentId];
-      return [r.studentId, r.studentName, first?.total || "-", r.total, first ? r.total - first.total : "-"];
-    }).sort((a, b) => (b[4] || 0) - (a[4] || 0));
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["学号", "姓名", `${firstExam.name}总分`, `${lastExam.name}总分`, "进步幅度"], ...studentData]), "学生进步榜");
+  if (wb.SheetNames.length > 0) {
+    XLSX.writeFile(wb, `${grade}_${currentUser.name}_小组成绩分析.xlsx`);
+    showToast("分析报告已下载", "success");
+  } else {
+    showToast("暂无小组数据", "warning");
+  }
+};
+
+// ========== 任课教师：自定义分析 ==========
+function renderCustomAnalysis() {
+  const grade = currentUser.grade;
+  const mySubjects = currentUser.subjects || [];
+  const exams = getSortedExams(grade);
+  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  const subjects = DB.subjects[grade] || [];
+
+  if (exams.length === 0) {
+    $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📝</div><div class="es-title">暂无考试数据</div></div></div>`;
+    return;
   }
 
-  const filename = `${role === "academic" ? grade : role === "headteacher" ? `${grade}_${currentUser.classNo}` : currentUser.name}_多次考试对比_${selectedExams.length}次.xlsx`;
-  XLSX.writeFile(wb, filename);
-  showToast("对比报告已下载", "success");
+  const examOptions = exams.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("");
+  const classOptions = myClasses.map((c) => `<option value="${c}">${esc(c)}</option>`).join("");
+  const subjectOptions = mySubjects.map((s) => `<option value="${s}">${esc(s)}</option>`).join("");
+
+  $("pageContent").innerHTML = `
+    <div class="card"><div class="card-title">⚙️ 自定义分析</div>
+      <div class="custom-analysis">
+        <div class="ca-row">
+          <div class="ca-field"><label>考试：</label><select id="ca_exam" class="form-control">${examOptions}</select></div>
+          <div class="ca-field"><label>班级：</label><select id="ca_class" class="form-control"><option value="">全年级</option>${classOptions}</select></div>
+          <div class="ca-field"><label>学科：</label><select id="ca_subject" class="form-control"><option value="">总分</option>${subjectOptions}</select></div>
+        </div>
+        <div class="ca-actions">
+          <button class="btn btn-primary" onclick="runCustomAnalysis()">🔍 开始分析</button>
+          <button class="btn btn-success" onclick="downloadCustomAnalysis()">📥 导出报告</button>
+        </div>
+      </div>
+    </div>
+    <div id="ca_result"></div>
+  `;
+}
+
+function runCustomAnalysis() {
+  const grade = currentUser.grade;
+  const examId = $("ca_exam").value;
+  const classNo = $("ca_class").value;
+  const subject = $("ca_subject").value;
+  const subjects = DB.subjects[grade] || [];
+
+  const exam = DB.exams.find((e) => e.id === examId);
+  if (!exam) return;
+
+  let recs = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  if (classNo) recs = recs.filter((r) => r.classNo === classNo);
+
+  if (recs.length === 0) {
+    $("ca_result").innerHTML = `<div class="card"><div class="empty-state"><div class="es-title">暂无成绩数据</div></div></div>`;
+    return;
+  }
+
+  // 基础统计
+  let values, label;
+  if (subject) {
+    values = recs.map((r) => r.scores[subject]).filter((v) => typeof v === "number" && !isNaN(v));
+    label = subject;
+  } else {
+    values = recs.map((r) => r.total);
+    label = "总分";
+  }
+
+  const n = values.length;
+  const sum = values.reduce((a, b) => a + b, 0);
+  const avg = sum / n;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const std = mathStdDev(values);
+
+  // 分数段分析
+  const fullScore = subject ? (subjects.find((s) => s.name === subject)?.score || 100) : (subjects.reduce((a, s) => a + s.score, 0));
+  const segments = [
+    { name: "满分", min: fullScore, max: fullScore + 1 },
+    { name: `90%以上 (${fmt(fullScore * 0.9, 0)}+)`, min: fullScore * 0.9, max: fullScore + 1 },
+    { name: `80%-90% (${fmt(fullScore * 0.8, 0)}-${fmt(fullScore * 0.9, 0)})`, min: fullScore * 0.8, max: fullScore * 0.9 },
+    { name: `70%-80% (${fmt(fullScore * 0.7, 0)}-${fmt(fullScore * 0.8, 0)})`, min: fullScore * 0.7, max: fullScore * 0.8 },
+    { name: `60%-70% (${fmt(fullScore * 0.6, 0)}-${fmt(fullScore * 0.7, 0)})`, min: fullScore * 0.6, max: fullScore * 0.7 },
+    { name: `60%以下 (<${fmt(fullScore * 0.6, 0)})`, min: 0, max: fullScore * 0.6 }
+  ];
+
+  const segData = segments.map((s) => {
+    const cnt = values.filter((v) => v >= s.min && v < s.max).length;
+    return { ...s, count: cnt, rate: cnt / n };
+  });
+
+  // 图表
+  const chartCanvas = `ca_chart_${Date.now()}`;
+  let html = `
+    <div class="card"><div class="card-title">📊 ${esc(label)}统计分析（${esc(exam.name)}${classNo ? " - " + esc(classNo) : " - 全年级"})</div>
+      <div class="ca-stats-grid">
+        <div class="ca-stat"><div class="ca-stat-label">考试人数</div><div class="ca-stat-value">${n}</div></div>
+        <div class="ca-stat"><div class="ca-stat-label">平均分</div><div class="ca-stat-value">${fmt(avg, 2)}</div></div>
+        <div class="ca-stat"><div class="ca-stat-label">最高分</div><div class="ca-stat-value">${max}</div></div>
+        <div class="ca-stat"><div class="ca-stat-label">最低分</div><div class="ca-stat-value">${min}</div></div>
+        <div class="ca-stat"><div class="ca-stat-label">标准差</div><div class="ca-stat-value">${fmt(std, 2)}</div></div>
+        <div class="ca-stat"><div class="ca-stat-label">满分线</div><div class="ca-stat-value">${fullScore}</div></div>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">📈 分数段分布</div>
+      <div class="ca-chart-container"><canvas id="${chartCanvas}"></canvas></div>
+      <div class="cmp-table-wrap" style="margin-top:16px"><table class="cmp-table">
+        <thead><tr><th>分数段</th><th>人数</th><th>占比</th><th>分布条</th></tr></thead>
+        <tbody>${segData.map((s) => `<tr>
+          <td><b>${esc(s.name)}</b></td><td>${s.count}</td><td>${fmtPct(s.rate)}</td>
+          <td><div style="background:var(--primary);height:16px;border-radius:4px;width:${Math.max(s.rate * 200, 4)}px"></div></td>
+        </tr>`).join("")}</tbody>
+      </table></div>
+    </div>`;
+
+  $("ca_result").innerHTML = html;
+
+  setTimeout(() => {
+    drawChart(chartCanvas, "bar", segData.map((s) => s.name), [{
+      label: "人数",
+      data: segData.map((s) => s.count)
+    }]);
+  }, 100);
+}
+
+window.downloadCustomAnalysis = function () {
+  const grade = currentUser.grade;
+  const examId = $("ca_exam")?.value;
+  const classNo = $("ca_class")?.value;
+  const subject = $("ca_subject")?.value;
+  const exam = DB.exams.find((e) => e.id === examId);
+  if (!exam) { showToast("请先进行分析", "warning"); return; }
+
+  const subjects = DB.subjects[grade] || [];
+  let recs = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  if (classNo) recs = recs.filter((r) => r.classNo === classNo);
+  if (recs.length === 0) { showToast("暂无数据", "warning"); return; }
+
+  let values, label;
+  if (subject) {
+    values = recs.map((r) => r.scores[subject]).filter((v) => typeof v === "number" && !isNaN(v));
+    label = subject;
+  } else {
+    values = recs.map((r) => r.total);
+    label = "总分";
+  }
+
+  const n = values.length;
+  const avg = values.reduce((a, b) => a + b, 0) / n;
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const fullScore = subject ? (subjects.find((s) => s.name === subject)?.score || 100) : (subjects.reduce((a, s) => a + s.score, 0));
+
+  const segments = [
+    { name: `90%以上 (${fmt(fullScore * 0.9, 0)}+)`, min: fullScore * 0.9, max: fullScore + 1 },
+    { name: `80%-90%`, min: fullScore * 0.8, max: fullScore * 0.9 },
+    { name: `70%-80%`, min: fullScore * 0.7, max: fullScore * 0.8 },
+    { name: `60%-70%`, min: fullScore * 0.6, max: fullScore * 0.7 },
+    { name: `60%以下`, min: 0, max: fullScore * 0.6 }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["项目", "数值"],
+    ["考试", exam.name],
+    ["班级", classNo || "全年级"],
+    ["学科", label],
+    ["考试人数", n],
+    ["平均分", fmt(avg, 2)],
+    ["最高分", max],
+    ["最低分", min],
+    ["标准差", fmt(mathStdDev(values), 2)],
+    ["满分线", fullScore],
+    ...segments.map((s) => {
+      const cnt = values.filter((v) => v >= s.min && v < s.max).length;
+      return [s.name, cnt, fmt(cnt / n * 100, 1) + "%"];
+    })
+  ]), "自定义分析");
+
+  XLSX.writeFile(wb, `${grade}_${currentUser.name}_自定义分析_${label}.xlsx`);
+  showToast("报告已下载", "success");
 };
+
+// 添加自定义分析样式
+const caStyle = document.createElement("style");
+caStyle.textContent = `
+  .custom-analysis { padding: 16px 0; }
+  .ca-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .ca-field { display: flex; align-items: center; gap: 8px; }
+  .ca-field label { font-weight: 600; color: var(--text-dark); white-space: nowrap; }
+  .ca-field .form-control { width: 160px; }
+  .ca-actions { display: flex; gap: 12px; }
+  .ca-stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 16px; }
+  .ca-stat { background: var(--card-bg); border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
+  .ca-stat-label { font-size: 12px; color: var(--text-light); margin-bottom: 8px; }
+  .ca-stat-value { font-size: 22px; font-weight: 700; color: var(--primary); }
+  .ca-chart-container { height: 280px; margin-top: 16px; }
+  @media (max-width: 900px) { .ca-stats-grid { grid-template-columns: repeat(3, 1fr); } }
+`;
+document.head.appendChild(caStyle);
 
