@@ -942,6 +942,9 @@ table.data-table tr.rank-top {
 }
 
 .checkbox-group label:hover { border-color: var(--primary); }
+.checkbox-group input[type="checkbox"] { margin: 0; width: 14px; height: 14px; }
+.checkbox-group input[type="checkbox"]:checked + span { color: var(--primary); font-weight: bold; }
+.checkbox-group input[type="checkbox"]:checked ~ span { color: var(--primary); font-weight: bold; }
 
 .analysis-text {
   background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
