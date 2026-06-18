@@ -1770,10 +1770,10 @@ function refreshAcademicAnalysis() {
       <td><b>${esc(s.name)}</b></td>
       <td>${fmt(st.avg, 2)}</td><td>${fmt(st.max, 2)}</td><td>${fmt(st.min, 2)}</td>
       <td>${fmt(st.passPct * 100, 1)}%</td><td>${st.passCount}</td>
-      <td>${fmt(st.excellentPct * 100, 1)}%</td><td>${st.excellentCount}</td>
-      <td>${fmt(st.goodPct * 100, 1)}%</td><td>${st.goodCount}</td>
-      <td>${fmt(st.lowPct * 100, 1)}%</td><td>${st.lowCount}</td>
-      <td>${st.count}</td>
+      <td>${fmt(st.excellentPct * 100, 1)}%</td><td>${st.excellent}</td>
+      <td>${fmt(st.goodPct * 100, 1)}%</td><td>${st.good}</td>
+      <td>${fmt(st.lowPct * 100, 1)}%</td><td>${st.low}</td>
+      <td>${st.total}</td>
     </tr>`;
   }).filter(Boolean).join("");
 
@@ -1819,7 +1819,7 @@ window.downloadAcademicAnalysis = function () {
       const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
       if (!recs.length) return;
       const st = aggregateStats(recs, [s])[s.name];
-      rateData.push([e.name, s.name, fmt(st.avg, 2), fmt(st.max, 2), fmt(st.min, 2), fmt(st.passPct * 100, 1) + "%", st.passCount, fmt(st.excellentPct * 100, 1) + "%", st.excellentCount, fmt(st.goodPct * 100, 1) + "%", st.goodCount, fmt(st.lowPct * 100, 1) + "%", st.lowCount, st.count]);
+      rateData.push([e.name, s.name, fmt(st.avg, 2), fmt(st.max, 2), fmt(st.min, 2), fmt(st.passPct * 100, 1) + "%", st.passCount, fmt(st.excellentPct * 100, 1) + "%", st.excellent, fmt(st.goodPct * 100, 1) + "%", st.good, fmt(st.lowPct * 100, 1) + "%", st.low, st.total]);
     });
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([rateHeader, ...rateData]), "各科详细统计");
@@ -1964,12 +1964,12 @@ function refreshHeadteacherAnalysis() {
   const recs = DB.records.filter((r) => r.examId === selectedExam.id && r.classNo === classNo);
   const detailRows = subjects.map((s) => {
     const st = aggregateStats(recs, [s])[s.name];
-    return `<tr><td><b>${esc(s.name)}</b></td><td>${fmt(st.avg, 2)}</td><td>${st.count}</td>
+    return `<tr><td><b>${esc(s.name)}</b></td><td>${fmt(st.avg, 2)}</td><td>${st.total}</td>
       <td>${fmt(st.max, 2)}</td><td>${fmt(st.min, 2)}</td>
       <td>${fmt(st.passPct * 100, 1)}%</td><td>${st.passCount}</td>
-      <td>${fmt(st.excellentPct * 100, 1)}%</td><td>${st.excellentCount}</td>
-      <td>${fmt(st.goodPct * 100, 1)}%</td><td>${st.goodCount}</td>
-      <td>${fmt(st.lowPct * 100, 1)}%</td><td>${st.lowCount}</td></tr>`;
+      <td>${fmt(st.excellentPct * 100, 1)}%</td><td>${st.excellent}</td>
+      <td>${fmt(st.goodPct * 100, 1)}%</td><td>${st.good}</td>
+      <td>${fmt(st.lowPct * 100, 1)}%</td><td>${st.low}</td></tr>`;
   }).join("");
 
   $("ht_detail_card").innerHTML = `<div class="card">
@@ -2020,7 +2020,7 @@ window.downloadHeadteacherAnalysis = function () {
   const statsHeader = ["学科", "均分", "最高", "最低", "及格率", "及格人数", "优秀率", "优秀人数", "良好率", "良好人数", "低分率", "低分人数", "人数"];
   const statsData = subjects.map((s) => {
     const st = aggregateStats(studentRecs, [s])[s.name];
-    return [s.name, fmt(st.avg, 2), fmt(st.max, 2), fmt(st.min, 2), fmt(st.passPct * 100, 1) + "%", st.passCount, fmt(st.excellentPct * 100, 1) + "%", st.excellentCount, fmt(st.goodPct * 100, 1) + "%", st.goodCount, fmt(st.lowPct * 100, 1) + "%", st.lowCount, st.count];
+    return [s.name, fmt(st.avg, 2), fmt(st.max, 2), fmt(st.min, 2), fmt(st.passPct * 100, 1) + "%", st.passCount, fmt(st.excellentPct * 100, 1) + "%", st.excellent, fmt(st.goodPct * 100, 1) + "%", st.good, fmt(st.lowPct * 100, 1) + "%", st.low, st.total];
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([statsHeader, ...statsData]), "学科统计");
 
