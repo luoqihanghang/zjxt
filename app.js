@@ -37,7 +37,7 @@ const DB_KEY = "smart_edu_platform_db_v1";
 let _skipGitHubSync = false; // 防止循环
 
 async function loadDB() {
-  // 优先尝试从 GitHub 加载
+  // 1. 优先从双 Gist 加载（主 Gist 配置 + 业务 Gist 成绩）
   if (GitHubService.isConfigured()) {
     const remote = await GitHubService.loadRemoteDB();
     if (remote) {
@@ -45,14 +45,14 @@ async function loadDB() {
       return remote;
     }
   }
-  // 回退到本地存储
+  // 2. 回退到本地浏览器缓存
   let db = localStorage.getItem(DB_KEY);
   if (!db) {
     db = initDefaultDB();
-    // 如果 GitHub 已配置，同步默认数据上去
+    // 若 Gist 已配置，则同步默认数据上去
     if (GitHubService.isConfigured()) {
       _skipGitHubSync = true;
-      await GitHubService.tryInitFile(db);
+      await GitHubService.saveRemoteDB(db);
       _skipGitHubSync = false;
     }
     saveDB(db);
@@ -65,9 +65,9 @@ async function loadDB() {
 
 function saveDB(db) {
   localStorage.setItem(DB_KEY, JSON.stringify(db));
-  // 同时同步到 GitHub
+  // 异步同步到双 Gist：主 Gist 存配置，业务 Gist 存成绩
   if (GitHubService.isConfigured() && !_skipGitHubSync) {
-    GitHubService.saveRemoteDB(db); // 非阻塞，不等待
+    GitHubService.saveRemoteDB(db).catch(err => console.log("Gist sync error:", err));
   }
 }
 
@@ -94,7 +94,8 @@ function initDefaultDB() {
     records: [],
     sends: [],
     announcements: [],
-    rankSends: []
+    rankSends: [],
+    groups: {}
   };
 }
 
@@ -112,45 +113,108 @@ const ROLE_NAMES = {
 
 const NAV_MENUS = {
   admin: [
-    { id: "dashboard", icon: "📊", text: "平台概览" },
-    { id: "users", icon: "👥", text: "教师名单管理" },
-    { id: "grades", icon: "🏫", text: "年级设置" },
-    { id: "permissions", icon: "🔐", text: "权限管理" },
-    { id: "exams", icon: "📝", text: "考试管理" },
-    { id: "announcements_all", icon: "📢", text: "公告管理" },
-    { id: "github_data", icon: "🔗", text: "GitHub 数据管理" }
+    {
+      group: "概览", icon: "🏠", items: [
+        { id: "dashboard", icon: "📊", text: "平台概览" }
+      ]
+    },
+    {
+      group: "人员管理", icon: "👥", items: [
+        { id: "users", icon: "👤", text: "教师名单管理" },
+        { id: "permissions", icon: "🔐", text: "权限管理" }
+      ]
+    },
+    {
+      group: "教学设置", icon: "🎓", items: [
+        { id: "grades", icon: "🏫", text: "年级设置" },
+        { id: "exams", icon: "📝", text: "考试管理" }
+      ]
+    },
+    {
+      group: "公告消息", icon: "📢", items: [
+        { id: "announcements_all", icon: "📢", text: "公告管理" }
+      ]
+    }
   ],
   academic: [
-    { id: "dashboard", icon: "📊", text: "工作首页" },
-    { id: "subjects", icon: "📚", text: "学科/分值设置" },
-    { id: "exams", icon: "📝", text: "考试管理" },
-    { id: "grade_summary", icon: "📈", text: "年级成绩汇总" },
-    { id: "class_ranking", icon: "🏆", text: "全年级排名" },
-    { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" },
-    { id: "send_scores", icon: "📨", text: "发送班级成绩" },
-    { id: "send_rank", icon: "📤", text: "发送教师排行" },
-    { id: "announcement", icon: "📢", text: "消息播报" },
-    { id: "academic_analysis", icon: "🔍", text: "全平台智能分析" },
-    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
+    {
+      group: "概览", icon: "🏠", items: [
+        { id: "dashboard", icon: "📊", text: "工作首页" }
+      ]
+    },
+    {
+      group: "基础设置", icon: "⚙️", items: [
+        { id: "subjects", icon: "📚", text: "学科/分值设置" },
+        { id: "exams", icon: "📝", text: "考试管理" }
+      ]
+    },
+    {
+      group: "成绩汇总", icon: "📈", items: [
+        { id: "grade_summary", icon: "📈", text: "年级成绩汇总" },
+        { id: "class_ranking", icon: "🏆", text: "全年级排名" },
+        { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" }
+      ]
+    },
+    {
+      group: "成绩分析", icon: "🔍", items: [
+        { id: "academic_analysis", icon: "🔍", text: "全平台智能分析" },
+        { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
+      ]
+    },
+    {
+      group: "消息发送", icon: "📨", items: [
+        { id: "send_scores", icon: "📨", text: "发送班级成绩" },
+        { id: "send_rank", icon: "📤", text: "发送教师排行" },
+        { id: "announcement", icon: "📢", text: "消息播报" }
+      ]
+    }
   ],
   teacher: [
-    { id: "dashboard", icon: "📊", text: "工作首页" },
-    { id: "my_scores", icon: "📖", text: "我的班级成绩" },
-    { id: "my_ranking", icon: "🏅", text: "我的排行信息" },
-    { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
-    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" },
-    { id: "group_scores", icon: "👥", text: "小组成绩分析" },
-    { id: "custom_analysis", icon: "⚙️", text: "自定义分析" }
+    {
+      group: "概览", icon: "🏠", items: [
+        { id: "dashboard", icon: "📊", text: "工作首页" }
+      ]
+    },
+    {
+      group: "我的成绩", icon: "📖", items: [
+        { id: "my_scores", icon: "📖", text: "我的班级成绩" },
+        { id: "my_ranking", icon: "🏅", text: "我的排行信息" }
+      ]
+    },
+    {
+      group: "数据分析", icon: "📊", items: [
+        { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
+        { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" },
+        { id: "group_scores", icon: "👥", text: "小组成绩分析" },
+        { id: "custom_analysis", icon: "⚙️", text: "自定义分析" }
+      ]
+    }
   ],
   headteacher: [
-    { id: "dashboard", icon: "📊", text: "工作首页" },
-    { id: "upload_scores", icon: "📥", text: "上传班级成绩" },
-    { id: "my_class_scores", icon: "📖", text: "本班考试成绩" },
-    { id: "class_ranking", icon: "🏆", text: "本班排名统计" },
-    { id: "download_scores", icon: "📤", text: "下载Excel成绩" },
-    { id: "headteacher_analysis", icon: "🔍", text: "本班智能对比分析" },
-    { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" },
-    { id: "group_manage", icon: "👥", text: "学习小组管理" }
+    {
+      group: "概览", icon: "🏠", items: [
+        { id: "dashboard", icon: "📊", text: "工作首页" }
+      ]
+    },
+    {
+      group: "班级成绩", icon: "📖", items: [
+        { id: "upload_scores", icon: "📥", text: "上传班级成绩" },
+        { id: "my_class_scores", icon: "📖", text: "本班考试成绩" },
+        { id: "class_ranking", icon: "🏆", text: "本班排名统计" },
+        { id: "download_scores", icon: "📤", text: "下载Excel成绩" }
+      ]
+    },
+    {
+      group: "数据分析", icon: "📊", items: [
+        { id: "headteacher_analysis", icon: "🔍", text: "本班智能对比分析" },
+        { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
+      ]
+    },
+    {
+      group: "小组管理", icon: "👥", items: [
+        { id: "group_manage", icon: "👥", text: "学习小组管理" }
+      ]
+    }
   ]
 };
 
@@ -170,6 +234,17 @@ if (savedUser) {
 $("loginBtn").onclick = doLogin;
 $("loginPassword").addEventListener("keypress", (e) => { if (e.key === "Enter") doLogin(); });
 $("logoutBtn").onclick = doLogout;
+
+// 翻转卡片：Gist 配置面板
+if ($("btnGistSetup")) {
+  $("btnGistSetup").onclick = () => GitHubService.showLoginSetup();
+}
+if ($("gistSaveBtn")) {
+  $("gistSaveBtn").onclick = () => GitHubService.applyLoginSetup();
+}
+if ($("gistBackBtn")) {
+  $("gistBackBtn").onclick = () => GitHubService.flipBackToLogin();
+}
 
 async function doLogin() {
   const username = $("loginUsername").value.trim();
@@ -238,7 +313,6 @@ function renderSyncStatus() {
   statusDiv.style.cssText = "display:flex;align-items:center;gap:10px";
   statusDiv.innerHTML = `
     <span id="sync-badge" style="font-size:12px;padding:4px 10px;background:#f0f4ff;border-radius:12px;color:#3b7ddd">🔗 未连接</span>
-    <button class="btn btn-sm btn-outline" id="btn-github-setup" onclick="openGithubSetup()">⚙️ GitHub 配置</button>
   `;
   document.querySelector(".topbar-right").insertBefore(statusDiv, document.querySelector(".topbar-right").firstChild);
   updateSyncBadge();
@@ -268,18 +342,18 @@ function renderGithubData() {
 
   $("pageContent").innerHTML = `
     <div class="card">
-      <div class="card-title">🔗 GitHub 数据仓库配置</div>
+      <div class="card-title">🔗 Gist 数据存储配置</div>
       <div class="form-row">
         <div class="form-group"><label>GitHub Token</label><input type="password" id="gd_token" value="${cfg.token || ""}" placeholder="ghp_xxxxx" /></div>
-        <div class="form-group"><label>仓库所有者</label><input id="gd_owner" value="${cfg.owner || ""}" placeholder="GitHub 用户名" /></div>
-        <div class="form-group"><label>仓库名称</label><input id="gd_repo" value="${cfg.repo || ""}" placeholder="repo-name" /></div>
-        <div class="form-group"><label>分支</label><input id="gd_branch" value="${cfg.branch || "main"}" placeholder="main" /></div>
-        <div class="form-group"><label>文件路径</label><input id="gd_path" value="${cfg.dbPath || "data/db.json"}" placeholder="data/db.json" /></div>
+        <div class="form-group"><label>Gist ID</label><input id="gd_gist_id" value="${cfg.gistId || ""}" placeholder="a1b2c3d4e5f6...（留空则保存时自动创建）" /></div>
+      </div>
+      <div style="font-size:13px;color:var(--text-light);margin:4px 0 12px 0">
+        💡 在 Gist URL https://gist.github.com/username/<b>最后一段</b> 就是 Gist ID。
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-success" id="gd_save">💾 保存配置</button>
-        <button class="btn btn-primary" id="gd_sync_now">🔄 立即同步到 GitHub</button>
-        <button class="btn btn-info" id="gd_load">📥 从 GitHub 拉取数据</button>
+        <button class="btn btn-primary" id="gd_sync_now">🔄 立即同步到 Gist</button>
+        <button class="btn btn-info" id="gd_load">📥 从 Gist 拉取数据</button>
         <button class="btn btn-secondary" id="gd_test">🧪 测试连接</button>
       </div>
     </div>
@@ -287,14 +361,14 @@ function renderGithubData() {
     <div class="card">
       <div class="card-title">📊 同步状态</div>
       <div id="gd_sync_info" style="padding:12px;background:#f8f9fc;border-radius:8px;font-size:13px;color:var(--text-light)">
-        <p>• 当前状态：${gs.isConfigured() ? `<b style="color:var(--success)">✅ 已配置（${cfg.owner}/${cfg.repo}）</b>` : `<b style="color:var(--danger)">⚠️ 未配置</b>`}</p>
+        <p>• 当前状态：${gs.isConfigured() ? `<b style="color:var(--success)">✅ 已配置</b>` : `<b style="color:var(--danger)">⚠️ 未配置</b>`}</p>
         <p>• Token：${cfg.token ? "✅ 已设置" : "❌ 未设置"}</p>
-        <p>• 数据文件：<code>${cfg.dbPath || "未设置"}</code></p>
+        <p>• Gist ID：<code>${cfg.gistId || "未设置（保存时自动创建）"}</code></p>
       </div>
     </div>
 
     <div class="card">
-      <div class="card-title">📋 同步日志（最近 20 条）</div>
+      <div class="card-title">📋 同步日志（最近 30 条）</div>
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>时间</th><th>类型</th><th>消息</th></tr></thead>
         <tbody>${log.map((l) => `<tr>
@@ -310,7 +384,7 @@ function renderGithubData() {
       <div class="analysis-text">
         <h4>⚠️ 安全风险提示</h4>
         <p>• 将 GitHub Token 放在前端代码中存在被他人获取的风险。</p>
-        <p>• 建议 Token 权限设置为 <b>最小权限</b>（仅给指定的单个仓库读写权限，禁用其他权限）。</p>
+        <p>• 建议 Token 权限设置为 <b>最小权限</b>（仅勾选 gist 权限即可，禁用其他所有权限）。</p>
         <p>• 建议尽快在 GitHub 设置中 <b>撤销此 Token</b>，并定期更换。</p>
         <p>• 生产环境推荐通过后端服务器持有 Token，前端仅调用接口。</p>
       </div>
@@ -319,24 +393,9 @@ function renderGithubData() {
 
   $("gd_save").onclick = () => {
     const token = $("gd_token").value.trim();
-    const owner = $("gd_owner").value.trim();
-    const repo = $("gd_repo").value.trim();
-    const branch = $("gd_branch").value.trim() || "main";
-    const dbPath = $("gd_path").value.trim() || "data/db.json";
-    if (token) {
-      localStorage.setItem("gh_token", token);
-      cfg.token = token;
-    }
-    localStorage.setItem("gh_owner", owner);
-    localStorage.setItem("gh_repo", repo);
-    localStorage.setItem("gh_branch", branch);
-    localStorage.setItem("gh_path", dbPath);
-    cfg.owner = owner;
-    cfg.repo = repo;
-    cfg.branch = branch;
-    cfg.dbPath = dbPath;
-    GitHubService.config = cfg;
-    showToast("配置已保存到你的浏览器", "success");
+    const gistId = $("gd_gist_id").value.trim();
+    gs.saveGistConfig(token, gistId);
+    showToast("配置已保存", "success");
     updateSyncBadge();
     renderGithubData();
   };
@@ -361,18 +420,17 @@ function renderGithubData() {
 
   $("gd_test").onclick = async () => {
     const tempToken = $("gd_token").value.trim();
-    const tempOwner = $("gd_owner").value.trim();
-    const tempRepo = $("gd_repo").value.trim();
-    if (!tempToken || !tempOwner || !tempRepo) { showToast("请先填写 Token、用户名和仓库名", "error"); return; }
+    if (!tempToken) { showToast("请先填写 Token", "error"); return; }
     try {
-      const res = await fetch(`https://api.github.com/repos/${tempOwner}/${tempRepo}`, {
-        headers: { Authorization: `Bearer ${tempToken}`, Accept: "application/vnd.github.v3+json" }
+      const res = await fetch(`https://api.github.com/gists?per_page=1`, {
+        headers: { Authorization: `Bearer ${tempToken}`, Accept: "application/vnd.github+json" }
       });
       if (res.ok) {
         const data = await res.json();
-        showToast(`✅ 连接成功！仓库：${data.full_name}`, "success");
+        const count = Array.isArray(data) ? data.length : 0;
+        showToast(`✅ Token 有效！可访问 ${count > 0 ? "Gist" : "账号"}`, "success");
       } else {
-        showToast(`❌ 连接失败：HTTP ${res.status}`, "error");
+        showToast(`❌ 连接失败：HTTP ${res.status}（请确认 Token 勾选了 gist 权限）`, "error");
       }
     } catch (e) {
       showToast(`❌ 连接失败：${e.message}`, "error");
@@ -394,12 +452,45 @@ function renderUserInfo() {
 }
 
 function renderNavMenu() {
-  const menus = NAV_MENUS[currentUser.role] || [];
-  $("navMenu").innerHTML = `<div class="nav-group-title">功能导航</div>` +
-    menus.map((m) => `<div class="nav-item" data-id="${m.id}"><span class="nav-icon">${m.icon}</span><span class="nav-text">${m.text}</span></div>`).join("");
+  const groups = NAV_MENUS[currentUser.role] || [];
+  // 平铺所有 items，便于 navigate 查找
+  const allItems = groups.flatMap((g) => g.items);
+
+  let html = `<div class="nav-group-title">功能导航</div>`;
+  groups.forEach((g, gi) => {
+    const firstGroup = gi === 0;
+    html += `
+      <div class="nav-group ${firstGroup ? "open" : ""}">
+        <div class="nav-group-header" data-group="${gi}">
+          <span class="ng-icon">${esc(g.icon || "")}</span>
+          <span class="ng-name">${esc(g.group)}</span>
+          <span class="ng-arrow">▸</span>
+        </div>
+        <div class="nav-group-items">
+          ${g.items.map((m) => `<div class="nav-item" data-id="${m.id}"><span class="nav-icon">${esc(m.icon)}</span><span class="nav-text">${esc(m.text)}</span></div>`).join("")}
+        </div>
+      </div>
+    `;
+  });
+  $("navMenu").innerHTML = html;
+
+  // 展开/折叠分组
+  $("navMenu").querySelectorAll(".nav-group-header").forEach((el) => {
+    el.onclick = () => el.parentElement.classList.toggle("open");
+  });
+  // 点击菜单项
   $("navMenu").querySelectorAll(".nav-item").forEach((el) => {
     el.onclick = () => navigate(el.dataset.id);
   });
+  // 高亮当前页
+  if (currentPage) {
+    const active = $("navMenu").querySelector(`.nav-item[data-id="${currentPage}"]`);
+    if (active) {
+      active.classList.add("active");
+      const group = active.closest(".nav-group");
+      if (group) group.classList.add("open");
+    }
+  }
 }
 
 async function navigate(pageId) {
@@ -407,8 +498,9 @@ async function navigate(pageId) {
   $("navMenu").querySelectorAll(".nav-item").forEach((el) => {
     el.classList.toggle("active", el.dataset.id === pageId);
   });
-  const menus = NAV_MENUS[currentUser.role] || [];
-  const menu = menus.find((m) => m.id === pageId);
+  const groups = NAV_MENUS[currentUser.role] || [];
+  const allItems = groups.flatMap((g) => g.items);
+  const menu = allItems.find((m) => m.id === pageId);
   $("pageTitle").textContent = menu ? menu.text : "页面";
 
   // 切换页面时自动刷新最新数据
@@ -432,7 +524,14 @@ function renderAnnouncement() {
   $("announcementBar").classList.remove("hidden");
   $("announcementBadge").classList.remove("hidden");
   $("announcementCount").textContent = DB.announcements.length;
-  $("announcementContent").innerHTML = list.map((a) => `<span style="margin-right:30px">【${a.title}】${a.content}</span>`).join("");
+  // 用无缝滚动容器：内容重复一份，形成循环
+  const textContent = list.map((a) => `📢 【${a.title}】${a.content}`).join("　　·　　");
+  $("announcementContent").innerHTML = `
+    <div class="marquee-track">
+      <span class="marquee-text">${esc(textContent)}　　　　</span>
+      <span class="marquee-text" aria-hidden="true">${esc(textContent)}　　　　</span>
+    </div>
+  `;
 }
 
 const PAGE_RENDERERS = {
@@ -458,7 +557,6 @@ const PAGE_RENDERERS = {
   my_ranking: renderMyRanking,
   teacher_analysis: renderTeacherAnalysis,
   exam_compare: renderExamCompare,
-  github_data: renderGithubData,
   group_manage: renderGroupManage,
   group_scores: renderGroupScores,
   custom_analysis: renderCustomAnalysis
@@ -668,24 +766,46 @@ window.editUser = function (id) {
   const u = id ? DB.users.find((x) => x.id === id) : null;
   const grades = Object.keys(DB.subjects);
   const html = `
-    <div class="form-group"><label>账号（登录用户名）</label><input id="m_username" value="${esc(u?.username || "")}" ${u ? "readonly" : ""} /></div>
-    <div class="form-group"><label>姓名</label><input id="m_name" value="${esc(u?.name || "")}" /></div>
-    <div class="form-group"><label>${u ? "新密码（留空则不修改）" : "初始密码"}</label><input id="m_password" type="text" placeholder="${u ? "留空保持原密码" : "默认 123456"}" value="${u ? "" : "123456"}" /></div>
-    <div class="form-group"><label>角色</label>
-      <select id="m_role">
-        <option value="academic" ${u?.role === "academic" ? "selected" : ""}>教务老师</option>
-        <option value="teacher" ${u?.role === "teacher" ? "selected" : ""}>任课教师</option>
-        <option value="headteacher" ${u?.role === "headteacher" ? "selected" : ""}>班主任</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>所属年级</label>
-        <select id="m_grade">${grades.map((g) => `<option ${u?.grade === g ? "selected" : ""}>${esc(g)}</option>`).join("")}${grades.length === 0 ? `<option>请先添加年级</option>` : ""}</select>
+    <div class="edit-user-form">
+      <div class="user-form-row">
+        <div class="form-group"><label>账号（登录用户名）</label>
+          <input id="m_username" value="${esc(u?.username || "")}" ${u ? "readonly" : ""} placeholder="例如：zhangsan" />
+        </div>
+        <div class="form-group"><label>姓名</label>
+          <input id="m_name" value="${esc(u?.name || "")}" placeholder="教师姓名" />
+        </div>
       </div>
-      <div class="form-group"><label>班级（班主任必填，如 1班）</label><input id="m_class" value="${esc(u?.classNo || "")}" placeholder="如 1班 / 2班" /></div>
-    </div>
-    <div class="form-group"><label>任教学科（逗号分隔，任课教师必填）</label>
-      <input id="m_subjects" value="${esc((u?.subjects || []).join(","))}" placeholder="如 语文,数学" />
+
+      <div class="user-form-row">
+        <div class="form-group"><label>角色</label>
+          <select id="m_role">
+            <option value="academic" ${u?.role === "academic" ? "selected" : ""}>教务老师</option>
+            <option value="teacher" ${u?.role === "teacher" ? "selected" : ""}>任课教师</option>
+            <option value="headteacher" ${u?.role === "headteacher" ? "selected" : ""}>班主任</option>
+          </select>
+        </div>
+        <div class="form-group"><label>${u ? "新密码（留空则不修改）" : "初始密码"}</label>
+          <input id="m_password" type="text" placeholder="${u ? "留空保持原密码" : "默认 123456"}" value="${u ? "" : "123456"}" />
+        </div>
+      </div>
+
+      <div class="user-form-row">
+        <div class="form-group"><label>所属年级</label>
+          <select id="m_grade">${grades.map((g) => `<option ${u?.grade === g ? "selected" : ""}>${esc(g)}</option>`).join("")}${grades.length === 0 ? `<option>请先添加年级</option>` : ""}</select>
+        </div>
+        <div class="form-group"><label>班级（班主任必填）</label>
+          <input id="m_class" value="${esc(u?.classNo || "")}" placeholder="如 1班 / 2班" />
+        </div>
+      </div>
+
+      <div class="form-group"><label>任教学科（逗号分隔，任课教师必填）</label>
+        <input id="m_subjects" value="${esc((u?.subjects || []).join(","))}" placeholder="如 语文,数学,英语" />
+      </div>
+
+      <div class="user-form-tip">
+        <span>💡</span>
+        <span>新教师登录账号为上方"账号"，初始密码可自定义，默认 <b>123456</b>。</span>
+      </div>
     </div>
   `;
   showModal(u ? "编辑教师信息" : "添加新教师", html, "保存", () => {

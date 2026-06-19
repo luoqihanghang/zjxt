@@ -1,216 +1,498 @@
-// ========== GitHub 数据持久化服务 ==========
-// 将所有数据存储到 GitHub 个人仓库中，模拟数据库效果
-// 使用 CORS 代理解决浏览器跨域限制
+// ========== Gist 双数据源持久化服务 ==========
+// 主 Gist（configGistId）：仅存放基础配置，永久不动
+//   文件：smart-edu-config.json
+//   内容：users, subjects, announcements, groups, dataGistIds
+//
+// 业务 Gist（dataGistIds 数组，[0] 为当前活跃）：
+//   文件：smart-edu-data.json（索引文件：exams, sends, rankSends）
+//         exam-<examId>.json（每个考试独立一个成绩文件）
+//   自动归档：当前活跃 Gist 文件数 >= 280 时，创建新 Gist 继续写入
+//
+// Token：共用一个具备 gist 权限的 GitHub Token
 
 const GitHubService = {
-  config: null,
+  config: {
+    token: null,
+    configGistId: null,    // 主 Gist
+    dataGistIds: []        // 业务 Gist 数组：[current, archive1, ...]
+  },
   isSyncing: false,
-  syncLog: [],
-  CORS_PROXY: "https://corsproxy.io/?", // 优先用 corsproxy.io
+  CORS_PROXY: "https://corsproxy.io/?",
   useProxy: true,
+  CONFIG_FILE: "smart-edu-config.json",
+  DATA_META_FILE: "smart-edu-data.json",
+  FILE_LIMIT: 280,         // 接近 300 时触发归档
 
   init() {
+    const token = localStorage.getItem("gh_token");
+    const configGistId = localStorage.getItem("gh_config_gist_id");
+    let dataGistIds = [];
+    try { dataGistIds = JSON.parse(localStorage.getItem("gh_data_gist_ids") || "[]"); } catch(e) {}
+
     this.config = {
-      token: localStorage.getItem("gh_token") || null,
-      owner: localStorage.getItem("gh_owner") || "",
-      repo: localStorage.getItem("gh_repo") || "smart-edu-platform",
-      branch: localStorage.getItem("gh_branch") || "main",
-      dbPath: localStorage.getItem("gh_path") || "data/db.json"
+      token: token || null,
+      configGistId: configGistId || null,
+      dataGistIds: Array.isArray(dataGistIds) && dataGistIds.length ? dataGistIds : []
     };
-    this.log("GitHub 服务已加载（Token 存储于本地浏览器）");
   },
 
-  log(msg, type = "info") {
-    const entry = { time: new Date().toLocaleTimeString(), msg, type };
-    this.syncLog.unshift(entry);
-    if (this.syncLog.length > 20) this.syncLog.pop();
-    console.log(`[GitHub Sync] [${entry.time}] ${msg}`);
+  log(msg, type = "info") { console.log(`[Gist Sync][${type}] ${msg}`); },
+
+  isConfigured() {
+    return !!this.config.token && !!this.config.configGistId;
   },
 
-  // 配置仓库（用户设置）
-  showSetupModal(onSaved) {
-    const cfg = this.config;
-    showModal("🔗 连接 GitHub 仓库", `
-      <p style="color:var(--text-light);margin-bottom:16px;font-size:13px">
-        请配置你的 GitHub 仓库信息。Token 会保存在<strong>你自己的浏览器</strong>中，其他用户看不到。
-      </p>
-      <div class="form-group"><label>GitHub Token <span style="color:var(--text-light);font-weight:normal">（必填，创建后存于你的浏览器）</span></label>
-        <input id="gs_token" type="password" value="" placeholder="ghp_xxxxxx（首次配置时填写）" />
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>仓库所有者（GitHub 用户名）</label>
-          <input id="gs_owner" value="" placeholder="your-github-username" />
-        </div>
-        <div class="form-group"><label>仓库名称</label>
-          <input id="gs_repo" value="" placeholder="repo-name" />
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>分支</label>
-          <input id="gs_branch" value="main" placeholder="main" />
-        </div>
-        <div class="form-group"><label>数据文件路径</label>
-          <input id="gs_path" value="data/db.json" placeholder="data/db.json" />
-        </div>
-      </div>
-    `, "保存配置", () => {
-      const token = $("gs_token").value.trim();
-      if (token) {
-        localStorage.setItem("gh_token", token);
-        cfg.token = token;
+  // ========= 登录页翻转面板 =========
+  showLoginSetup() {
+    document.getElementById("flipCard").classList.add("flipped");
+    document.getElementById("gist_token").value = this.config.token || "";
+    document.getElementById("gist_config_id").value = this.config.configGistId || "";
+    // 填充多行业务 Gist ID（最多 5 个槽位）
+    for (let i = 1; i <= 5; i++) {
+      const el = document.getElementById("gist_data_id_" + i);
+      if (el) {
+        el.value = this.config.dataGistIds[i - 1] || "";
       }
-      cfg.owner = $("gs_owner").value.trim();
-      cfg.repo = $("gs_repo").value.trim();
-      cfg.branch = $("gs_branch").value.trim() || "main";
-      cfg.dbPath = $("gs_path").value.trim() || "data/db.json";
-      localStorage.setItem("gh_owner", cfg.owner);
-      localStorage.setItem("gh_repo", cfg.repo);
-      localStorage.setItem("gh_branch", cfg.branch);
-      localStorage.setItem("gh_path", cfg.dbPath);
-      this.config = cfg;
-      showToast("配置已保存到你的浏览器", "success");
-      if (onSaved) onSaved();
-    });
+    }
+    // 默认展开业务 Gist 区
+    const body = document.getElementById("gistDataBody");
+    const arrow = document.getElementById("gistArrow");
+    if (body && arrow) {
+      body.classList.add("open");
+      arrow.textContent = "▴";
+    }
+    // 绑定展开/折叠点击
+    const header = document.getElementById("gistDataHeader");
+    if (header && !header._bound) {
+      header.addEventListener("click", () => {
+        body.classList.toggle("open");
+        arrow.textContent = body.classList.contains("open") ? "▴" : "▾";
+      });
+      header._bound = true;
+    }
   },
 
-  // GitHub API 请求（带 CORS 代理支持）
-  async api(method, endpoint, body = null) {
-    if (!this.config.token || !this.config.owner || !this.config.repo) {
-      throw new Error("GitHub 仓库未配置，请先设置");
+  flipBackToLogin() {
+    document.getElementById("flipCard").classList.remove("flipped");
+  },
+
+  // 保存配置（登录页的"设置"面板）
+  applyLoginSetup() {
+    const token = document.getElementById("gist_token").value.trim();
+    const configGistId = document.getElementById("gist_config_id").value.trim();
+    // 收集 5 个业务 Gist ID，按顺序保存（第一行为当前活跃）
+    const dataGistIds = [];
+    for (let i = 1; i <= 5; i++) {
+      const el = document.getElementById("gist_data_id_" + i);
+      if (el && el.value.trim()) {
+        dataGistIds.push(el.value.trim());
+      }
     }
-    const githubUrl = `https://api.github.com${endpoint}`;
-    // 用 CORS 代理绕过浏览器限制
+
+    if (!token) { this._flash("请输入 Token", "error"); return false; }
+    if (!configGistId) { this._flash("请输入主 Gist ID（固定存放系统配置）", "error"); return false; }
+
+    this.saveGistConfig(token, configGistId, null);  // token + 主 Gist 正常保存
+    this.config.dataGistIds = dataGistIds;
+    localStorage.setItem("gh_data_gist_ids", JSON.stringify(dataGistIds));
+
+    const n = dataGistIds.length;
+    this._flash(`已保存 · Token + 主 Gist ID + ${n} 个业务 Gist ID`, "success");
+    this.flipBackToLogin();
+    return true;
+  },
+
+  _flash(msg, type) {
+    let el = document.getElementById("gistSetupHint");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "gistSetupHint";
+      el.style.cssText = "padding:8px 12px;margin:8px 0;border-radius:6px;font-size:12px;text-align:center;";
+      document.getElementById("gistSetupBox").insertBefore(el, document.getElementById("gistSaveBtn"));
+    }
+    el.style.background = type === "error" ? "#fee" : "#e6f7ea";
+    el.style.color = type === "error" ? "#c00" : "#1a7f37";
+    el.textContent = msg;
+    setTimeout(() => { el.textContent = ""; el.style.background = "transparent"; }, 3000);
+  },
+
+  saveGistConfig(token, configGistId, dataGistId) {
+    if (token) {
+      localStorage.setItem("gh_token", token);
+      this.config.token = token;
+    }
+    if (configGistId) {
+      localStorage.setItem("gh_config_gist_id", configGistId);
+      this.config.configGistId = configGistId;
+    }
+    // dataGistId 参数保留用于兼容；多行模式下由 applyLoginSetup 自行处理
+    if (dataGistId && !this.config.dataGistIds.includes(dataGistId)) {
+      this.config.dataGistIds.unshift(dataGistId);
+      localStorage.setItem("gh_data_gist_ids", JSON.stringify(this.config.dataGistIds));
+    }
+  },
+
+  // ========= 通用 Gist API =========
+  async api(method, gistId, body = null) {
+    if (!this.config.token) throw new Error("未配置 Token");
+    const githubUrl = `https://api.github.com/gists/${gistId || ""}`;
     const url = this.useProxy ? `${this.CORS_PROXY}${encodeURIComponent(githubUrl)}` : githubUrl;
     const opts = {
       method,
       headers: {
         "Authorization": `Bearer ${this.config.token}`,
-        "Accept": "application/vnd.github.v3+json",
+        "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28"
       }
     };
     if (body) opts.body = JSON.stringify(body);
-    let res;
     try {
-      res = await fetch(url, opts);
-    } catch (e) {
-      // 如果代理失败，尝试不用代理
-      if (this.useProxy) {
-        this.log("⚠️ CORS 代理连接失败，尝试直连...", "warn");
-        this.useProxy = false;
-        return this.api(method, endpoint, body);
+      const res = await fetch(url, opts);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(`${err.message || "HTTP " + res.status}（${res.status}）`);
       }
-      throw new Error(`网络请求失败: ${e.message}`);
-    }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.message || `HTTP ${res.status}`);
-    }
-    return res.status === 204 ? null : res.json();
-  },
-
-  // 获取数据文件 SHA（用于更新）
-  async getFileSha(path) {
-    try {
-      const data = await this.api("GET", `/repos/${this.config.owner}/${this.config.repo}/contents/${path}?ref=${this.config.branch}`);
-      return data.sha;
+      return res.status === 204 ? null : res.json();
     } catch (e) {
-      if (e.message.includes("Not Found") || e.message.includes("HTTP 404")) return null;
+      if (this.useProxy && (e.message.includes("Failed to fetch") || e.message.includes("NetworkError"))) {
+        this.useProxy = false;
+        return this.api(method, gistId, body);
+      }
       throw e;
     }
   },
 
-  // 加载远程数据
-  async loadRemoteDB() {
-    if (this.isSyncing) return null;
-    this.isSyncing = true;
+  // 创建一个新 Gist（用于新业务 Gist 归档）
+  async createGist(description, initialFiles) {
+    const body = {
+      description,
+      public: false,
+      files: initialFiles || { "README.txt": { content: "Smart Education Platform - business data archive" } }
+    };
+    const res = await this.api("POST", "", body);
+    return res;
+  },
+
+  // 更新 Gist 中一个/多个文件（删除文件传 content: ""）
+  async updateGistFiles(gistId, files, description) {
+    if (!gistId) throw new Error("缺少 Gist ID");
+    const body = { files };
+    if (description) body.description = description;
+    return this.api("PATCH", gistId, body);
+  },
+
+  // 获取 Gist 详情（含所有文件列表）
+  async getGistInfo(gistId) {
+    if (!gistId) throw new Error("缺少 Gist ID");
+    return this.api("GET", gistId);
+  },
+
+  // 读取 Gist 中某个文件的 JSON 内容
+  async readGistFile(gistId, filename) {
     try {
-      const path = this.config.dbPath;
-      this.log(`正在从 ${this.config.owner}/${this.config.repo} 加载数据...`);
-      const data = await this.api("GET", `/repos/${this.config.owner}/${this.config.repo}/contents/${path}?ref=${this.config.branch}`);
-      if (!data.content) throw new Error("仓库中没有数据文件");
-      // 正确处理 UTF-8 字符的 base64 解码
-      const jsonStr = decodeURIComponent(escape(atob(data.content)));
-      const db = JSON.parse(jsonStr);
-      this.log("✅ 数据已从 GitHub 加载", "success");
-      return db;
-    } catch (e) {
-      if (e.message.includes("Not Found") || e.message.includes("仓库未配置") || e.message.includes("HTTP 404")) {
-        this.log("⚠️ 仓库中暂无数据文件，将使用本地默认数据", "warn");
-        return null;
+      const info = await this.getGistInfo(gistId);
+      const file = info.files[filename];
+      if (!file) return null;
+      // file.content 在 Gist 详情中直接返回（小文件）
+      if (file.content) return JSON.parse(file.content);
+      // 大文件需要通过 raw_url 再 fetch
+      if (file.raw_url) {
+        const raw = await fetch(file.raw_url);
+        const text = await raw.text();
+        return JSON.parse(text);
       }
-      this.log(`❌ 加载失败: ${e.message}`, "error");
       return null;
-    } finally {
-      this.isSyncing = false;
+    } catch (e) {
+      this.log(`读取 ${gistId}/${filename} 失败: ${e.message}`, "error");
+      return null;
     }
   },
 
-  // 保存数据到 GitHub
+  // ========= 主 Gist（配置）读写 =========
+  // 从主 Gist 读取完整配置
+  async loadConfigDB() {
+    if (!this.isConfigured()) return null;
+    this.log("正在从主 Gist 加载系统配置...");
+    const cfg = await this.readGistFile(this.config.configGistId, this.CONFIG_FILE);
+    if (cfg) {
+      this.log(`✅ 配置已加载（${cfg.users?.length || 0} 账号、${Object.keys(cfg.subjects || {}).length} 个年级）`);
+      // 同步业务 Gist 索引到本地
+      if (Array.isArray(cfg.dataGistIds) && cfg.dataGistIds.length) {
+        this.config.dataGistIds = cfg.dataGistIds;
+        localStorage.setItem("gh_data_gist_ids", JSON.stringify(cfg.dataGistIds));
+      }
+    }
+    return cfg;
+  },
+
+  // 写入主 Gist（配置变更时调用）
+  async saveConfigDB(configPart) {
+    if (!this.isConfigured()) return false;
+    // 确保 dataGistIds 与最新配置同步
+    configPart.dataGistIds = this.config.dataGistIds;
+    try {
+      const files = {
+        [this.CONFIG_FILE]: { content: JSON.stringify(configPart, null, 2) }
+      };
+      await this.updateGistFiles(this.config.configGistId, files,
+        `网络智慧教务平台 · 系统配置 · ${new Date().toLocaleString()}`);
+      this.log("✅ 主 Gist 配置已保存");
+      return true;
+    } catch (e) {
+      this.log(`❌ 保存配置失败: ${e.message}`, "error");
+      return false;
+    }
+  },
+
+  // ========= 业务 Gist 读写 =========
+  getActiveDataGistId() {
+    return this.config.dataGistIds[0] || null;
+  },
+
+  // 统计某 Gist 的文件数
+  async countFiles(gistId) {
+    if (!gistId) return 0;
+    try {
+      const info = await this.getGistInfo(gistId);
+      return Object.keys(info.files || {}).length;
+    } catch (e) {
+      return 0;
+    }
+  },
+
+  // 检查当前活跃业务 Gist 是否接近上限，必要时创建新 Gist
+  async ensureCapacity() {
+    const currentId = this.getActiveDataGistId();
+    if (!currentId) {
+      // 没有业务 Gist，立即创建一个
+      return this.createNewDataGist();
+    }
+    try {
+      const count = await this.countFiles(currentId);
+      if (count >= this.FILE_LIMIT) {
+        this.log(`⚠️ 当前业务 Gist (${currentId.slice(0,8)}...) 文件数 ${count}，接近上限，创建新 Gist...`, "warn");
+        return this.createNewDataGist();
+      }
+      return currentId;
+    } catch (e) {
+      this.log(`容量检查失败: ${e.message}`, "error");
+      // 失败时保守处理：新建一个
+      return this.createNewDataGist();
+    }
+  },
+
+  // 创建新的业务 Gist
+  async createNewDataGist() {
+    if (!this.config.token) return null;
+    try {
+      const metaFile = {
+        exams: [],
+        sends: [],
+        rankSends: [],
+        createdAt: Date.now(),
+        version: "v2"
+      };
+      const files = {
+        [this.DATA_META_FILE]: { content: JSON.stringify(metaFile, null, 2) },
+        "README.txt": { content: "网络智慧教务平台 · 业务数据归档 Gist。请勿手动修改文件。" }
+      };
+      const gist = await this.createGist(
+        `网络智慧教务平台 · 业务数据归档 · ${new Date().toLocaleString()}`,
+        files
+      );
+      if (gist && gist.id) {
+        // 插入到数组首（成为活跃 Gist）
+        this.config.dataGistIds.unshift(gist.id);
+        // 保存到本地
+        localStorage.setItem("gh_data_gist_ids", JSON.stringify(this.config.dataGistIds));
+        // 保存到主 Gist（在 saveConfigDB 会覆盖）
+        this.log(`✅ 新业务 Gist 已创建: ${gist.id}`, "success");
+        return gist.id;
+      }
+      return null;
+    } catch (e) {
+      this.log(`❌ 创建业务 Gist 失败: ${e.message}`, "error");
+      return null;
+    }
+  },
+
+  // 读当前业务 Gist 的索引文件（exams, sends, rankSends）
+  async loadDataMeta() {
+    const currentId = this.getActiveDataGistId();
+    if (!currentId) return { exams: [], sends: [], rankSends: [] };
+    const meta = await this.readGistFile(currentId, this.DATA_META_FILE);
+    return meta || { exams: [], sends: [], rankSends: [] };
+  },
+
+  // 从所有业务 Gist 加载索引文件（合并历史）
+  async loadAllDataMeta() {
+    const all = { exams: [], sends: [], rankSends: [] };
+    for (const gid of this.config.dataGistIds) {
+      const meta = await this.readGistFile(gid, this.DATA_META_FILE);
+      if (meta) {
+        all.exams.push(...(meta.exams || []));
+        all.sends.push(...(meta.sends || []));
+        all.rankSends.push(...(meta.rankSends || []));
+      }
+    }
+    return all;
+  },
+
+  // 从所有业务 Gist 读取所有 exam-*.json → records 数组
+  async loadAllRecords() {
+    const records = [];
+    for (const gid of this.config.dataGistIds) {
+      try {
+        const info = await this.getGistInfo(gid);
+        const files = Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json"));
+        for (const fname of files) {
+          const recs = await this.readGistFile(gid, fname);
+          if (Array.isArray(recs)) records.push(...recs);
+        }
+      } catch (e) {
+        this.log(`读取 ${gid} 下的成绩文件失败: ${e.message}`, "error");
+      }
+    }
+    return records;
+  },
+
+  // 写入当前业务 Gist 的索引文件
+  async saveDataMeta(meta) {
+    const currentId = this.getActiveDataGistId();
+    if (!currentId) return false;
+    try {
+      const files = {
+        [this.DATA_META_FILE]: { content: JSON.stringify({
+          exams: meta.exams || [],
+          sends: meta.sends || [],
+          rankSends: meta.rankSends || [],
+          updatedAt: Date.now(),
+          version: "v2"
+        }, null, 2) }
+      };
+      await this.updateGistFiles(currentId, files,
+        `业务数据归档 · 索引更新 · ${new Date().toLocaleString()}`);
+      return true;
+    } catch (e) {
+      this.log(`❌ 保存业务索引失败: ${e.message}`, "error");
+      return false;
+    }
+  },
+
+  // 写入一个考试的成绩文件（examId 决定文件名）
+  async saveExamRecords(examId, records) {
+    if (!examId) return false;
+    // 先确保容量：检查当前活跃 Gist 的文件数，必要时新建
+    const activeGistId = await this.ensureCapacity();
+    if (!activeGistId) {
+      this.log("❌ 无可用业务 Gist（自动创建失败）", "error");
+      return false;
+    }
+    try {
+      const filename = `exam-${examId}.json`;
+      const files = {
+        [filename]: { content: JSON.stringify(records, null, 2) }
+      };
+      await this.updateGistFiles(activeGistId, files,
+        `考试成绩更新：${examId.slice(0,10)}... · ${new Date().toLocaleString()}`);
+      return true;
+    } catch (e) {
+      this.log(`❌ 保存 ${examId}.json 失败: ${e.message}`, "error");
+      return false;
+    }
+  },
+
+  // 一次性完整写入：主 Gist 配置 + 当前业务 Gist 索引 + 每个考试的成绩文件
+  // 入参 db 是完整的 DB 对象（users, subjects, exams, records, announcements, sends, rankSends, groups）
   async saveRemoteDB(db) {
     if (this.isSyncing) return false;
     this.isSyncing = true;
     try {
-      const path = this.config.dbPath;
-      const content = JSON.stringify(db, null, 2);
-      const base64Content = btoa(unescape(encodeURIComponent(content)));
-      this.log(`正在保存数据到 ${this.config.owner}/${this.config.repo}...`);
-      const sha = await this.getFileSha(path);
-      const payload = {
-        message: `📊 更新教务平台数据 - ${new Date().toLocaleString()}`,
-        content: base64Content,
-        branch: this.config.branch
+      // 1. 主 Gist：配置
+      const configPart = {
+        users: db.users || [],
+        subjects: db.subjects || {},
+        announcements: db.announcements || [],
+        groups: db.groups || {},
+        dataGistIds: this.config.dataGistIds,
+        version: "v2",
+        updatedAt: Date.now()
       };
-      if (sha) payload.sha = sha;
-      await this.api("PUT", `/repos/${this.config.owner}/${this.config.repo}/contents/${path}`, payload);
-      this.log(`✅ 数据已保存到 GitHub (${(content.length / 1024).toFixed(1)} KB)`, "success");
+      const ok1 = await this.saveConfigDB(configPart);
+
+      // 2. 业务 Gist：先确保有活跃 Gist
+      const activeId = await this.ensureCapacity();
+      if (!activeId) {
+        this.isSyncing = false;
+        return ok1;
+      }
+
+      // 3. 业务 Gist：索引文件
+      const meta = { exams: db.exams || [], sends: db.sends || [], rankSends: db.rankSends || [] };
+      await this.saveDataMeta(meta);
+
+      // 4. 业务 Gist：按 examId 分组写每个考试的成绩文件
+      //    只写当前活跃 Gist 中的考试（即 records 中出现的 examId）
+      const byExam = {};
+      (db.records || []).forEach(r => {
+        const k = r.examId;
+        if (!byExam[k]) byExam[k] = [];
+        byExam[k].push(r);
+      });
+
+      // 对每个 exam 写一个文件
+      for (const examId of Object.keys(byExam)) {
+        await this.saveExamRecords(examId, byExam[examId]);
+      }
+
       return true;
     } catch (e) {
-      this.log(`❌ 保存失败: ${e.message}`, "error");
-      // 不弹 Toast，避免打扰用户，只记录日志
+      this.log(`❌ saveRemoteDB 异常: ${e.message}`, "error");
       return false;
     } finally {
       this.isSyncing = false;
     }
   },
 
-  // 尝试创建初始数据文件（首次使用）
-  async tryInitFile(db) {
+  // 从远程加载完整 DB（主 Gist + 所有业务 Gist）
+  async loadRemoteDB() {
+    if (this.isSyncing) return null;
+    this.isSyncing = true;
     try {
-      const path = this.config.dbPath;
-      const content = JSON.stringify(db, null, 2);
-      const base64Content = btoa(unescape(encodeURIComponent(content)));
-      await this.api("PUT", `/repos/${this.config.owner}/${this.config.repo}/contents/${path}`, {
-        message: `📊 初始化教务平台数据 - ${new Date().toLocaleString()}`,
-        content: base64Content,
-        branch: this.config.branch
-      });
-      this.log("✅ 初始数据文件已创建", "success");
-      return true;
+      if (!this.isConfigured()) {
+        this.log("未配置 Token 或主 Gist ID", "warn");
+        return null;
+      }
+      const cfg = await this.loadConfigDB();
+      if (!cfg) {
+        this.log("主 Gist 无配置文件", "warn");
+        return null;
+      }
+
+      // 如果主 Gist 里指定了业务 Gist，也读回来
+      const meta = await this.loadAllDataMeta();
+      const records = await this.loadAllRecords();
+
+      // 合并成一个 DB 对象（与原有 initDefaultDB 结构一致）
+      return {
+        users: cfg.users || [],
+        subjects: cfg.subjects || {},
+        announcements: cfg.announcements || [],
+        groups: cfg.groups || {},
+        exams: meta.exams || [],
+        records: records,
+        sends: meta.sends || [],
+        rankSends: meta.rankSends || []
+      };
     } catch (e) {
-      this.log(`❌ 初始化失败: ${e.message}`, "error");
-      return false;
+      this.log(`❌ loadRemoteDB 异常: ${e.message}`, "error");
+      return null;
+    } finally {
+      this.isSyncing = false;
     }
-  },
-
-  // 获取同步状态 UI
-  getStatusHTML() {
-    if (this.isSyncing) {
-      return `<span style="color:var(--warning)">🔄 同步中...</span>`;
-    }
-    if (this.config.owner && this.config.repo) {
-      return `<span style="color:var(--success)">✅ 已连接</span>`;
-    }
-    return `<span style="color:var(--danger)">⚠️ 未连接</span>`;
-  },
-
-  // 判断是否已配置
-  isConfigured() {
-    return !!(this.config.token && this.config.owner && this.config.repo);
   }
 };
 
-// 初始化
 GitHubService.init();
 window.GitHubService = GitHubService;
