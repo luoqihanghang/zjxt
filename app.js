@@ -339,14 +339,16 @@ function enterApp() {
 
 // ========== GitHub 同步状态 ==========
 function renderSyncStatus() {
-  // 顶部栏右侧追加同步状态
+  // 顶部栏右侧：若已存在则仅刷新状态，不存在则新建
+  if ($("sync-status")) { updateSyncBadge(); return; }
   const statusDiv = document.createElement("div");
   statusDiv.id = "sync-status";
   statusDiv.style.cssText = "display:flex;align-items:center;gap:10px";
   statusDiv.innerHTML = `
     <span id="sync-badge" style="font-size:12px;padding:4px 10px;background:#f0f4ff;border-radius:12px;color:#3b7ddd">🔗 未连接</span>
   `;
-  document.querySelector(".topbar-right").insertBefore(statusDiv, document.querySelector(".topbar-right").firstChild);
+  const rightBar = document.querySelector(".topbar-right");
+  if (rightBar) rightBar.insertBefore(statusDiv, rightBar.firstChild);
   updateSyncBadge();
 }
 
