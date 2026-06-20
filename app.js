@@ -77,7 +77,7 @@ function initDefaultDB() {
       { id: "u_admin", username: "admin", password: "123456", name: "超级管理员", role: "admin", grade: null, classNo: null, createdAt: Date.now() },
       { id: "u_aca",   username: "academic", password: "123456", name: "张教务", role: "academic", grade: "高一年级", classNo: null, createdAt: Date.now() },
       { id: "u_tch",   username: "teacher", password: "123456", name: "李老师", role: "teacher", grade: "高一年级", classNo: null, subjects: ["数学"], createdAt: Date.now() },
-      { id: "u_ht",    username: "headteacher", password: "123456", name: "王班主任", role: "headteacher", grade: "高一年级", classNo: "1班", createdAt: Date.now() }
+      { id: "u_ht",    username: "headteacher", password: "123456", name: "王班主任", role: "headteacher", grade: "高一年级", classNo: "1班", subjects: ["语文"], createdAt: Date.now() }
     ],
     subjects: {
       "高一年级": [
@@ -134,6 +134,11 @@ const NAV_MENUS = {
       group: "公告消息", icon: "📢", items: [
         { id: "announcements_all", icon: "📢", text: "公告管理" }
       ]
+    },
+    {
+      group: "个人中心", icon: "👤", items: [
+        { id: "account_profile", icon: "🔐", text: "修改我的密码" }
+      ]
     }
   ],
   academic: [
@@ -167,6 +172,11 @@ const NAV_MENUS = {
         { id: "send_rank", icon: "📤", text: "发送教师排行" },
         { id: "announcement", icon: "📢", text: "消息播报" }
       ]
+    },
+    {
+      group: "个人中心", icon: "👤", items: [
+        { id: "account_profile", icon: "🔐", text: "修改我的密码" }
+      ]
     }
   ],
   teacher: [
@@ -184,9 +194,18 @@ const NAV_MENUS = {
     {
       group: "数据分析", icon: "📊", items: [
         { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
-        { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" },
+        { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
+      ]
+    },
+    {
+      group: "小组与分析", icon: "👥", items: [
         { id: "group_scores", icon: "👥", text: "小组成绩分析" },
         { id: "custom_analysis", icon: "⚙️", text: "自定义分析" }
+      ]
+    },
+    {
+      group: "个人中心", icon: "👤", items: [
+        { id: "account_profile", icon: "🔐", text: "修改我的密码" }
       ]
     }
   ],
@@ -197,11 +216,19 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "班级成绩", icon: "📖", items: [
+      group: "班级成绩（班主任）", icon: "📖", items: [
         { id: "upload_scores", icon: "📥", text: "上传班级成绩" },
         { id: "my_class_scores", icon: "📖", text: "本班考试成绩" },
         { id: "class_ranking", icon: "🏆", text: "本班排名统计" },
         { id: "download_scores", icon: "📤", text: "下载Excel成绩" }
+      ]
+    },
+    {
+      group: "任教科目（作为任课教师）", icon: "📘", items: [
+        { id: "my_scores", icon: "📖", text: "我的班级成绩" },
+        { id: "my_ranking", icon: "🏅", text: "我的排行信息" },
+        { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
+        { id: "group_scores", icon: "👥", text: "小组成绩分析" }
       ]
     },
     {
@@ -213,6 +240,11 @@ const NAV_MENUS = {
     {
       group: "小组管理", icon: "👥", items: [
         { id: "group_manage", icon: "👥", text: "学习小组管理" }
+      ]
+    },
+    {
+      group: "个人中心", icon: "👤", items: [
+        { id: "account_profile", icon: "🔐", text: "修改我的密码" }
       ]
     }
   ]
@@ -514,6 +546,98 @@ async function navigate(pageId) {
   else $("pageContent").innerHTML = `<div class="empty-state"><div class="es-icon">🚧</div><div class="es-title">功能建设中</div></div>`;
 }
 
+// ========== 个人中心：修改密码 ==========
+function renderAccountProfile() {
+  const u = currentUser;
+  $("pageContent").innerHTML = `
+    <div class="card">
+      <div class="card-title">👤 我的账号信息</div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th style="width:35%">项目</th><th>内容</th></tr></thead>
+        <tbody>
+          <tr><td><b>账号（登录用户名）</b></td><td>${esc(u.username)}</td></tr>
+          <tr><td><b>姓名</b></td><td>${esc(u.name)}</td></tr>
+          <tr><td><b>角色</b></td><td>${esc(ROLE_NAMES[u.role])}</td></tr>
+          <tr><td><b>所属年级</b></td><td>${esc(u.grade || "-")}</td></tr>
+          <tr><td><b>班级</b></td><td>${esc(u.classNo || "-")}</td></tr>
+          ${u.subjects && u.subjects.length ? `<tr><td><b>任教学科</b></td><td>${esc(u.subjects.join("、"))}</td></tr>` : ""}
+          <tr><td><b>账号创建时间</b></td><td>${u.createdAt ? new Date(u.createdAt).toLocaleString() : "-"}</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">🔐 修改我的密码</div>
+      <div class="form-row">
+        <div class="form-group"><label>当前密码</label>
+          <input id="ap_old" type="password" placeholder="输入当前密码" />
+        </div>
+        <div class="form-group"><label>新密码</label>
+          <input id="ap_new1" type="password" placeholder="至少 4 位" />
+        </div>
+        <div class="form-group"><label>确认新密码</label>
+          <input id="ap_new2" type="password" placeholder="再次输入新密码" />
+        </div>
+      </div>
+      <div style="margin-top:16px; display:flex; gap:10px;">
+        <button class="btn btn-primary btn-lg" id="ap_save">💾 保存新密码</button>
+        <button class="btn btn-secondary btn-lg" id="ap_clear">🗑 清空</button>
+      </div>
+      <div style="margin-top:14px; padding:10px 12px; background:#fff8e1; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px; color:#78350f;">
+        💡 修改成功后，新密码将自动同步至系统（通过 Gist 持久化存储），其他端再次登录时即可使用新密码。
+      </div>
+    </div>
+  `;
+
+  $("ap_save").onclick = () => {
+    const oldPwd = $("ap_old").value.trim();
+    const new1 = $("ap_new1").value.trim();
+    const new2 = $("ap_new2").value.trim();
+
+    if (!oldPwd) { showToast("请输入当前密码", "error"); return; }
+    if (oldPwd !== u.password) { showToast("当前密码不正确", "error"); return; }
+    if (!new1 || !new2) { showToast("请输入新密码并确认", "error"); return; }
+    if (new1.length < 4) { showToast("新密码至少 4 位", "error"); return; }
+    if (new1 !== new2) { showToast("两次输入的新密码不一致", "error"); return; }
+    if (new1 === oldPwd) { showToast("新密码不能与当前密码相同", "warning"); return; }
+
+    // 更新本地 DB 对象
+    const uInDB = DB.users.find((x) => x.id === u.id);
+    if (uInDB) uInDB.password = new1;
+
+    // 更新 currentUser（同步当前会话）
+    currentUser.password = new1;
+
+    saveDB(DB);
+    showToast("✅ 密码已修改，已同步保存", "success");
+
+    // 清空输入框
+    $("ap_old").value = "";
+    $("ap_new1").value = "";
+    $("ap_new2").value = "";
+
+    // 如果浏览器记住了密码，也更新本地缓存
+    const saved = localStorage.getItem("saved_user");
+    if (saved) {
+      try {
+        const obj = JSON.parse(saved);
+        if (obj.username === u.username) {
+          obj.password = new1;
+          localStorage.setItem("saved_user", JSON.stringify(obj));
+        }
+      } catch (e) {}
+    }
+  };
+
+  $("ap_clear").onclick = () => {
+    $("ap_old").value = "";
+    $("ap_new1").value = "";
+    $("ap_new2").value = "";
+    showToast("已清空", "info");
+  };
+}
+
+// ========== 公告 ==========
 function renderAnnouncement() {
   const list = DB.announcements.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
   if (list.length === 0) {
@@ -559,7 +683,8 @@ const PAGE_RENDERERS = {
   exam_compare: renderExamCompare,
   group_manage: renderGroupManage,
   group_scores: renderGroupScores,
-  custom_analysis: renderCustomAnalysis
+  custom_analysis: renderCustomAnalysis,
+  account_profile: renderAccountProfile
 };
 
 // ========== 平台概览 ==========
@@ -580,17 +705,83 @@ function renderDashboard() {
 
   let roleSection = "";
   if (currentUser.role === "admin") {
+    // ===== 管理员：全学校视角 =====
+    const grades = Object.keys(DB.subjects);
+    // 计算每个年级的核心数据
+    const gradeRows = grades.map((g) => {
+      const userCount = DB.users.filter((u) => u.grade === g).length;
+      const examCount = DB.exams.filter((e) => e.grade === g).length;
+      const recCount = DB.records.filter((r) => r.grade === g).length;
+      // 最近一次考试的年级总均分
+      const recentExam = DB.exams.filter((e) => e.grade === g).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+      let recentAvg = "-";
+      if (recentExam) {
+        const recs = DB.records.filter((r) => r.examId === recentExam.id);
+        if (recs.length > 0) {
+          const totalAvg = recs.map((r) => {
+            const vs = Object.values(r.scores || {}).filter((v) => v != null);
+            if (vs.length === 0) return null;
+            return vs.reduce((a, b) => a + b, 0) / vs.length;
+          }).filter(v => v != null);
+          if (totalAvg.length > 0) {
+            recentAvg = fmt(totalAvg.reduce((a, b) => a + b, 0) / totalAvg.length);
+          }
+        }
+      }
+      // 班主任人数
+      const htCount = DB.users.filter((u) => u.grade === g && u.role === "headteacher").length;
+      const subjectCount = (DB.subjects[g] || []).length;
+      return { grade: g, users: userCount, exams: examCount, recs: recCount, avg: recentAvg, ht: htCount, subjects: subjectCount };
+    });
+
+    // 各年级考试数量的图表数据
+    const gradeChartLabels = gradeRows.map((r) => r.grade);
+    const examCounts = gradeRows.map((r) => r.exams);
+    const recCounts = gradeRows.map((r) => r.recs);
+
     roleSection = `
       <div class="card">
-        <div class="card-title">📌 快速开始</div>
+        <div class="card-title">🏫 校园总览 - 各年级概况</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>年级</th><th>学科数</th><th>教师数</th><th>班主任数</th><th>考试数</th><th>成绩记录</th><th>最近一次考试年级均分</th></tr></thead>
+          <tbody>
+            ${gradeRows.length === 0 ? `<tr><td colspan="7"><div class="empty-state"><div class="es-tip">暂无年级数据，请先添加年级</div></div></td></tr>` : gradeRows.map((r) => `<tr>
+              <td><b>${r.grade}</b></td>
+              <td>${r.subjects}</td>
+              <td>${r.users}</td>
+              <td>${r.ht}</td>
+              <td>${r.exams}</td>
+              <td>${r.recs}</td>
+              <td><b style="color:#0b6bcb">${r.avg}</b></td>
+            </tr>`).join("")}
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📊 各年级考试与成绩记录对比</div>
+        <div class="chart-box"><canvas id="adminGradeChart"></canvas></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📌 管理员工作台</div>
         <div class="form-row">
-          <button class="btn btn-primary btn-lg" onclick="navigate('users')">➜ 添加教师名单</button>
-          <button class="btn btn-info btn-lg" onclick="navigate('exams')">➜ 管理考试</button>
-          <button class="btn btn-success btn-lg" onclick="navigate('grades')">➜ 年级设置</button>
+          <button class="btn btn-primary btn-lg" onclick="navigate('users')">➜ 教师名单管理</button>
+          <button class="btn btn-info btn-lg" onclick="navigate('grades')">➜ 年级设置</button>
+          <button class="btn btn-success btn-lg" onclick="navigate('exams')">➜ 考试管理</button>
+          <button class="btn btn-warning btn-lg" onclick="navigate('announcements_all')">➜ 公告管理</button>
+          <button class="btn btn-secondary btn-lg" onclick="navigate('account_profile')">🔐 修改密码</button>
         </div>
-        <p style="margin-top:16px; color:var(--text-light); font-size:13px;">欢迎，${currentUser.name}！作为平台管理员，您可以添加教师、设置年级学科分值、管理考试与公告。</p>
       </div>
     `;
+
+    setTimeout(() => {
+      if (gradeChartLabels.length === 0) return;
+      drawChart("adminGradeChart", "bar", gradeChartLabels, [
+        { label: "考试数", data: examCounts, color: "#3b82f6" },
+        { label: "成绩记录", data: recCounts, color: "#f59e0b" }
+      ]);
+    }, 50);
   } else if (currentUser.role === "academic") {
     roleSection = `
       <div class="card">
@@ -607,11 +798,24 @@ function renderDashboard() {
     roleSection = `
       <div class="card">
         <div class="card-title">📌 班主任工作台 - ${currentUser.grade || ""} ${currentUser.classNo || ""}</div>
+        <div style="color:var(--text-light); font-size:13px; margin-bottom:12px;">
+          身份：班主任 · 任教学科：<b>${(currentUser.subjects || []).join("、") || "（尚未设置）"}</b>
+        </div>
         <div class="form-row">
           <button class="btn btn-primary btn-lg" onclick="navigate('upload_scores')">➜ 上传班级成绩</button>
           <button class="btn btn-info btn-lg" onclick="navigate('my_class_scores')">➜ 查看本班成绩</button>
           <button class="btn btn-success btn-lg" onclick="navigate('download_scores')">➜ 下载Excel</button>
           <button class="btn btn-warning btn-lg" onclick="navigate('headteacher_analysis')">➜ 智能对比分析</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📘 我的任教科目分析</div>
+        <div class="form-row">
+          <button class="btn btn-primary btn-lg" onclick="navigate('my_scores')">📖 我的班级成绩</button>
+          <button class="btn btn-info btn-lg" onclick="navigate('my_ranking')">🏅 我的排行信息</button>
+          <button class="btn btn-success btn-lg" onclick="navigate('teacher_analysis')">🔍 学科对比分析</button>
+          <button class="btn btn-secondary btn-lg" onclick="navigate('group_scores')">👥 小组成绩分析</button>
         </div>
       </div>
     `;
@@ -2156,7 +2360,8 @@ window.downloadHeadteacherAnalysis = function () {
 
 // 任课教师端：我的成绩 & 排行 & 分析
 function renderMyScores() {
-  if (currentUser.role !== "teacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  // 任课教师 / 班主任均可访问（班主任也能看所教的学科成绩）
+  if (currentUser.role !== "teacher" && currentUser.role !== "headteacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
   const grade = currentUser.grade;
   const subjects = currentUser.subjects || [];
   const exams = getSortedExams(grade);
@@ -2235,7 +2440,7 @@ window._downloadMySubject = function (subjectName, grade) {
 };
 
 function renderMyRanking() {
-  if (currentUser.role !== "teacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  if (currentUser.role !== "teacher" && currentUser.role !== "headteacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
   const grade = currentUser.grade;
   const subjects = currentUser.subjects || [];
   const exams = getSortedExams(grade);
@@ -2269,7 +2474,7 @@ function renderMyRanking() {
 
 // ========== 任课教师：学科对比分析（独立页面） ==========
 function renderTeacherAnalysis() {
-  if (currentUser.role !== "teacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  if (currentUser.role !== "teacher" && currentUser.role !== "headteacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
   const grade = currentUser.grade;
   const subjects = currentUser.subjects || [];
   const exams = getSortedExams(grade);
