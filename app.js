@@ -17,6 +17,20 @@ const getVisibleRecords = (records) => {
   return records.filter((r) => r.status === "confirmed");
 };
 
+// 学号辅助函数：学号以学生名单为准，无名单时不显示
+const hasRoster = (grade) => {
+  return !!(DB.studentRoster && DB.studentRoster[grade] && Object.keys(DB.studentRoster[grade]).length > 0);
+};
+
+const getStudentIdFromRoster = (grade, classNo, studentName) => {
+  if (!hasRoster(grade)) return "";
+  const roster = DB.studentRoster[grade];
+  const classRoster = roster[classNo];
+  if (!classRoster) return "";
+  const found = classRoster.find((s) => s.studentName === studentName);
+  return found ? found.studentId : "";
+};
+
 function showToast(msg, type = "info", duration = 2500) {
   const toast = $("toast");
   toast.className = `toast toast-${type}`;
@@ -104,7 +118,9 @@ function initDefaultDB() {
     rankSends: [],
     groups: {},
     studentRoster: {},  // 学生名单 { grade: { classNo: [{studentId, studentName, classNo}] } }
-    scoreReviews: []   // 成绩审核记录
+    scoreReviews: [],   // 成绩审核记录
+    gradeNotifications: [],  // 全年组通知弹窗 [{id, grade, title, content, level, createdBy, createdAt, readBy: {userId: true}}]
+    dismissedNotifications: {}   // 用户已关闭的通知 {userId: {notifId: true}}
   };
 }
 
@@ -176,7 +192,7 @@ const NAV_MENUS = {
     {
       group: "成绩汇总", icon: "📈", items: [
         { id: "academic_upload_scores", icon: "📥", text: "上传全年级成绩（教务）" },
-        { id: "score_review", icon: "✅", text: "成绩审核" },
+        { id: "score_review", icon: "✅", text: "成绩审核（复审一键确认）" },
         { id: "grade_summary", icon: "📈", text: "年级成绩汇总" },
         { id: "class_ranking", icon: "🏆", text: "全年级排名" },
         { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" }
@@ -189,10 +205,8 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "消息发送", icon: "📨", items: [
-        { id: "send_scores", icon: "📨", text: "发送班级成绩" },
-        { id: "send_rank", icon: "📤", text: "发送教师排行" },
-        { id: "announcement", icon: "📢", text: "消息播报" }
+      group: "全年组通知", icon: "🔔", items: [
+        { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
       ]
     },
     {
@@ -223,6 +237,11 @@ const NAV_MENUS = {
       group: "小组与分析", icon: "👥", items: [
         { id: "group_scores", icon: "👥", text: "小组成绩分析" },
         { id: "custom_analysis", icon: "⚙️", text: "自定义分析" }
+      ]
+    },
+    {
+      group: "年级通知", icon: "🔔", items: [
+        { id: "grade_notifications", icon: "📣", text: "全年组通知" }
       ]
     },
     {
@@ -262,6 +281,11 @@ const NAV_MENUS = {
     {
       group: "小组管理", icon: "👥", items: [
         { id: "group_manage", icon: "👥", text: "学习小组管理" }
+      ]
+    },
+    {
+      group: "年级通知", icon: "🔔", items: [
+        { id: "grade_notifications", icon: "📣", text: "全年组通知" }
       ]
     },
     {
@@ -578,6 +602,9 @@ async function navigate(pageId) {
   const render = PAGE_RENDERERS[pageId];
   if (render) render();
   else $("pageContent").innerHTML = `<div class="empty-state"><div class="es-icon">🚧</div><div class="es-title">功能建设中</div></div>`;
+
+  // 每次导航后检查并弹出全年组通知
+  setTimeout(() => { checkGradeNotifications(); }, 400);
 }
 
 // ========== 个人中心：修改密码 ==========
@@ -703,8 +730,7 @@ const PAGE_RENDERERS = {
   grade_summary: renderGradeSummary,
   class_ranking: renderClassRanking,
   teacher_ranking: renderTeacherRanking,
-  send_scores: renderSendScores,
-  send_rank: renderSendRank,
+  grade_notifications: renderGradeNotifications,
   announcement: renderAnnouncementMgr,
   announcements_all: renderAnnouncementMgr,
   academic_analysis: renderAcademicAnalysis,
@@ -1305,6 +1331,7 @@ function renderUploadScores() {
   const classNo = currentUser.classNo;
   const exams = DB.exams.filter((e) => e.grade === grade);
   const subjects = DB.subjects[grade] || [];
+  const showStudentId = hasRoster(grade);
 
   // 各考试的审核状态（只看本班级）
   const examStatus = exams.map((e) => {
@@ -1504,8 +1531,11 @@ function handleExcelFile(file) {
           ℹ️ 提交后，本班级成绩将进入 <b>「待审核」</b> 状态，教务老师确认后会汇总到全年级并通知相关教师。
         </div>
         <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>学号</th><th>姓名</th>${subjectNames2.map((n) => `<th>${n}</th>`).join("")}<th>总分</th><th>上传状态</th></tr></thead>
-          <tbody>${parsed.slice(0, 30).map((r) => `<tr><td>${esc(r.studentId)}</td><td>${esc(r.studentName)}</td>${subjectNames2.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td><td><span class="tag tag-warning">待审核</span></td></tr>`).join("")}</tbody>
+          <thead><tr>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th>${subjectNames2.map((n) => `<th>${n}</th>`).join("")}<th>总分</th><th>上传状态</th></tr></thead>
+          <tbody>${parsed.slice(0, 30).map((r) => {
+            const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, r.studentName) : "";
+            return `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td>${esc(r.studentName)}</td>${subjectNames2.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td><td><span class="tag tag-warning">待审核</span></td></tr>`;
+          }).join("")}</tbody>
         </table></div>
         ${parsed.length > 30 ? `<p style="text-align:center;color:var(--text-light);margin-top:10px">仅显示前 30 行，共 ${parsed.length} 行</p>` : ""}
         <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
@@ -1518,14 +1548,23 @@ function handleExcelFile(file) {
 
       $("confirm_upload").onclick = () => {
         const examId = $("u_exam").value;
+        // 统计当前考试中已确认的记录数（用于提示）
+        const existingConfirmed = DB.records.filter((r) => r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) && r.status === "confirmed").length;
+        const examName = $("u_exam").selectedOptions[0].text;
         showModal("确认上传", `<div>
-          <p>将把 ${parsed.length} 名学生成绩上传到 <b>${esc($("u_exam").selectedOptions[0].text)}</b>。</p>
+          <p>将把 <b>${parsed.length}</b> 名学生成绩上传到 <b>${esc(examName)}</b>。</p>
           <p style="color:#856404;margin-top:8px">ℹ️ 提交后数据为<b>「待审核」</b>状态，由教务老师确认后才会汇总到全年级。</p>
+          ${existingConfirmed > 0 ? `<p style="color:#28a745;margin-top:8px">✅ 当前班级已有 <b>${existingConfirmed}</b> 条成绩已确认，将予以保留，不会被覆盖。仅会替换/新增本班级的待审核记录。</p>` : ""}
         </div>`, "✓ 确认上传", () => {
-          DB.records = DB.records.filter((r) => !(r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) && parsed.some((p) => p.studentId === r.studentId)));
+          // 仅删除本考试+本班级中 status="pending" 且与解析记录匹配的记录，保留已确认的记录
+          const pendingToRemove = new Set(parsed.map((p) => p.studentId));
+          DB.records = DB.records.filter((r) => !(
+            r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) &&
+            r.status === "pending" && pendingToRemove.has(r.studentId)
+          ));
           parsed.forEach((p) => DB.records.push(p));
           saveDB(DB);
-          showToast(`成功上传 ${parsed.length} 条成绩，已进入待审核状态`, "success");
+          showToast(`成功上传 ${parsed.length} 条成绩，已进入待审核状态${existingConfirmed > 0 ? `（保留 ${existingConfirmed} 条已确认记录）` : ""}`, "success");
           renderUploadScores();
         });
       };
@@ -1552,6 +1591,7 @@ function renderAcademicUploadScores() {
   const grade = currentUser.grade;
   const exams = DB.exams.filter((e) => e.grade === grade);
   const subjects = DB.subjects[grade] || [];
+  const showStudentId = hasRoster(grade);
 
   if (subjects.length === 0) {
     $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">⚠️</div><div class="es-title">${grade} 尚未配置学科</div><div class="es-tip">请先进行学科设置</div></div></div>`;
@@ -1762,8 +1802,11 @@ function handleAcademicExcelFile(fileList) {
       ${autoNote}
       ${conflictNote}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>班级</th><th>学号</th><th>姓名</th>${subjectNames.map((n) => `<th>${n}</th>`).join("")}<th>总分</th></tr></thead>
-        <tbody>${allParsed.slice(0, 40).map((r) => `<tr><td><b>${esc(r.classNo)}</b></td><td>${esc(r.studentId)}</td><td>${esc(r.studentName)}</td>${subjectNames.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td></tr>`).join("")}</tbody>
+        <thead><tr><th>班级</th>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th>${subjectNames.map((n) => `<th>${n}</th>`).join("")}<th>总分</th></tr></thead>
+        <tbody>${allParsed.slice(0, 40).map((r) => {
+          const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
+          return `<tr><td><b>${esc(r.classNo)}</b></td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td>${esc(r.studentName)}</td>${subjectNames.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td></tr>`;
+        }).join("")}</tbody>
       </table></div>
       ${allParsed.length > 40 ? `<p style="text-align:center;color:var(--text-light);margin-top:10px">仅显示前 40 行，共 ${allParsed.length} 行</p>` : ""}
       <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
@@ -1921,10 +1964,14 @@ function exportSummaryExcel(examId, grade) {
   });
   t1.push(["全年级", records.length, ...subjects.map((s) => +fmt(totalStats[s.name].avg)), +fmt(totalStats["总分"].avg)]);
 
+  const showStudentId = hasRoster(grade);
+  const thId = showStudentId ? ["学号"] : [];
+
   // 学生明细
-  const t2 = [["年级排名", "班级", "学号", "姓名", ...subjects.map((s) => s.name), "总分"]];
+  const t2 = [["年级排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
   records.slice().sort((a, b) => b.total - a.total).forEach((r, idx) => {
-    t2.push([idx + 1, r.classNo, r.studentId, r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
+    t2.push([idx + 1, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
   });
 
   // 统计详情
@@ -1974,7 +2021,7 @@ function renderClassRanking() {
 function drawRanking(examId, grade, classFilter = "") {
   const subjects = DB.subjects[grade] || [];
   const isAcademic = currentUser.role === "academic";
-  let records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  let records = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   if (classFilter) records = records.filter((r) => r.classNo === classFilter);
   if (records.length === 0) {
     $("rank_result").innerHTML = `<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">暂无成绩数据</div></div>`;
@@ -1982,6 +2029,7 @@ function drawRanking(examId, grade, classFilter = "") {
   }
   records.sort((a, b) => b.total - a.total);
   const stats = aggregateStats(records, subjects);
+  const showStudentId = hasRoster(grade);
 
   // 获取所有班级（用于批量下载）
   const allClasses = [...new Set(DB.records.filter((r) => r.examId === examId && r.grade === grade).map((r) => r.classNo))].sort();
@@ -1989,10 +2037,11 @@ function drawRanking(examId, grade, classFilter = "") {
   const rows = records.map((r, idx) => {
     const rank = idx + 1;
     const badge = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank;
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
     return `<tr class="${rank <= 3 ? "rank-top" : ""}">
       <td><b>${badge}</b></td>
       <td>${r.classNo}</td>
-      <td>${r.studentId}</td>
+      ${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}
       <td>${r.studentName}</td>
       ${subjects.map((s) => `<td>${r.scores[s.name] != null ? r.scores[s.name] : "-"}</td>`).join("")}
       <td><b>${r.total}</b></td>
@@ -2001,8 +2050,9 @@ function drawRanking(examId, grade, classFilter = "") {
 
   const summaryRows = subjects.map((s) => {
     const st = stats[s.name];
+    const colspan = showStudentId ? 4 : 3;
     return `<tr class="summary-row">
-      <td colspan="4" style="text-align:right"><b>${s.name} 统计</b></td>
+      <td colspan="${colspan}" style="text-align:right"><b>${s.name} 统计</b></td>
       <td colspan="${subjects.length + 1}">
         优秀 ${st.excellent}人（${fmtPct(st.excellentPct)}） ·
         良好 ${st.good}人（${fmtPct(st.goodPct)}） ·
@@ -2024,11 +2074,14 @@ function drawRanking(examId, grade, classFilter = "") {
     `;
   }
 
+  const thStudentId = showStudentId ? "<th>学号</th>" : "";
+  const tbodyRows = rows + summaryRows;
+
   $("rank_result").innerHTML = `
     <h3 style="margin:10px 0 14px">按总分排名（共 ${records.length} 名学生）</h3>
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>排名</th><th>班级</th><th>学号</th><th>姓名</th>${subjects.map((s) => `<th>${s.name}</th>`).join("")}<th>总分</th></tr></thead>
-      <tbody>${rows}${summaryRows}</tbody>
+      <thead><tr><th>排名</th><th>班级</th>${thStudentId}<th>姓名</th>${subjects.map((s) => `<th>${s.name}</th>`).join("")}<th>总分</th></tr></thead>
+      <tbody>${tbodyRows}</tbody>
     </table></div>
     <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       ${downloadBtns}
@@ -2041,22 +2094,23 @@ window.downloadAllRankingExcel = function (examId, grade) {
   const exam = DB.exams.find((e) => e.id === examId);
   if (!exam) { showToast("考试不存在", "error"); return; }
   const subjects = DB.subjects[grade] || [];
-  let records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  let records = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   if (records.length === 0) { showToast("无数据", "error"); return; }
 
-  // 按总分排序
   records.sort((a, b) => b.total - a.total);
-
   const wb = XLSX.utils.book_new();
+  const showStudentId = hasRoster(grade);
+  const thId = showStudentId ? ["学号"] : [];
 
   // Sheet 1: 全年级排名
-  const t1 = [["年级排名", "班级", "学号", "姓名", ...subjects.map((s) => s.name), "总分"]];
+  const t1 = [["年级排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
   records.forEach((r, idx) => {
-    t1.push([idx + 1, r.classNo, r.studentId, r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
+    t1.push([idx + 1, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t1), "全年级排名");
 
-  // Sheet 2: 各班均分对比
+  // Sheet 2: 各班均分对比（无学号，无改动
   const classGroups = {};
   records.forEach((r) => { if (!classGroups[r.classNo]) classGroups[r.classNo] = []; classGroups[r.classNo].push(r); });
   const classes = Object.keys(classGroups).sort();
@@ -2086,12 +2140,14 @@ window.downloadEachClassRankingExcel = function (examId, grade) {
   const exam = DB.exams.find((e) => e.id === examId);
   if (!exam) { showToast("考试不存在", "error"); return; }
   const subjects = DB.subjects[grade] || [];
-  let records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  let records = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   if (records.length === 0) { showToast("无数据", "error"); return; }
 
   const classGroups = {};
   records.forEach((r) => { if (!classGroups[r.classNo]) classGroups[r.classNo] = []; classGroups[r.classNo].push(r); });
   const classes = Object.keys(classGroups).sort();
+  const showStudentId = hasRoster(grade);
+  const thId = showStudentId ? ["学号"] : [];
 
   const wb = XLSX.utils.book_new();
 
@@ -2100,15 +2156,14 @@ window.downloadEachClassRankingExcel = function (examId, grade) {
     classRecords.sort((a, b) => b.total - a.total);
     const cs = aggregateStats(classRecords, subjects);
 
-    // Sheet名：班级排名
     const sheetName = `${c}_排名`;
-    const t1 = [["排名", "学号", "姓名", ...subjects.map((s) => s.name), "总分"]];
+    const t1 = [["排名", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
     classRecords.forEach((r, idx) => {
-      t1.push([idx + 1, r.studentId, r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
+      const rosterId = showStudentId ? getStudentIdFromRoster(grade, c, r.studentName) : "";
+      t1.push([idx + 1, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t1), sheetName);
 
-    // 班级统计Sheet
     const statName = `${c}_统计`;
     const t2 = [["学科", "均分", "最高分", "最低分", "优秀人数", "良好人数", "及格人数", "低分人数"]];
     subjects.forEach((s) => {
@@ -2125,15 +2180,18 @@ window.downloadEachClassRankingExcel = function (examId, grade) {
 window.downloadRankingExcel = function (examId, grade, classFilter) {
   const exam = DB.exams.find((e) => e.id === examId);
   const subjects = DB.subjects[grade] || [];
-  let records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  let records = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   if (classFilter) records = records.filter((r) => r.classNo === classFilter);
   if (records.length === 0) { showToast("无数据", "error"); return; }
   records.sort((a, b) => b.total - a.total);
   const stats = aggregateStats(records, subjects);
+  const showStudentId = hasRoster(grade);
+  const thId = showStudentId ? ["学号"] : [];
 
-  const t1 = [["排名", "班级", "学号", "姓名", ...subjects.map((s) => s.name), "总分"]];
+  const t1 = [["排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
   records.forEach((r, idx) => {
-    t1.push([idx + 1, r.classNo, r.studentId, r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
+    t1.push([idx + 1, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
   });
 
   const t2 = [["学科", "参考人数", "优秀人数", "优秀率", "良好人数", "良好率", "及格人数", "及格率", "低分人数", "低分率", "平均分", "最高分", "最高分人数", "最低分", "最低分人数"]];
@@ -2187,22 +2245,28 @@ function drawClassScores(examId, grade, classNo) {
   }
   records.sort((a, b) => b.total - a.total);
   const stats = aggregateStats(records, subjects);
+  const showStudentId = hasRoster(grade);
 
-  const rows = records.map((r, idx) => `<tr>
-    <td>${idx + 1}</td><td>${r.studentId}</td><td>${r.studentName}</td>
-    ${subjects.map((s) => `<td>${r.scores[s.name] != null ? r.scores[s.name] : "-"}</td>`).join("")}
-    <td><b>${r.total}</b></td>
-  </tr>`).join("");
+  const thStudentId = showStudentId ? "<th>学号</th>" : "";
+  const rows = records.map((r, idx) => {
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, r.studentName) : "";
+    return `<tr>
+      <td>${idx + 1}</td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td>${r.studentName}</td>
+      ${subjects.map((s) => `<td>${r.scores[s.name] != null ? r.scores[s.name] : "-"}</td>`).join("")}
+      <td><b>${r.total}</b></td>
+    </tr>`;
+  }).join("");
 
   const summaryRows = subjects.map((s) => {
     const st = stats[s.name];
-    return `<tr class="summary-row"><td colspan="3" style="text-align:right"><b>${s.name}</b></td>
+    const colCount = showStudentId ? 3 : 2;
+    return `<tr class="summary-row"><td colspan="${colCount}" style="text-align:right"><b>${s.name}</b></td>
       <td colspan="${subjects.length + 1}">优秀 ${st.excellent}人/${fmtPct(st.excellentPct)} · 良好 ${st.good}人/${fmtPct(st.goodPct)} · 及格 ${st.passCount}人/${fmtPct(st.passPct)} · 低分 ${st.low}人/${fmtPct(st.lowPct)} · 平均 ${fmt(st.avg)} · 最高 ${st.max}(${st.maxCount}人) · 最低 ${st.min}(${st.minCount}人)</td></tr>`;
   }).join("");
 
   $("mc_result").innerHTML = `
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>排名</th><th>学号</th><th>姓名</th>${subjects.map((s) => `<th>${s.name}</th>`).join("")}<th>总分</th></tr></thead>
+      <thead><tr><th>排名</th>${thStudentId}<th>姓名</th>${subjects.map((s) => `<th>${s.name}</th>`).join("")}<th>总分</th></tr></thead>
       <tbody>${rows}${summaryRows}</tbody>
     </table></div>
   `;
@@ -2546,155 +2610,152 @@ window.downloadTeacherRanking = function (examId, grade) {
 };
 
 // ========== 教务：发送班级成绩 ==========
+// ========== 教务：成绩审核（发送通知改为直接审核） ==========
 function renderSendScores() {
   if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
   const grade = currentUser.grade;
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
-  const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
-  const headteachers = DB.users.filter((u) => u.role === "headteacher" && u.grade === grade);
-  const subjectTeachers = DB.users.filter((u) => u.role === "teacher" && u.grade === grade);
 
-  // 检查各考试的审核状态（按班级分组）
+  // 各考试审核状态
   const examReviewStatus = exams.map((e) => {
     const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
     const total = recs.length;
     const confirmed = recs.filter((r) => r.status === "confirmed").length;
-    // 按班级统计
     const byClass = {};
     recs.forEach((r) => {
       if (!byClass[r.classNo]) byClass[r.classNo] = { total: 0, confirmed: 0 };
       byClass[r.classNo].total++;
       if (r.status === "confirmed") byClass[r.classNo].confirmed++;
     });
-    return { id: e.id, name: e.name, total, confirmed, pending: total - confirmed, allConfirmed: total > 0 && total === confirmed, byClass };
+    return {
+      id: e.id, name: e.name, total, confirmed,
+      pending: total - confirmed,
+      allConfirmed: total > 0 && total === confirmed,
+      byClass
+    };
   });
+
+  // 全部考试的汇总
+  const totalRecords = examReviewStatus.reduce((s, e) => s + e.total, 0);
+  const totalPending = examReviewStatus.reduce((s, e) => s + e.pending, 0);
+  const totalConfirmed = examReviewStatus.reduce((s, e) => s + e.confirmed, 0);
 
   $("pageContent").innerHTML = `
     <div class="card">
-      <div class="card-title">📨 发送班级成绩通知（含批量审核确认）</div>
-      <p style="color:var(--text-light); margin-bottom:16px;">选择考试后，可以先<b>一键批量确认</b>所有成绩，确认后直接发送给对应的班主任和任课教师。</p>
-      <div class="form-row">
-        <div class="form-group" style="flex:1"><label>选择考试</label><select id="ss_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select></div>
-      </div>
+      <div class="card-title">✅ 成绩审核与发布</div>
+      <p style="color:var(--text-light); margin-bottom:12px;">
+        班主任上传成绩后，在此页面<b>一键审核</b>。审核通过后，数据将<b style="color:#1a7f37">自动显示</b>在班主任和任课教师的成绩查询页面，无需手动发送。
+      </p>
 
-      <!-- 审核状态表格 -->
-      <div id="ss_review_table" class="review-status-box"></div>
-
-      <!-- 按班级发送目标 -->
-      <div id="ss_target_panel">
-        <div class="form-row">
-          <div class="form-group" style="flex:1; min-width:300px;"><label>发送给班主任</label>
-            <div class="checkbox-group">${classes.map((c) => {
-              const ht = headteachers.find((h) => classNoEquals(h.classNo, c));
-              return `<label><input type="checkbox" class="ss_ht" value="${c}" checked> ${c}（${ht ? ht.name : "未分配"}）</label>`;
-            }).join("") || `<span style="color:var(--text-light)">（暂无班级）</span>`}</div>
-          </div>
-          <div class="form-group" style="flex:1; min-width:300px;"><label>发送给任课教师</label>
-            <div class="checkbox-group">${subjectTeachers.map((t) => `<label><input type="checkbox" class="ss_tc" value="${t.id}"> ${t.name}（${(t.subjects||[]).join("、")}）</label>`).join("") || `<span style="color:var(--text-light)">（暂无任课教师）</span>`}</div>
-          </div>
+      <!-- 全部考试总览 -->
+      <div class="stats-grid">
+        <div class="stat-card ${totalPending > 0 ? "warning" : "success"}">
+          <div class="sc-label">全部考试记录</div>
+          <div class="sc-value">${totalRecords}</div>
+          <div style="font-size:12px;color:var(--text-light)">待审: <b style="color:${totalPending > 0 ? "#d35400" : "#ccc"}">${totalPending}</b> | 已确认: <b style="color:#1a7f37">${totalConfirmed}</b></div>
+        </div>
+        <div class="stat-card ${totalPending > 0 ? "warning" : "success"}" style="grid-column:span 2">
+          <div class="sc-label">一键审核全部</div>
+          <button class="btn btn-lg btn-success" id="ss_batch_confirm_all" ${totalPending === 0 ? "disabled" : ""} onclick="ssConfirmAllPending()">
+            ✅ 一键审核通过全部待审成绩（${totalPending > 0 ? totalPending + " 条" : "已全部审核"})
+          </button>
+          <div style="font-size:12px;color:var(--text-light);margin-top:6px">⚠️ 点击后所有待审记录转为"已确认"，班主任和任课教师即可查看</div>
         </div>
       </div>
-
-      <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
-        <button class="btn btn-warning" id="ss_batch_confirm">✓ 一键批量确认所有成绩</button>
-        <button class="btn btn-success" id="ss_send" disabled>📤 确认并发送</button>
-      </div>
     </div>
-    <div class="card"><div class="card-title">📜 发送历史</div>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>时间</th><th>考试</th><th>发送内容</th></tr></thead>
-        <tbody>${DB.sends.slice().reverse().slice(0, 20).map((s) => `<tr><td>${new Date(s.createdAt).toLocaleString()}</td><td>${s.examName}</td><td>${s.content}</td></tr>`).join("") || `<tr><td colspan="3"><div class="empty-state"><div class="es-tip">暂无记录</div></div></td></tr>`}</tbody>
-      </table></div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">📋 各考试审核状态</div>
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group"><label>选择考试</label>
+          <select id="ss_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select>
+        </div>
+      </div>
+      <div id="ss_review_table"></div>
+      <div style="margin-top:14px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-warning" id="ss_batch_confirm" ${totalPending === 0 ? "disabled" : ""} onclick="ssConfirmCurrentExam()">
+          ✅ 一键审核通过当前考试全部成绩
+        </button>
+      </div>
     </div>
   `;
 
-  // 更新审核状态显示
   function updateReviewStatus() {
     const examId = $("ss_exam").value;
     const status = examReviewStatus.find((s) => s.id === examId);
-    const statusTable = $("ss_review_table");
-    const sendBtn = $("ss_send");
+    const tableEl = $("ss_review_table");
     const batchBtn = $("ss_batch_confirm");
 
     if (!status || status.total === 0) {
-      statusTable.innerHTML = `<div class="review-tip warning">⚠️ 暂无成绩数据，请先让班主任上传</div>`;
-      sendBtn.disabled = true; sendBtn.innerHTML = `📤 发送（暂无数据）`;
+      tableEl.innerHTML = `<div class="review-tip warning">⚠️ 暂无成绩数据，请先让班主任上传</div>`;
       batchBtn.disabled = true;
       return;
     }
 
-    // 生成按班级的审核状态表格
     const classNames = Object.keys(status.byClass).sort();
-    let tableHTML = `<div style="margin-bottom:10px"><b>${esc(status.name)}</b>：共 <b>${status.total}</b> 条记录，已确认 <b style="color:#1a7f37">${status.confirmed}</b> 条，待审核 <b style="color:#d35400">${status.pending}</b> 条</div>`;
+    let tableHTML = `<div style="margin-bottom:8px"><b>${esc(status.name)}</b>：共 <b>${status.total}</b> 条，已确认 <b style="color:#1a7f37">${status.confirmed}</b> 条，待审核 <b style="color:#d35400">${status.pending}</b> 条</div>`;
     tableHTML += `<div class="table-wrap"><table class="data-table">
       <thead><tr><th>班级</th><th>学生数</th><th>已确认</th><th>待审核</th><th>状态</th></tr></thead>
       <tbody>`;
     classNames.forEach((c) => {
       const cs = status.byClass[c];
-      const isDone = cs.confirmed === cs.total;
-      tableHTML += `<tr><td>${esc(c)}</td><td>${cs.total}</td><td style="color:#1a7f37">${cs.confirmed}</td><td style="color:${cs.confirmed === cs.total ? "#ccc" : "#d35400"}">${cs.total - cs.confirmed}</td>
-        <td><span class="tag ${isDone ? "tag-success" : "tag-warning"}">${isDone ? "✓ 已确认" : "⏳ 待审核"}</span></td></tr>`;
+      const done = cs.confirmed === cs.total;
+      tableHTML += `<tr class="${!done ? "row-pending" : ""}">
+        <td>${esc(c)}</td>
+        <td>${cs.total}</td>
+        <td style="color:#1a7f37">${cs.confirmed}</td>
+        <td style="color:${done ? "#ccc" : "#d35400"}">${cs.total - cs.confirmed}</td>
+        <td><span class="tag ${done ? "tag-success" : "tag-warning"}">${done ? "✓ 全部已确认" : "⏳ 待审核"}</span></td>
+      </tr>`;
     });
     tableHTML += `</tbody></table></div>`;
-    statusTable.innerHTML = tableHTML;
-
-    if (!status.allConfirmed) {
-      sendBtn.disabled = true; sendBtn.innerHTML = `📤 发送（还有 ${status.pending} 条待审核）`;
-      batchBtn.disabled = false;
-    } else {
-      sendBtn.disabled = false; sendBtn.innerHTML = `📤 发送成绩通知`;
-      batchBtn.disabled = true; batchBtn.innerHTML = "✓ 全部已确认";
-    }
+    tableEl.innerHTML = tableHTML;
+    batchBtn.disabled = status.pending === 0;
+    batchBtn.innerHTML = status.pending === 0 ? "✓ 当前考试已全部审核" : `✅ 一键审核通过当前考试全部成绩（${status.pending} 条待审）`;
   }
 
   $("ss_exam").onchange = updateReviewStatus;
   updateReviewStatus();
-
-  // 一键批量确认
-  $("ss_batch_confirm").onclick = () => {
-    const examId = $("ss_exam").value;
-    showModal("确认批量审核", `<div>
-      <p>将把 <b>${esc($("ss_exam").selectedOptions[0].text)}</b> 的全部 <b>待审核</b> 成绩转为 <b>已确认</b>。</p>
-      <p style="color:#d35400;margin-top:8px">⚠️ 确认后，所有班主任和任课教师可以在各自页面看到对应数据。</p>
-    </div>`, "✓ 确认批量审核", () => {
-      const now = Date.now();
-      DB.records.forEach((r) => {
-        if (r.examId === examId && r.grade === grade && r.status === "pending") {
-          r.status = "confirmed";
-          r.confirmedAt = now;
-          r.confirmedBy = currentUser.id;
-        }
-      });
-      saveDB(DB);
-      showToast("批量审核成功，已全部确认", "success");
-      renderSendScores();
-    });
-  };
-
-  // 发送按钮
-  $("ss_send").onclick = () => {
-    const examId = $("ss_exam").value;
-    const exam = DB.exams.find((e) => e.id === examId);
-    // 重新统计（避免页面打开期间状态被其他操作改变）
-    const totalNow = DB.records.filter((r) => r.examId === examId && r.grade === grade).length;
-    const pendingNow = DB.records.filter((r) => r.examId === examId && r.grade === grade && r.status === "pending").length;
-
-    if (!exam) { showToast("请先选择考试", "error"); return; }
-    if (totalNow === 0) { showToast("暂无成绩数据", "error"); return; }
-    if (pendingNow > 0) {
-      showToast(`还有 ${pendingNow} 条待审核，请先点击「一键批量确认」`, "warning");
-      return;
-    }
-
-    const hts = [...document.querySelectorAll(".ss_ht:checked")].map((e) => e.value);
-    const tcs = [...document.querySelectorAll(".ss_tc:checked")].map((e) => e.value);
-    if (hts.length === 0 && tcs.length === 0) { showToast("请至少选择一位接收者", "error"); return; }
-    DB.sends.push({ id: uid(), examId, examName: exam.name, targets: { classes: hts, teachers: tcs }, content: `已向 ${hts.length} 位班主任和 ${tcs.length} 位任课教师推送 ${exam.name} 的成绩`, sentBy: currentUser.name, createdAt: Date.now() });
-    saveDB(DB);
-    showToast(`已发送给 ${hts.length + tcs.length} 位教师`, "success");
-    renderSendScores();
-  };
 }
+
+// 一键审核当前选中考试的所有待审记录
+window.ssConfirmCurrentExam = function () {
+  const examId = $("ss_exam").value;
+  const exam = DB.exams.find((e) => e.id === examId);
+  if (!exam) return;
+  const grade = currentUser.grade;
+  const targets = DB.records.filter((r) => r.examId === examId && r.grade === grade && r.status === "pending");
+  if (targets.length === 0) { showToast("没有待审核的记录", "info"); return; }
+
+  showModal("确认一键审核", `<div>
+    <p>将把 <b>${esc(exam.name)}</b> 的 <b style="color:#d35400">${targets.length}</b> 条待审核成绩<b style="color:#1a7f37">全部确认为已审核</b>。</p>
+    <p style="color:#1a7f37;margin-top:8px">✅ 确认后，班主任和任课教师将在各自页面自动看到这些数据。</p>
+  </div>`, "✅ 确认审核通过", () => {
+    const now = Date.now();
+    targets.forEach((r) => { r.status = "confirmed"; r.confirmedAt = now; r.confirmedBy = currentUser.id; });
+    saveDB(DB);
+    showToast(`已审核通过 ${targets.length} 条成绩，班主任和任课教师端已可查看`, "success");
+    renderSendScores();
+  });
+};
+
+// 一键审核全部考试的所有待审记录
+window.ssConfirmAllPending = function () {
+  const grade = currentUser.grade;
+  const targets = DB.records.filter((r) => r.grade === grade && r.status === "pending");
+  if (targets.length === 0) { showToast("没有待审核的记录", "info"); return; }
+
+  showModal("确认一键审核全部", `<div>
+    <p>将把 <b style="color:#d35400">${targets.length}</b> 条待审核成绩（涉及全部考试）<b style="color:#1a7f37">全部确认为已审核</b>。</p>
+    <p style="color:#1a7f37;margin-top:8px">✅ 确认后，所有班主任和任课教师将在各自页面自动看到这些数据。</p>
+  </div>`, "✅ 确认审核全部", () => {
+    const now = Date.now();
+    targets.forEach((r) => { r.status = "confirmed"; r.confirmedAt = now; r.confirmedBy = currentUser.id; });
+    saveDB(DB);
+    showToast(`已审核通过 ${targets.length} 条成绩，全员可见`, "success");
+    renderSendScores();
+  });
+};
 
 // 添加审核状态样式
 const reviewStatusStyle = document.createElement("style");
@@ -2784,6 +2845,204 @@ window.delAnnouncement = function (id) {
   renderAnnouncement();
   renderAnnouncementMgr();
 };
+
+// ========== 全年组通知弹窗（教务端可发布，全年级自动弹窗 ==========
+function renderGradeNotifications() {
+  // 只有教务和同年级教师可见
+  const isAcademic = currentUser.role === "academic";
+  const grade = currentUser.grade;
+
+  // 所有通知（同年级）
+  const notifs = (DB.gradeNotifications || []).filter((n) => n.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
+  const pendingCount = notifs.length;
+
+  $("pageContent").innerHTML = `
+    <div class="card">
+      <div class="card-title">🔔 全年组通知弹窗</div>
+      <p style="color:var(--text-light);margin-bottom:12px;">
+        ${isAcademic
+          ? `在这里发布同年级通知。发布后，该年级所有教师（班主任、任课教师）登录或刷新页面时将自动<b style="color:#dc3545">弹窗提醒</b>，直到手动关闭。`
+          : `以下是教务为${esc(grade)}发布的重要通知。您可在此查看所有历史通知，未关闭的通知将在登录/刷新时自动弹窗提醒。`
+        }
+      </p>
+    </div>
+
+    ${isAcademic ? `
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">📣 发布新通知</div>
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group" style="flex:1"><label>通知级别</label>
+          <select id="gn_level">
+            <option value="normal">普通通知（蓝色）</option>
+            <option value="important">重要通知（橙色）</option>
+            <option value="urgent">紧急通知（红色）</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label>通知标题</label>
+          <input id="gn_title" placeholder="如：关于期中考试成绩审核的通知" style="width:100%" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1"><label>通知内容</label>
+          <textarea id="gn_content" rows="4" placeholder="请输入详细内容..." style="width:100%"></textarea>
+        </div>
+      </div>
+      <div style="text-align:right;margin-top:12px">
+        <button class="btn btn-success btn-lg" id="gn_post">📣 发布通知（全年级弹窗）</button>
+      </div>
+    </div>
+    ` : ""}
+
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">📋 通知列表（共 ${notifs.length} 条）</div>
+      ${notifs.length === 0 ? `
+        <div class="empty-state"><div class="es-icon">🔕</div><div class="es-title">暂无通知</div></div>
+      ` : `
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>级别</th><th>标题</th><th>内容</th><th>发布人</th><th>发布时间</th>${isAcademic ? "<th>操作</th>" : ""}</th></tr></thead>
+          <tbody>${notifs.map((n) => {
+            const levelMap = { normal: { text: "普通", color: "#3b7ddd" }, important: { text: "重要", color: "#fd7e14" }, urgent: { text: "紧急", color: "#dc3545" } };
+            const lm = levelMap[n.level] || levelMap.normal;
+            return `<tr>
+              <td><span class="tag" style="background:${lm.color}22;color:${lm.color};border:1px solid ${lm.color}44">${lm.text}</span></td>
+              <td><b>${esc(n.title)}</b></td>
+              <td style="max-width:400px">${esc(n.content)}</td>
+              <td>${esc(n.createdBy)}</td>
+              <td>${new Date(n.createdAt).toLocaleString()}</td>
+              ${isAcademic ? `<td><button class="btn btn-sm btn-danger" onclick="delGradeNotif('${n.id}')">删除</button></td>` : ""}
+            </tr>`;
+          }).join("")}</tbody>
+        </table></div>
+      `}
+    </div>
+  `;
+
+  if (isAcademic) {
+    $("gn_post").onclick = () => {
+      const title = $("gn_title").value.trim();
+      const content = $("gn_content").value.trim();
+      const level = $("gn_level").value;
+      if (!title || !content) { showToast("请填写标题和内容", "error"); return; }
+
+      DB.gradeNotifications.push({
+        id: "gn_" + Date.now(),
+        grade: grade,
+        title, content, level,
+        createdBy: currentUser.name,
+        createdAt: Date.now()
+      });
+      // 清除所有用户对该年级的 dismissed 记录，确保所有人都能看到新通知
+      DB.dismissedNotifications = DB.dismissedNotifications || {};
+      saveDB(DB);
+      showToast("✅ 通知已发布！全年级教师将收到弹窗提醒", "success");
+      $("gn_title").value = "";
+      $("gn_content").value = "";
+      renderGradeNotifications();
+    };
+  }
+}
+
+window.delGradeNotif = function (id) {
+  showModal("确认删除", `<p>删除此通知后，所有用户都将不再弹窗显示此条通知。确认删除？</p>`, "🗑️ 删除", () => {
+    DB.gradeNotifications = DB.gradeNotifications.filter((n) => n.id !== id);
+    saveDB(DB);
+    showToast("已删除", "success");
+    renderGradeNotifications();
+  });
+};
+
+// 检查并弹出全年组通知（在页面加载/每次导航后调用
+function checkGradeNotifications() {
+  if (!currentUser) return;
+  const grade = currentUser.grade;
+  DB.dismissedNotifications = DB.dismissedNotifications || {};
+  if (!DB.dismissedNotifications[currentUser.id]) {
+    DB.dismissedNotifications[currentUser.id] = {};
+  }
+
+  // 找出当前年级未被当前用户关闭的通知（按重要性排序：urgent > important > normal
+  const notifs = (DB.gradeNotifications || [])
+    .filter((n) => n.grade === grade && !DB.dismissedNotifications[currentUser.id][n.id])
+    .sort((a, b) => {
+      const order = { urgent: 0, important: 1, normal: 2 };
+      return (order[a.level] ?? 2) - (order[b.level] ?? 2) || b.createdAt - a.createdAt;
+    });
+
+  if (notifs.length === 0) return;
+
+  // 弹出通知
+  showGradeNotificationPopup(notifs, 0);
+}
+
+// 逐个弹出通知（一个接一个
+function showGradeNotificationPopup(notifs, idx) {
+  if (idx >= notifs.length) {
+    saveDB(DB);
+    return;
+  }
+  const n = notifs[idx];
+  const levelMap = {
+    normal: { icon: "📢", color: "#3b7ddd", text: "普通通知" },
+    important: { icon: "⚠️", color: "#fd7e14", text: "重要通知" },
+    urgent: { icon: "🚨", color: "#dc3545", text: "紧急通知" }
+  };
+  const lm = levelMap[n.level] || levelMap.normal;
+
+  // 创建自定义弹窗（用 showModal 不可控，这里用自定义）
+  const modalId = "gradeNotifModal";
+  const existing = document.getElementById(modalId);
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.id = modalId;
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.55);z-index:99999;
+    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);
+  `;
+  modal.innerHTML = `
+    <div style="
+      background:#fff;border-radius:14px;padding:28px 32px;width:90%;max-width:540px;
+      box-shadow:0 20px 60px rgba(0,0,0,0.25);border:3px solid ${lm.color};
+      animation:notifPop 0.3s ease;
+    ">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span style="font-size:38px">${lm.icon}</span>
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+            <h3 style="margin:0;color:${lm.color};font-size:18px">${esc(n.title)}</h3>
+            <span class="tag" style="background:${lm.color}22;color:${lm.color};border:1px solid ${lm.color}44;font-size:11px">${lm.text}</span>
+          </div>
+          <div style="color:#999;font-size:12px">发布人：${esc(n.createdBy)}　·　${new Date(n.createdAt).toLocaleString()}　·　第 ${idx + 1}/${notifs.length} 条</div>
+        </div>
+      </div>
+      <div style="background:${lm.color}08;padding:16px;border-radius:8px;margin:12px 0;line-height:1.7;color:#333;font-size:14px">
+        ${esc(n.content).replace(/\n/g, "<br/>")}
+      </div>
+      <div style="text-align:right;margin-top:16px">
+        <button class="btn btn-primary" id="gnCloseBtn" style="background:${lm.color};border-color:${lm.color}">我已知晓，关闭通知</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  // 添加动画样式（如果还没有
+  if (!document.getElementById("gnAnimStyle")) {
+    const s = document.createElement("style");
+    s.id = "gnAnimStyle";
+    s.textContent = `@keyframes notifPop { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }`;
+    document.head.appendChild(s);
+  }
+
+  $("gnCloseBtn").onclick = () => {
+    DB.dismissedNotifications[currentUser.id][n.id] = true;
+    saveDB(DB);
+    modal.remove();
+    // 继续弹出下一条
+    setTimeout(() => showGradeNotificationPopup(notifs, idx + 1), 200);
+  };
+}
 
 // ========== 智能对比分析 ==========
 // 获取所有考试列表（按时间排序）
@@ -3026,6 +3285,7 @@ function renderHeadteacherAnalysis() {
   if (exams.length === 0) { $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📊</div><div class="es-title">暂无考试</div><div class="es-tip">请先上传成绩</div></div></div>`; return; }
 
   const subjects = DB.subjects[grade] || [];
+  const showStudentId = hasRoster(grade);
   const examOptions = exams.map((e, i) => `<option value="${e.id}" ${i === exams.length - 1 ? "selected" : ""}>${esc(e.name)}</option>`).join("");
 
   $("pageContent").innerHTML = `
@@ -3107,8 +3367,8 @@ function refreshHeadteacherAnalysis() {
   if (last2.length >= 2) {
     const [prevExam, currExam] = last2;
     const prevMap = {};
-    DB.records.filter((r) => r.examId === prevExam.id && r.classNo === classNo).forEach((r) => { prevMap[r.studentId] = r; });
-    const currRows = DB.records.filter((r) => r.examId === currExam.id && r.classNo === classNo);
+    getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && r.classNo === classNo)).forEach((r) => { prevMap[r.studentId] = r; });
+    const currRows = getVisibleRecords(DB.records.filter((r) => r.examId === currExam.id && r.classNo === classNo));
     const studentRows = currRows.map((r) => {
       const prev = prevMap[r.studentId];
       const diff = prev ? r.total - prev.total : null;
@@ -3124,20 +3384,23 @@ function refreshHeadteacherAnalysis() {
 
     studentCard = `<div class="card"><div class="card-title">👨‍🎓 本班学生进步/退步分析（${esc(prevExam.name)} → ${esc(currExam.name)}）</div>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>排名</th><th>学号</th><th>姓名</th><th>上次总分</th><th>本次总分</th><th>变化</th></tr></thead>
-        <tbody>${studentRows.map((r, idx) => `<tr>
-          <td>${idx + 1}</td><td>${esc(r.studentId)}</td><td><b>${esc(r.studentName)}</b></td>
-          <td>${r.prevTotal != null ? r.prevTotal : "-"}</td><td><b>${r.total}</b></td>
-          <td style="color:${r.diff == null ? '#999' : r.diff > 0 ? 'green' : r.diff < 0 ? 'red' : '#333'}">
-            <b>${r.diff == null ? '-' : (r.diff > 0 ? '▲+' : '▼') + r.diff}</b>
-          </td>
-        </tr>`).join("")}</tbody>
+        <thead><tr><th>排名</th>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th><th>上次总分</th><th>本次总分</th><th>变化</th></tr></thead>
+        <tbody>${studentRows.map((r, idx) => {
+          const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, r.studentName) : "";
+          return `<tr>
+            <td>${idx + 1}</td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(r.studentName)}</b></td>
+            <td>${r.prevTotal != null ? r.prevTotal : "-"}</td><td><b>${r.total}</b></td>
+            <td style="color:${r.diff == null ? '#999' : r.diff > 0 ? 'green' : r.diff < 0 ? 'red' : '#333'}">
+              <b>${r.diff == null ? '-' : (r.diff > 0 ? '▲+' : '▼') + r.diff}</b>
+            </td>
+          </tr>`;
+        }).join("")}</tbody>
       </table></div></div>`;
   }
   $("ht_student_card").innerHTML = studentCard;
 
   // 班级详细统计
-  const recs = DB.records.filter((r) => r.examId === selectedExam.id && r.classNo === classNo);
+  const recs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.classNo === classNo));
   const detailRows = subjects.map((s) => {
     const st = aggregateStats(recs, [s])[s.name];
     return `<tr><td><b>${esc(s.name)}</b></td><td>${fmt(st.avg, 2)}</td><td>${st.total}</td>
@@ -3280,10 +3543,13 @@ window._downloadMySubject = function (subjectName, grade, teacherId) {
   const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))]
     .filter((c) => teacherTeaches(teacher, grade, c, subjectName));
   const filtered = getVisibleRecords(DB.records.filter((r) => r.grade === grade && myClasses.indexOf(r.classNo) >= 0 && r.scores[subjectName] != null));
-  const rows = [["考试", "班级", "学号", "姓名", subjectName]];
+  const showStudentId = hasRoster(grade);
+  const thId = showStudentId ? ["学号"] : [];
+  const rows = [["考试", "班级", ...thId, "姓名", subjectName]];
   filtered.forEach((r) => {
     const exam = DB.exams.find((e) => e.id === r.examId);
-    rows.push([exam ? exam.name : "-", r.classNo, r.studentId, r.studentName, r.scores[subjectName]]);
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
+    rows.push([exam ? exam.name : "-", r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, r.scores[subjectName]]);
   });
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), subjectName);
@@ -3467,7 +3733,7 @@ window.downloadTeacherAnalysis = function () {
     myClasses.forEach((c) => {
       const row = [s, c];
       exams.forEach((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
+        const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === c));
         const vals = recs.map((r) => r.scores[s]).filter((v) => v != null);
         row.push(vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-");
       });
@@ -3501,6 +3767,7 @@ function renderExamCompare() {
   const isAcademic = role === "academic";
   const isHeadteacher = role === "headteacher";
   const classNo = isHeadteacher ? currentUser.classNo : null;
+  const showStudentId = hasRoster(grade);
 
   // 考试选择（支持拖拽排序）
   const examChips = exams.map((e, i) => `
@@ -3754,9 +4021,9 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
 
   // 获取学生数据
   const firstMap = {};
-  DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).forEach((r) => { firstMap[r.studentId] = r; });
+  getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
 
-  const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
+  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
   const students = lastRecs.map((r) => {
     const first = firstMap[r.studentId];
     const firstTotal = first && typeof first.total === 'number' ? first.total : null;
@@ -3765,8 +4032,8 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   }).sort((a, b) => (b.diff || 0) - (a.diff || 0));
 
   // 计算班级/年级排名
-  const allFirst = DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).sort((a, b) => b.total - a.total);
-  const allLast = DB.records.filter((r) => r.examId === lastExam.id && r.grade === grade).sort((a, b) => b.total - a.total);
+  const allFirst = getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).sort((a, b) => b.total - a.total);
+  const allLast = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && r.grade === grade)).sort((a, b) => b.total - a.total);
 
   students.forEach((s) => {
     const firstIdx = allFirst.findIndex((x) => x.studentId === s.studentId);
@@ -3777,14 +4044,16 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   });
 
   // 进步榜
+  const thId = showStudentId ? "<th>学号</th>" : "";
   let html = `<div class="cmp-section-title">🏆 进步最快 TOP 10（${esc(firstExam.name)} → ${esc(lastExam.name)}）</div>`;
   html += `<div class="cmp-table-wrap"><table class="cmp-table">
-    <thead><tr><th>排名</th><th>班级</th><th>学号</th><th>姓名</th><th>首次</th><th>最近</th><th>涨幅</th><th>首次排名</th><th>最近排名</th><th>排名变化</th></tr></thead><tbody>`;
+    <thead><tr><th>排名</th><th>班级</th>${thId}<th>姓名</th><th>首次</th><th>最近</th><th>涨幅</th><th>首次排名</th><th>最近排名</th><th>排名变化</th></tr></thead><tbody>`;
   students.slice(0, 10).forEach((s, idx) => {
     const color = s.diff > 0 ? "var(--success)" : s.diff < 0 ? "var(--danger)" : "var(--text-light)";
     const rankColor = s.rankChange > 0 ? "var(--success)" : s.rankChange < 0 ? "var(--danger)" : "var(--text-light)";
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, s.classNo, s.studentName) : "";
     html += `<tr>
-      <td>${idx + 1}</td><td>${esc(s.classNo)}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td>
+      <td>${idx + 1}</td><td>${esc(s.classNo)}</td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(s.studentName)}</b></td>
       <td>${s.firstTotal || "-"}</td><td><b>${s.total}</b></td>
       <td style="color:${color};font-weight:bold">${s.diff != null ? (s.diff > 0 ? "+" : "") + s.diff : "-"}</td>
       <td>${s.firstRank || "-"}</td><td>${s.lastRank || "-"}</td>
@@ -3796,12 +4065,13 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   // 退步榜
   html += `<div class="cmp-section-title" style="margin-top:24px">⚠️ 需关注学生 TOP 10（退步较大）</div>`;
   html += `<div class="cmp-table-wrap"><table class="cmp-table">
-    <thead><tr><th>排名</th><th>班级</th><th>学号</th><th>姓名</th><th>首次</th><th>最近</th><th>跌幅</th><th>首次排名</th><th>最近排名</th><th>排名变化</th></tr></thead><tbody>`;
+    <thead><tr><th>排名</th><th>班级</th>${thId}<th>姓名</th><th>首次</th><th>最近</th><th>跌幅</th><th>首次排名</th><th>最近排名</th><th>排名变化</th></tr></thead><tbody>`;
   students.slice(-10).reverse().forEach((s, idx) => {
     const color = "var(--danger)";
     const rankColor = s.rankChange > 0 ? "var(--success)" : s.rankChange < 0 ? "var(--danger)" : "var(--text-light)";
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, s.classNo, s.studentName) : "";
     html += `<tr>
-      <td>${idx + 1}</td><td>${esc(s.classNo)}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td>
+      <td>${idx + 1}</td><td>${esc(s.classNo)}</td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(s.studentName)}</b></td>
       <td>${s.firstTotal || "-"}</td><td><b>${s.total}</b></td>
       <td style="color:${color};font-weight:bold">${s.diff != null ? s.diff : "-"}</td>
       <td>${s.firstRank || "-"}</td><td>${s.lastRank || "-"}</td>
@@ -3814,9 +4084,10 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   const stableStudents = students.filter((s) => s.diff != null && Math.abs(s.diff) <= 5).sort((a, b) => Math.abs(a.diff) - Math.abs(b.diff));
   html += `<div class="cmp-section-title" style="margin-top:24px">🎯 成绩稳定学生（波动 ≤5分）</div>`;
   html += `<div class="cmp-table-wrap"><table class="cmp-table">
-    <thead><tr><th>班级</th><th>学号</th><th>姓名</th><th>首次</th><th>最近</th><th>波动</th><th>趋势</th></tr></thead><tbody>`;
+    <thead><tr><th>班级</th>${thId}<th>姓名</th><th>首次</th><th>最近</th><th>波动</th><th>趋势</th></tr></thead><tbody>`;
   stableStudents.slice(0, 10).forEach((s) => {
-    html += `<tr><td>${esc(s.classNo)}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td><td>${s.firstTotal || "-"}</td><td>${s.total}</td><td>${Math.abs(s.diff)}</td><td>➡️</td></tr>`;
+    const rosterId = showStudentId ? getStudentIdFromRoster(grade, s.classNo, s.studentName) : "";
+    html += `<tr><td>${esc(s.classNo)}</td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(s.studentName)}</b></td><td>${s.firstTotal || "-"}</td><td>${s.total}</td><td>${Math.abs(s.diff)}</td><td>➡️</td></tr>`;
   });
   html += `</tbody></table></div>`;
 
@@ -3824,13 +4095,13 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   if (isAcademic && !classNo) {
     html += `<div class="cmp-section-title" style="margin-top:24px">👥 每班所有学生详细分析</div>`;
 
-    const allClasses = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+    const allClasses = [...new Set(getVisibleRecords(DB.records.filter((r) => r.grade === grade)).map((r) => r.classNo))].sort();
     const allStudentsByClass = {};
 
     // 获取所有学生在所有考试中的数据
     const studentExamData = {};
     selectedExams.forEach((exam) => {
-      DB.records.filter((r) => r.examId === exam.id && r.grade === grade).forEach((r) => {
+      getVisibleRecords(DB.records.filter((r) => r.examId === exam.id && r.grade === grade)).forEach((r) => {
         if (!studentExamData[r.studentId]) {
           studentExamData[r.studentId] = { studentId: r.studentId, studentName: r.studentName, classNo: r.classNo, exams: {} };
         }
@@ -3852,7 +4123,7 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
       html += `<div class="cmp-subject-card">
         <div class="cmp-section-title">🏫 ${esc(c)}（${classStudents.length}人）</div>
         <div class="cmp-table-wrap" style="max-height:300px;overflow-y:auto"><table class="cmp-table">
-          <thead><tr><th>排名</th><th>学号</th><th>姓名</th>${examLabels.map((e) => `<th>${esc(e)}</th>`).join("")}<th>总涨跌幅</th></tr></thead>
+          <thead><tr><th>排名</th>${thId}<th>姓名</th>${examLabels.map((e) => `<th>${esc(e)}</th>`).join("")}<th>总涨跌幅</th></tr></thead>
           <tbody>`;
 
       classStudents.forEach((s, idx) => {
@@ -3860,9 +4131,10 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
         const lastTotal = s.exams[lastExam.id]?.total;
         const diff = firstTotal != null && lastTotal != null ? lastTotal - firstTotal : null;
         const diffColor = diff > 0 ? "var(--success)" : diff < 0 ? "var(--danger)" : "var(--text-light)";
+        const rosterId = showStudentId ? getStudentIdFromRoster(grade, c, s.studentName) : "";
 
         html += `<tr>
-          <td>${idx + 1}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td>
+          <td>${idx + 1}</td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(s.studentName)}</b></td>
           ${selectedExams.map((e) => `<td>${s.exams[e.id]?.total ?? "-"}</td>`).join("")}
           <td style="color:${diffColor};font-weight:bold">${diff != null ? (diff > 0 ? "+" : "") + diff : "-"}</td>
         </tr>`;
@@ -4047,13 +4319,13 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
 
   // 班级综合对比图表
   if (activeTab === "tab_class") {
-    const classes = classNo ? [classNo] : [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+    const classes = classNo ? [classNo] : [...new Set(getVisibleRecords(DB.records.filter((r) => r.grade === grade)).map((r) => r.classNo))].sort();
 
     // 各班均分对比柱状图
     const classAvgDatasets = classes.map((c) => ({
       label: c,
       data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
+        const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === c));
         if (!recs.length) return null;
         const totals = recs.map((r) => r.total);
         return +fmt(totals.reduce((a, b) => a + b, 0) / totals.length, 2);
@@ -4072,9 +4344,9 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
 
     // 获取所有学生数据
     const firstMap = {};
-    DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).forEach((r) => { firstMap[r.studentId] = r; });
+    getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
 
-    const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
+    const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo)));
     const students = lastRecs.map((r) => {
       const first = firstMap[r.studentId];
       const firstTotal = first && typeof first.total === 'number' ? first.total : null;
@@ -4098,8 +4370,8 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     }
 
     // 排名变化分布
-    const allFirst = DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).sort((a, b) => b.total - a.total);
-    const allLast = DB.records.filter((r) => r.examId === lastExam.id && r.grade === grade).sort((a, b) => b.total - a.total);
+    const allFirst = getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).sort((a, b) => b.total - a.total);
+    const allLast = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && r.grade === grade)).sort((a, b) => b.total - a.total);
 
     const rankChanges = [];
     students.forEach((s) => {
@@ -4124,7 +4396,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
       const subjDatasets = subjects.map((s) => ({
         label: s.name,
         data: selectedExams.map((e) => {
-          const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+          const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)));
           if (!recs.length) return null;
           const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
           return vals.length ? +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : null;
@@ -4198,14 +4470,14 @@ window.downloadExamCompare = function () {
   const wb = XLSX.utils.book_new();
 
   // Sheet 1: 班级综合对比
-  const classes = classNo ? [classNo] : [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+  const classes = classNo ? [classNo] : [...new Set(getVisibleRecords(DB.records.filter((r) => r.grade === grade)).map((r) => r.classNo))].sort();
   const classHeader1 = ["班级", "考试人数", ...examLabels.flatMap((e) => [e + "-均分", e + "-最高", e + "-最低", e + "-标准差", e + "-及格率"])];
   const classData1 = [];
   classes.forEach((c) => {
     const row = [c];
     let firstCount = 0;
     selectedExams.forEach((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
+      const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === c));
       if (recs.length) {
         if (!firstCount) firstCount = recs.length;
         const totals = recs.map((r) => r.total);
@@ -4226,11 +4498,11 @@ window.downloadExamCompare = function () {
   const firstExam = selectedExams[0];
   const lastExam = selectedExams[selectedExams.length - 1];
   const firstMap = {};
-  DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade).forEach((r) => { firstMap[r.studentId] = r; });
-  const lastRecs = DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
+  getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
+  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo)));
   const studentHeader = ["学号", "姓名", `${firstExam.name}总分`, `${lastExam.name}总分`, "涨幅", "首次排名", "最近排名", "排名变化"];
-  const allFirst = DB.records.filter((x) => x.examId === firstExam.id && x.grade === grade).sort((a, b) => b.total - a.total);
-  const allLast = DB.records.filter((x) => x.examId === lastExam.id && x.grade === grade).sort((a, b) => b.total - a.total);
+  const allFirst = getVisibleRecords(DB.records.filter((x) => x.examId === firstExam.id && x.grade === grade)).sort((a, b) => b.total - a.total);
+  const allLast = getVisibleRecords(DB.records.filter((x) => x.examId === lastExam.id && x.grade === grade)).sort((a, b) => b.total - a.total);
   const studentData = lastRecs.map((r) => {
     const first = firstMap[r.studentId];
     const firstTotal = first && typeof first.total === 'number' ? first.total : null;
@@ -4248,7 +4520,7 @@ window.downloadExamCompare = function () {
   const subjData = subjects.map((s) => {
     const row = [s.name];
     selectedExams.forEach((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)));
       if (recs.length) {
         const st = aggregateStats(recs, [s])[s.name];
         row.push(fmt(st.avg, 2), fmtPct(st.passPct), fmtPct(st.excellentPct), fmtPct(st.goodPct), fmtPct(st.lowPct), st.total);
@@ -4263,9 +4535,9 @@ window.downloadExamCompare = function () {
   // Sheet 4: 趋势数据
   const trendHeader = ["指标", ...examLabels];
   const trendData = [
-    ["总分均分", ...selectedExams.map((e) => { const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)); return recs.length ? fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2) : "-"; })],
-    ["总分标准差", ...selectedExams.map((e) => { const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)); return recs.length ? fmt(mathStdDev(recs.map((r) => r.total)), 2) : "-"; })],
-    ...subjects.map((s) => [s.name + "均分", ...selectedExams.map((e) => { const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)); const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number"); return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-"; })])
+    ["总分均分", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo))); return recs.length ? fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2) : "-"; })],
+    ["总分标准差", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo))); return recs.length ? fmt(mathStdDev(recs.map((r) => r.total)), 2) : "-"; })],
+    ...subjects.map((s) => [s.name + "均分", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo))); const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number"); return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-"; })])
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([trendHeader, ...trendData]), "趋势数据");
 
@@ -4341,12 +4613,12 @@ function renderGroupManage() {
       <button class="btn btn-sm btn-danger" onclick="clearAllGroups()">清空全部</button>
     </div>
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>学号</th><th>姓名</th><th>小组</th><th>操作</th></tr></thead>
-      <tbody>${groups.map((g, i) => `<tr>
-        <td>${esc(g.studentId)}</td><td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td>
-        <td><button class="btn btn-sm btn-danger" onclick="deleteGroupMember(${i})">删除</button></td>
-      </tr>`).join("")}</tbody>
-    </table></div></div>
+      <thead><tr>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th><th>小组</th><th>操作</th></tr></thead>
+      <tbody>${groups.map((g, i) => {
+        const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
+        return `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td>
+        <td><button class="btn btn-sm btn-danger" onclick="deleteGroupMember(${i})">删除</button></td></tr>`;
+      }).join("")}</tbody></table></div></div>
     <div class="card"><div class="card-title">📊 小组统计</div>
     ${renderGroupStats(groups)}
     </div>` : "";
@@ -4444,15 +4716,17 @@ function renderGroupManage() {
     html += `</tbody></table></div>`;
 
     // 小组成员详情
+    const thId = showStudentId ? "<th>学号</th>" : "";
     html += `<div class="cmp-section-title">👨‍🎓 小组成员成绩明细</div>
       <div class="cmp-table-wrap"><table class="cmp-table">
-      <thead><tr><th>学号</th><th>姓名</th><th>小组</th><th>总分</th>`;
+      <thead><tr>${thId}<th>姓名</th><th>小组</th><th>总分</th>`;
     subjects.forEach((s) => html += `<th>${esc(s.name)}</th>`);
     html += `</tr></thead><tbody>`;
 
     groups.forEach((g) => {
       const rec = DB.records.find((r) => r.examId === examId && r.classNo === classNo && r.studentId === g.studentId);
-      html += `<tr><td>${esc(g.studentId)}</td><td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td><td><b>${rec?.total || "-"}</b></td>`;
+      const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
+      html += `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td><td><b>${rec?.total || "-"}</b></td>`;
       subjects.forEach((s) => {
         const score = rec?.scores[s.name];
         html += `<td>${typeof score === "number" ? score : "-"}</td>`;
@@ -4553,6 +4827,7 @@ function renderGroupScores() {
   const grade = currentUser.grade;
   const mySubjects = currentUser.subjects || [];
   const exams = getSortedExams(grade);
+  const showStudentId = hasRoster(grade);
 
   if (exams.length === 0) {
     $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📝</div><div class="es-title">暂无考试数据</div></div></div>`;
@@ -5291,7 +5566,7 @@ function renderScoreReview() {
 
   $("pageContent").innerHTML = `
     <div class="card">
-      <div class="card-title">✅ ${grade} 成绩审核与总览</div>
+      <div class="card-title">✅ ${grade} 成绩审核与总览（复审：一键确认）</div>
       <p style="color:var(--text-light);margin-bottom:16px">对班主任上传的成绩进行审核、修改、删除操作。支持<b>批量确认</b>和<b>一键退回</b>。</p>
     </div>
 
@@ -5437,6 +5712,7 @@ function refreshScoreReview() {
 
   const classes = Object.keys(classGroups).sort();
   const subjects = DB.subjects[grade] || [];
+  const showStudentId = hasRoster(grade);
 
   let html = `<div class="card" style="background:rgba(52,152,219,0.06);border:1px solid rgba(52,152,219,0.2);padding:14px;margin-bottom:10px">
     <span style="font-size:13px;color:#2c3e50">
@@ -5454,21 +5730,22 @@ function refreshScoreReview() {
       <button class="btn btn-sm btn-danger" onclick="rejectClassScores('${examId}','${esc(c)}')" style="margin-left:6px">🗑️ 一键退回本班级</button>
     </div>
     <div class="cmp-table-wrap"><table class="cmp-table">
-      <thead><tr><th><input type="checkbox" onchange="toggleAllReview(this,'${esc(c)}')" /></th><th>学号</th><th>姓名</th>${subjects.map((s) => `<th>${esc(s.name)}</th>`).join("")}<th>总分</th><th>状态</th><th>操作</th></tr></thead>
+      <thead><tr><th><input type="checkbox" onchange="toggleAllReview(this,'${esc(c)}')" /></th>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th>${subjects.map((s) => `<th>${esc(s.name)}</th>`).join("")}<th>总分</th><th>状态</th><th>操作</th></tr></thead>
       <tbody>`;
 
     recs.forEach((r) => {
       const isPending = r.status === "pending";
+      const rosterId = showStudentId ? getStudentIdFromRoster(grade, c, r.studentName) : "";
       html += `<tr class="${isPending ? "row-pending" : ""}">
         <td><input type="checkbox" class="review-cb" data-recordid="${r.id}" data-class="${esc(c)}" ${isPending ? "" : "disabled"} /></td>
-        <td>${esc(r.studentId)}</td>
+        ${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}
         <td><b>${esc(r.studentName)}</b></td>
         ${subjects.map((s) => `<td>
           <input type="number" class="score-input" value="${r.scores[s.name] ?? ""}"
             data-studentid="${esc(r.studentId)}" data-subject="${esc(s.name)}"
             style="width:60px" onchange="window.updateScoreInline('${r.id}','${esc(s.name)}',this)" />
         </td>`).join("")}
-        <td><b>${r.total}</b></td>
+        <td class="total-cell"><b>${r.total}</b></td>
         <td><span class="tag tag-${isPending ? "warning" : "success"}">${isPending ? "⏳待审" : "✓已确认"}</span></td>
         <td>
           <button class="btn btn-sm btn-success" onclick="confirmOneScore('${r.id}')" ${!isPending ? "disabled" : ""}>✓确认</button>
@@ -5496,10 +5773,10 @@ window.updateScoreInline = function (recordId, subjectName, inputEl) {
     Object.values(record.scores).forEach((v) => { if (typeof v === "number" && !isNaN(v)) total += v; });
     record.total = total;
     saveDB(DB);
-    // 找到对应总分单元更新显示
+    // 找到对应总分单元更新显示（通过 class 精确查找，避免列数变化导致位置错误）
     const row = inputEl.closest("tr");
     if (row) {
-      const totalCell = row.children[row.children.length - 2];
+      const totalCell = row.querySelector(".total-cell");
       if (totalCell) totalCell.innerHTML = `<b>${total}</b>`;
     }
     showToast("已更新", "success");
@@ -5509,6 +5786,11 @@ window.updateScoreInline = function (recordId, subjectName, inputEl) {
     Object.values(record.scores).forEach((v) => { if (typeof v === "number" && !isNaN(v)) total += v; });
     record.total = total;
     saveDB(DB);
+    const row = inputEl.closest("tr");
+    if (row) {
+      const totalCell = row.querySelector(".total-cell");
+      if (totalCell) totalCell.innerHTML = `<b>${total}</b>`;
+    }
   } else {
     showToast("分数无效", "warning");
   }
