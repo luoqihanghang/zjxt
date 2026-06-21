@@ -4023,7 +4023,7 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   const firstMap = {};
   getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
 
-  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo));
+  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo)));
   const students = lastRecs.map((r) => {
     const first = firstMap[r.studentId];
     const firstTotal = first && typeof first.total === 'number' ? first.total : null;
