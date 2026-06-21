@@ -155,6 +155,7 @@ const NAV_MENUS = {
     },
     {
       group: "成绩汇总", icon: "📈", items: [
+        { id: "academic_upload_scores", icon: "📥", text: "上传全年级成绩（教务）" },
         { id: "grade_summary", icon: "📈", text: "年级成绩汇总" },
         { id: "class_ranking", icon: "🏆", text: "全年级排名" },
         { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" }
@@ -357,14 +358,20 @@ function updateSyncBadge() {
   if (!badge) return;
   const gs = window.GitHubService;
   if (!gs) return;
-  badge.innerHTML = gs.getStatusHTML();
+  const cfg = gs.config;
+  if (gs.isConfigured()) {
+    badge.innerHTML = `🔗 已连接（主 Gist：${(cfg.configGistId || "").substring(0, 8)}…）`;
+    badge.style.background = "#e8f7ec";
+    badge.style.color = "#2b8a3e";
+  } else {
+    badge.innerHTML = "🔗 未配置";
+    badge.style.background = "#fff4e6";
+    badge.style.color = "#d9480f";
+  }
 }
 
 window.openGithubSetup = function () {
-  GitHubService.showSetupModal(() => {
-    updateSyncBadge();
-    if (DB) GitHubService.saveRemoteDB(DB);
-  });
+  GitHubService.showLoginSetup();
 };
 
 // ========== GitHub 数据管理页面 ==========
@@ -372,14 +379,21 @@ function renderGithubData() {
   if (currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
   const gs = window.GitHubService;
   const cfg = gs.config;
-  const log = gs.syncLog;
 
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">🔗 Gist 数据存储配置</div>
       <div class="form-row">
         <div class="form-group"><label>GitHub Token</label><input type="password" id="gd_token" value="${cfg.token || ""}" placeholder="ghp_xxxxx" /></div>
-        <div class="form-group"><label>Gist ID</label><input id="gd_gist_id" value="${cfg.gistId || ""}" placeholder="a1b2c3d4e5f6...（留空则保存时自动创建）" /></div>
+        <div class="form-group"><label>主 Gist ID（配置存储，永久不变）</label><input id="gd_config_id" value="${cfg.configGistId || ""}" placeholder="a1b2c3d4e5f6…" /></div>
+      </div>
+      <div class="form-row">
+        ${[1, 2, 3, 4, 5].map(i => `
+          <div class="form-group">
+            <label>业务 Gist ID #${i}${i === 1 ? "（当前活跃）" : "（归档）"}</label>
+            <input class="gd_data_id_${i}" value="${cfg.dataGistIds[i - 1] || ""}" placeholder="留空则首次上传时自动创建" />
+          </div>
+        `).join("")}
       </div>
       <div style="font-size:13px;color:var(--text-light);margin:4px 0 12px 0">
         💡 在 Gist URL https://gist.github.com/username/<b>最后一段</b> 就是 Gist ID。
@@ -395,22 +409,11 @@ function renderGithubData() {
     <div class="card">
       <div class="card-title">📊 同步状态</div>
       <div id="gd_sync_info" style="padding:12px;background:#f8f9fc;border-radius:8px;font-size:13px;color:var(--text-light)">
-        <p>• 当前状态：${gs.isConfigured() ? `<b style="color:var(--success)">✅ 已配置</b>` : `<b style="color:var(--danger)">⚠️ 未配置</b>`}</p>
+        <p>• 当前状态：${gs.isConfigured() ? `<b style="color:#2b8a3e">✅ 已配置</b>` : `<b style="color:#d9480f">⚠️ 未配置</b>`}</p>
         <p>• Token：${cfg.token ? "✅ 已设置" : "❌ 未设置"}</p>
-        <p>• Gist ID：<code>${cfg.gistId || "未设置（保存时自动创建）"}</code></p>
+        <p>• 主 Gist ID：<code>${cfg.configGistId || "未设置"}</code></p>
+        <p>• 业务 Gist：<code>${cfg.dataGistIds.length ? cfg.dataGistIds.join("、") : "未设置（首次上传时自动创建）"}</code></p>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">📋 同步日志（最近 30 条）</div>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>时间</th><th>类型</th><th>消息</th></tr></thead>
-        <tbody>${log.map((l) => `<tr>
-          <td>${l.time}</td>
-          <td><span class="badge badge-${l.type === "success" ? "success" : l.type === "error" ? "danger" : l.type === "warn" ? "warning" : "primary"}">${l.type}</span></td>
-          <td>${l.msg}</td>
-        </tr>`).join("") || `<tr><td colspan="3"><div class="empty-state"><div class="es-tip">暂无日志</div></div></td></tr>`}</tbody>
-      </table></div>
     </div>
 
     <div class="card">
@@ -427,8 +430,16 @@ function renderGithubData() {
 
   $("gd_save").onclick = () => {
     const token = $("gd_token").value.trim();
-    const gistId = $("gd_gist_id").value.trim();
-    gs.saveGistConfig(token, gistId);
+    const configGistId = $("gd_config_id").value.trim();
+    gs.saveGistConfig(token, configGistId, null);
+    // 收集所有业务 Gist ID
+    const dataGistIds = [];
+    for (let i = 1; i <= 5; i++) {
+      const el = document.querySelector(".gd_data_id_" + i);
+      if (el && el.value.trim()) dataGistIds.push(el.value.trim());
+    }
+    gs.config.dataGistIds = dataGistIds;
+    localStorage.setItem("gh_data_gist_ids", JSON.stringify(dataGistIds));
     showToast("配置已保存", "success");
     updateSyncBadge();
     renderGithubData();
@@ -667,6 +678,7 @@ const PAGE_RENDERERS = {
   permissions: renderPermissions,
   exams: renderExams,
   subjects: renderSubjects,
+  academic_upload_scores: renderAcademicUploadScores,
   grade_summary: renderGradeSummary,
   class_ranking: renderClassRanking,
   teacher_ranking: renderTeacherRanking,
@@ -857,7 +869,7 @@ function renderUsers() {
       <td><span class="badge badge-primary">${esc(ROLE_NAMES[u.role])}</span></td>
       <td>${esc(u.grade || "-")}</td>
       <td>${esc(u.classNo || "-")}</td>
-      <td>${u.role === "teacher" ? esc((u.subjects || []).join("、")) || "-" : "-"}</td>
+      <td>${(u.subjects && u.subjects.length) ? esc(u.subjects.join("、")) : "-"}</td>
       <td>${new Date(u.createdAt).toLocaleDateString()}</td>
       <td style="display:flex;gap:6px">
         <button class="btn btn-sm btn-info" onclick="editUser('${esc(u.id)}')">编辑</button>
@@ -999,12 +1011,12 @@ window.editUser = function (id) {
         <div class="form-group"><label>所属年级</label>
           <select id="m_grade">${grades.map((g) => `<option ${u?.grade === g ? "selected" : ""}>${esc(g)}</option>`).join("")}${grades.length === 0 ? `<option>请先添加年级</option>` : ""}</select>
         </div>
-        <div class="form-group"><label>班级（班主任必填）</label>
-          <input id="m_class" value="${esc(u?.classNo || "")}" placeholder="如 1班 / 2班" />
+        <div class="form-group"><label>班级（班主任必填；任课教师可填，多班用逗号分隔，如 1班,2班）</label>
+          <input id="m_class" value="${esc(u?.classNo || "")}" placeholder="如 1班 / 1班,2班" />
         </div>
       </div>
 
-      <div class="form-group"><label>任教学科（逗号分隔，任课教师必填）</label>
+      <div class="form-group"><label>任教学科（任课教师/班主任必填，逗号分隔）</label>
         <input id="m_subjects" value="${esc((u?.subjects || []).join(","))}" placeholder="如 语文,数学,英语" />
       </div>
 
@@ -1278,9 +1290,10 @@ function renderUploadScores() {
     <div class="card">
       <div class="card-title">📋 Excel 模板说明</div>
       <p style="color:var(--text-light); line-height:1.9;">
-        • Excel 首行为表头：<b>学号、姓名、${subjects.map((s) => s.name).join("、")}</b><br/>
-        • 系统自动识别年级与班级（当前登录账号）<br/>
-        • 学生学号是唯一标识，重复上传将更新覆盖<br/>
+        • Excel 首行为表头：<b>学号（可留空）、姓名、${subjects.map((s) => s.name).join("、")}</b><br/>
+        • <b>学号列为可选</b>：留空时系统自动分配格式「班级-序号」（如 1-001），下次上传同名学生自动沿用，<b>班主任无需手打学号</b><br/>
+        • 同班同名学生必须手动补充学号区分（如「张三1」「张三2」或填入学号），系统会检测并提示<br/>
+        • 学生姓名是唯一识别方式，请确保姓名填写准确<br/>
         • 留空的分数视为缺考，不计入统计
       </p>
     </div>
@@ -1301,16 +1314,21 @@ function renderUploadScores() {
 
 window.downloadTemplate = function () {
   const grade = currentUser.grade;
+  const classNo = currentUser.classNo;
   const subjects = DB.subjects[grade] || [];
-  const headers = ["学号", "姓名", ...subjects.map((s) => s.name)];
+  const headers = ["学号（可留空）", "姓名", ...subjects.map((s) => s.name)];
   const rows = [headers];
   for (let i = 1; i <= 3; i++) {
-    rows.push([`2024${String(i).padStart(4, "0")}`, `学生${i}`, ...subjects.map((s) => Math.floor(Math.random() * s.fullScore))]);
+    rows.push([
+      "",  // 学号留空，系统自动生成
+      `${classNo}学生${i}`,
+      ...subjects.map((s) => Math.floor(Math.random() * s.fullScore))
+    ]);
   }
   const ws = XLSX.utils.aoa_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "成绩模板");
-  XLSX.writeFile(wb, `${grade}_${currentUser.classNo}_成绩模板.xlsx`);
+  XLSX.writeFile(wb, `${grade}_${classNo}_成绩模板.xlsx`);
   showToast("模板已下载", "success");
 };
 
@@ -1329,11 +1347,51 @@ function handleExcelFile(file) {
       const subjects = DB.subjects[grade] || [];
       const subjectNames = subjects.map((s) => s.name);
 
+      // 从已有成绩数据中，构建"姓名 → 已有学号"映射，自动重用
+      const existingNameToId = {};
+      DB.records.filter((r) => r.grade === grade && r.classNo === classNo).forEach((r) => {
+        if (!existingNameToId[r.studentName]) existingNameToId[r.studentName] = r.studentId;
+      });
+      // 还要从即将解析的数据中构建学号冲突检查
+      const parsedRowIds = new Set();
+
       const parsed = [];
-      for (const row of rows) {
-        const studentId = String(row["学号"] || row["id"] || "").trim();
+      const autoGenNotes = [];  // 记录哪些学生自动分配了学号
+      const conflictWarnings = [];
+
+      for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+        const row = rows[rowIdx];
+        let studentId = String(row["学号"] || row["学号（可留空）"] || row["id"] || "").trim();
         const studentName = String(row["姓名"] || row["name"] || "").trim();
         if (!studentName) continue;
+
+        // 学号留空 → 自动分配
+        if (!studentId) {
+          if (existingNameToId[studentName]) {
+            // 历史已有该姓名，直接沿用历史学号
+            studentId = existingNameToId[studentName];
+          } else {
+            // 新学生：自动分配格式 "班级-序号"
+            const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
+            const countSoFar = parsed.filter((p) => p.studentName === studentName).length;
+            if (countSoFar === 0) {
+              studentId = `${classPrefix}-${String(parsed.length + 1).padStart(3, "0")}`;
+              autoGenNotes.push(studentName);
+            } else {
+              // 同班同名 → 提示用户手动处理
+              conflictWarnings.push(`第 ${rowIdx + 2} 行：同班同名「${studentName}」，请手动补充学号区分`);
+              continue;
+            }
+          }
+        } else {
+          // 用户自己填了学号
+          if (parsedRowIds.has(studentId)) {
+            conflictWarnings.push(`学号「${studentId}」重复出现：${studentName}，请核查`);
+            continue;
+          }
+          parsedRowIds.add(studentId);
+        }
+
         const scores = {};
         subjectNames.forEach((sn) => {
           const v = row[sn];
@@ -1343,19 +1401,33 @@ function handleExcelFile(file) {
         subjectNames.forEach((sn) => { if (scores[sn] != null) total += scores[sn]; });
         parsed.push({
           id: uid(), examId: $("u_exam").value, grade, classNo,
-          studentId: studentId || "S" + uid(), studentName, scores, total,
+          studentId, studentName, scores, total,
           uploadedBy: currentUser.id, uploadedAt: Date.now()
         });
       }
 
-      if (parsed.length === 0) { showToast("未能解析任何有效学生", "error"); return; }
+      if (parsed.length === 0) {
+        showToast(conflictWarnings.length ? `未能解析有效学生：${conflictWarnings[0]}` : "未能解析任何有效学生", "error");
+        return;
+      }
 
       const subjectNames2 = subjects.map((s) => s.name);
+      const autoNote = autoGenNotes.length > 0
+        ? `<div style="padding:10px 12px;background:#e6f7ea;border-left:3px solid #1a7f37;border-radius:4px;font-size:12px;margin-bottom:10px">💡 系统已为 ${autoGenNotes.length} 位学生自动分配学号：${autoGenNotes.slice(0, 6).join("、")}${autoGenNotes.length > 6 ? "……" : ""}</div>`
+        : "";
+      const conflictNote = conflictWarnings.length > 0
+        ? `<div style="padding:10px 12px;background:#fff0f0;border-left:3px solid #c0392b;border-radius:4px;font-size:12px;margin-bottom:10px">⚠️ ${conflictWarnings.join("；")}</div>`
+        : "";
+
       const preview = `
-        <div class="card-title" style="border:none;padding:0;margin-bottom:12px">📋 已解析 ${parsed.length} 名学生 - ${grade} ${classNo}</div>
+        <div class="card-title" style="border:none;padding:0;margin-bottom:12px">
+          📋 已解析 ${parsed.length} 名学生 - ${grade} ${classNo}
+        </div>
+        ${autoNote}
+        ${conflictNote}
         <div class="table-wrap"><table class="data-table">
           <thead><tr><th>学号</th><th>姓名</th>${subjectNames2.map((n) => `<th>${n}</th>`).join("")}<th>总分</th></tr></thead>
-          <tbody>${parsed.slice(0, 30).map((r) => `<tr><td>${r.studentId}</td><td>${r.studentName}</td>${subjectNames2.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td></tr>`).join("")}</tbody>
+          <tbody>${parsed.slice(0, 30).map((r) => `<tr><td>${esc(r.studentId)}</td><td>${esc(r.studentName)}</td>${subjectNames2.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td></tr>`).join("")}</tbody>
         </table></div>
         ${parsed.length > 30 ? `<p style="text-align:center;color:var(--text-light);margin-top:10px">仅显示前 30 行，共 ${parsed.length} 行</p>` : ""}
         <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
@@ -1378,6 +1450,245 @@ function handleExcelFile(file) {
     }
   };
   reader.readAsArrayBuffer(file);
+}
+
+// ========== 教务：上传全年级成绩（所有班级） ==========
+function renderAcademicUploadScores() {
+  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const grade = currentUser.grade;
+  const exams = DB.exams.filter((e) => e.grade === grade);
+  const subjects = DB.subjects[grade] || [];
+
+  if (subjects.length === 0) {
+    $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">⚠️</div><div class="es-title">${grade} 尚未配置学科</div><div class="es-tip">请先进行学科设置</div></div></div>`;
+    return;
+  }
+
+  $("pageContent").innerHTML = `
+    <div class="card">
+      <div class="card-title">📥 上传 ${grade} 全年级成绩（所有班级一次导入）</div>
+      <div class="form-row">
+        <div class="form-group"><label>选择考试</label>
+          <select id="a_exam">
+            ${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}
+            ${exams.length === 0 ? `<option>暂无考试</option>` : ""}
+          </select>
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end">
+          <button class="btn btn-info" onclick="window.downloadAcademicTemplate()">⬇ 下载全年级Excel模板</button>
+        </div>
+      </div>
+
+      <div id="a_uploadArea" class="upload-area">
+        <div class="ua-icon">📂</div>
+        <div class="ua-title">点击选择多个 Excel 文件（每班一个，可一次框选 .xlsx / .xls）</div>
+        <div class="ua-tip">或直接拖拽多个文件到此区域。系统按「班级」列合并，一次提交全部班级</div>
+        <input type="file" id="a_file" accept=".xlsx,.xls" multiple style="display:none" />
+      </div>
+
+      <div id="a_preview" style="margin-top:20px"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Excel 模板说明（教务端）</div>
+      <p style="color:var(--text-light); line-height:1.9;">
+        • Excel 首行为表头：<b>学号（可留空）、姓名、班级、${subjects.map((s) => s.name).join("、")}</b><br/>
+        • <b>「班级」列必填</b>：系统据此按班级拆分并写入成绩<br/>
+        • <b>学号列为可选</b>：留空时系统自动分配「班级-序号」（如 1-001、2-003），下次上传同班级同名学生自动沿用<br/>
+        • 支持同一文件中混合多个班级（如：1班、2班、3班……）<br/>
+        • 同班同名学生必须手动补充学号区分（如「张三1」「张三2」），系统会检测并提示<br/>
+        • 留空的分数视为缺考，不计入统计
+      </p>
+    </div>
+  `;
+
+  const ua = $("a_uploadArea");
+  ua.onclick = () => $("a_file").click();
+  ua.addEventListener("dragover", (e) => { e.preventDefault(); ua.classList.add("dragover"); });
+  ua.addEventListener("dragleave", () => ua.classList.remove("dragover"));
+  ua.addEventListener("drop", (e) => {
+    e.preventDefault(); ua.classList.remove("dragover");
+    if (e.dataTransfer.files.length) handleAcademicExcelFile(e.dataTransfer.files);
+  });
+  $("a_file").addEventListener("change", (e) => {
+    if (e.target.files.length) handleAcademicExcelFile(e.target.files);
+  });
+}
+
+window.downloadAcademicTemplate = function () {
+  const grade = currentUser.grade;
+  const subjects = DB.subjects[grade] || [];
+  const headers = ["学号（可留空）", "姓名", "班级", ...subjects.map((s) => s.name)];
+  const rows = [headers];
+  const sampleClasses = ["1班", "2班", "3班"];
+  sampleClasses.forEach((c) => {
+    for (let i = 1; i <= 3; i++) {
+      rows.push([
+        "",  // 学号留空，系统自动分配
+        `${c}学生${i}`,
+        c,
+        ...subjects.map((s) => Math.floor(Math.random() * s.fullScore))
+      ]);
+    }
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "全年级成绩");
+  XLSX.writeFile(wb, `${grade}_全年级成绩模板.xlsx`);
+  showToast("模板已下载", "success");
+};
+
+function handleAcademicExcelFile(fileList) {
+  const files = Array.from(fileList);
+  if (files.length === 0) return;
+
+  const grade = currentUser.grade;
+  const subjects = DB.subjects[grade] || [];
+  const subjectNames = subjects.map((s) => s.name);
+
+  // 从已有成绩数据中，构建"班级+姓名 → 学号"映射
+  const existingKeyToId = {};
+  DB.records.filter((r) => r.grade === grade).forEach((r) => {
+    const key = `${r.classNo}|${r.studentName}`;
+    if (!existingKeyToId[key]) existingKeyToId[key] = r.studentId;
+  });
+
+  const allParsed = [];
+  const conflictWarnings = [];
+  const autoGenNotes = [];
+  const classStat = {};
+  const classCounter = {};      // 各班级内部计数器（用于自增学号）
+  const globalRowIds = new Set(); // 跨文件检查学号冲突
+
+  // 逐个文件异步解析
+  let processed = 0;
+  const totalFiles = files.length;
+
+  function parseSingleFile(file, fileIdx) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const wb = XLSX.read(data, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+          for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+            const row = rows[rowIdx];
+            let studentId = String(row["学号"] || row["学号（可留空）"] || row["id"] || "").trim();
+            const studentName = String(row["姓名"] || row["name"] || "").trim();
+            const classNo = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
+            if (!studentName) continue;
+            if (!classNo) {
+              conflictWarnings.push(`文件「${file.name}」学生「${studentName}」缺少班级信息，已跳过`);
+              continue;
+            }
+
+            const key = `${classNo}|${studentName}`;
+
+            if (!studentId) {
+              if (existingKeyToId[key]) {
+                // 同班同姓名已有历史学号 → 复用
+                studentId = existingKeyToId[key];
+              } else {
+                // 本次解析内已出现该班级+姓名 → 冲突
+                const localCount = allParsed.filter((p) => p.classNo === classNo && p.studentName === studentName).length;
+                if (localCount === 0) {
+                  // 新学生 → 自动分配
+                  const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
+                  classCounter[classPrefix] = (classCounter[classPrefix] || 0) + 1;
+                  studentId = `${classPrefix}-${String(classCounter[classPrefix]).padStart(3, "0")}`;
+                  autoGenNotes.push(`${classNo} ${studentName}`);
+                } else {
+                  conflictWarnings.push(`文件「${file.name}」第 ${rowIdx + 2} 行：${classNo} 同班同名「${studentName}」，请手动补充学号区分`);
+                  continue;
+                }
+              }
+            } else {
+              // 用户自己填了学号，跨文件检查冲突
+              if (globalRowIds.has(studentId)) {
+                conflictWarnings.push(`文件「${file.name}」中学号「${studentId}」与其他文件重复：${studentName}`);
+                continue;
+              }
+              globalRowIds.add(studentId);
+            }
+
+            const scores = {};
+            subjectNames.forEach((sn) => {
+              const v = row[sn];
+              if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
+            });
+            let total = 0;
+            subjectNames.forEach((sn) => { if (scores[sn] != null) total += scores[sn]; });
+            allParsed.push({
+              id: uid(), examId: $("a_exam").value, grade, classNo,
+              studentId, studentName, scores, total,
+              uploadedBy: currentUser.id, uploadedAt: Date.now()
+            });
+            classStat[classNo] = (classStat[classNo] || 0) + 1;
+          }
+          resolve(true);
+        } catch (err) {
+          conflictWarnings.push(`文件「${file.name}」解析失败：${err.message}`);
+          resolve(false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  // 按顺序解析所有文件；完成后统一渲染
+  (async function () {
+    for (let i = 0; i < files.length; i++) {
+      await parseSingleFile(files[i], i);
+    }
+
+    if (allParsed.length === 0) {
+      showToast(conflictWarnings.length ? `未能解析有效学生：${conflictWarnings[0]}` : "未能解析任何有效学生，请检查列名", "error");
+      return;
+    }
+
+    const classList = Object.keys(classStat).sort();
+    const classInfo = classList.map((c) => `${c}（${classStat[c]}人）`).join("、");
+
+    const autoNote = autoGenNotes.length > 0
+      ? `<div style="padding:10px 12px;background:#e6f7ea;border-left:3px solid #1a7f37;border-radius:4px;font-size:12px;margin-bottom:10px">💡 已为 ${autoGenNotes.length} 位学生自动分配学号：${autoGenNotes.slice(0, 6).join("、")}${autoGenNotes.length > 6 ? "……" : ""}</div>`
+      : "";
+    const conflictNote = conflictWarnings.length > 0
+      ? `<div style="padding:10px 12px;background:#fff0f0;border-left:3px solid #c0392b;border-radius:4px;font-size:12px;margin-bottom:10px">⚠️ ${conflictWarnings.slice(0, 8).join("；")}${conflictWarnings.length > 8 ? `（共${conflictWarnings.length}条）` : ""}</div>`
+      : "";
+
+    $("a_preview").innerHTML = `
+      <div class="card-title" style="border:none;padding:0;margin-bottom:12px">
+        📋 已解析 ${totalFiles} 个文件 · ${allParsed.length} 名学生 · 共 ${classList.length} 个班级：${esc(classInfo)}
+      </div>
+      ${autoNote}
+      ${conflictNote}
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>班级</th><th>学号</th><th>姓名</th>${subjectNames.map((n) => `<th>${n}</th>`).join("")}<th>总分</th></tr></thead>
+        <tbody>${allParsed.slice(0, 40).map((r) => `<tr><td><b>${esc(r.classNo)}</b></td><td>${esc(r.studentId)}</td><td>${esc(r.studentName)}</td>${subjectNames.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td></tr>`).join("")}</tbody>
+      </table></div>
+      ${allParsed.length > 40 ? `<p style="text-align:center;color:var(--text-light);margin-top:10px">仅显示前 40 行，共 ${allParsed.length} 行</p>` : ""}
+      <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="renderAcademicUploadScores()">取消</button>
+        <button class="btn btn-success" id="a_confirm_upload">✓ 确认导入 ${allParsed.length} 条成绩（${classList.length} 个班级）</button>
+      </div>
+    `;
+
+    $("a_confirm_upload").onclick = () => {
+      const examId = $("a_exam").value;
+      DB.records = DB.records.filter((r) => {
+        if (r.examId !== examId || r.grade !== grade) return true;
+        if (!classList.includes(r.classNo)) return true;
+        const match = allParsed.find((p) => p.classNo === r.classNo && p.studentId === r.studentId);
+        return !match;
+      });
+      allParsed.forEach((p) => DB.records.push(p));
+      saveDB(DB);
+      showToast(`成功导入 ${allParsed.length} 条学生成绩（${classList.length} 个班级）`, "success");
+      $("a_preview").innerHTML = "";
+    };
+  })();
 }
 
 // ========== 成绩统计核心 ==========
@@ -1729,6 +2040,30 @@ function computeTeacherRanking(examId, grade) {
   const byClass = {};
   allRecords.forEach((r) => { if (!byClass[r.classNo]) byClass[r.classNo] = []; byClass[r.classNo].push(r); });
   const gradeStats = aggregateStats(allRecords, subjects);
+
+  // 辅助：判断教师是否教某班级某学科
+  // - 班主任：其 subjects 包含该学科 即视为该班该学科的教师
+  // - 任课教师：其 subjects 包含该学科，并且 (classNo 为空 || classNo 包含当前班级)
+  function getClassSubjectTeachers(classNo, subjectName) {
+    const teachers = [];
+    DB.users.filter((u) => u.grade === grade).forEach((u) => {
+      const uSubjects = u.subjects || [];
+      if (uSubjects.indexOf(subjectName) < 0) return;
+      if (u.role === "headteacher") {
+        // 班主任且任教学科包含 → 他就是该班该学科的教师
+        if (u.classNo === classNo) teachers.push(u);
+      } else if (u.role === "teacher") {
+        // 任课教师：如果没填 classNo 视为教全年级；否则检查是否包含当前 classNo
+        if (!u.classNo) teachers.push(u);
+        else {
+          const classes = String(u.classNo).split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+          if (classes.indexOf(classNo) >= 0) teachers.push(u);
+        }
+      }
+    });
+    return teachers;
+  }
+
   const rows = [];
   subjects.forEach((subject) => {
     const classes = Object.keys(byClass).sort();
@@ -1737,17 +2072,26 @@ function computeTeacherRanking(examId, grade) {
       const classRecs = byClass[classNo];
       const cs = aggregateStats(classRecs, [subject])[subject.name];
       if (!cs || cs.total === 0) return;
-      const ht = DB.users.find((u) => u.role === "headteacher" && u.grade === grade && u.classNo === classNo);
-      const teacherName = ht ? ht.name : `${classNo} 教师`;
-      const normalizedAvg = cs.avg / subject.fullScore;
-      const compositeScore = cs.excellentPct * 0.3 + cs.passPct * 0.3 + normalizedAvg * 0.4;
-      subjectRows.push({
-        subject: subject.name, teacherName, classNo, total: cs.total, avg: cs.avg,
-        excellent: cs.excellent, excellentPct: cs.excellentPct,
-        passCount: cs.passCount, passPct: cs.passPct,
-        good: cs.good, goodPct: cs.goodPct,
-        low: cs.low, lowPct: cs.lowPct,
-        normalizedAvg, compositeScore, gradeAvg: gradeStats[subject.name].avg
+      const teachers = getClassSubjectTeachers(classNo, subject.name);
+      if (teachers.length === 0) return; // 没有指派教师的班级跳过（不生成虚假记录）
+      teachers.forEach((teacher) => {
+        const normalizedAvg = cs.avg / subject.fullScore;
+        const compositeScore = cs.excellentPct * 0.3 + cs.passPct * 0.3 + normalizedAvg * 0.4;
+        subjectRows.push({
+          subject: subject.name,
+          teacherId: teacher.id,
+          teacherName: teacher.name,
+          classNo, total: cs.total, avg: cs.avg,
+          excellent: cs.excellent, excellentPct: cs.excellentPct,
+          excellentCount: cs.excellent,
+          passCount: cs.passCount, passPct: cs.passPct,
+          good: cs.good, goodPct: cs.goodPct,
+          goodCount: cs.good,
+          low: cs.low, lowPct: cs.lowPct,
+          lowCount: cs.low,
+          normalizedAvg, compositeScore,
+          gradeAvg: gradeStats[subject.name].avg
+        });
       });
     });
     subjectRows.sort((a, b) => b.compositeScore - a.compositeScore);
@@ -2456,7 +2800,7 @@ function renderMyRanking() {
     const { rows } = computeTeacherRanking(e.id, grade);
     rows.forEach((r) => { r.examName = e.name; allRows.push(r); });
   });
-  const myRows = allRows.filter((r) => subjects.indexOf(r.subject) >= 0 && r.teacherName === currentUser.name);
+  const myRows = allRows.filter((r) => subjects.indexOf(r.subject) >= 0 && r.teacherId === currentUser.id);
 
   $("pageContent").innerHTML = `
     <div class="card"><div class="card-title">🏅 我的排行信息 - ${currentUser.name}</div>
@@ -2548,7 +2892,7 @@ function refreshTeacherAnalysis() {
 
   // 教师排行榜
   const { rows } = computeTeacherRanking(selectedExam.id, grade);
-  const myRows = rows.filter((r) => subjects.indexOf(r.subject) >= 0);
+  const myRows = rows.filter((r) => subjects.indexOf(r.subject) >= 0 && r.teacherId === currentUser.id);
 
   if (myRows.length > 0) {
     myRows.forEach((r) => {
@@ -2562,12 +2906,13 @@ function refreshTeacherAnalysis() {
 
   $("ta_insights").innerHTML = insights.map((i) => `<p>${i}</p>`).join("");
 
+  const displayRows = rows.filter((r) => subjects.indexOf(r.subject) >= 0);
   const rankingHTML = `<div class="card">
-    <div class="card-title">🏅 ${esc(selectedExam.name)} 任教科目教师排行榜</div>
+    <div class="card-title">🏅 ${esc(selectedExam.name)} 任教科目教师排行榜（${subjects.join("、")}）</div>
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>名次</th><th>学科</th><th>班级</th><th>任课教师</th><th>班级人数</th><th>均分</th><th>优秀率</th><th>优秀人数</th><th>及格率</th><th>及格人数</th><th>良好率</th><th>良好人数</th><th>低分率</th><th>低分人数</th><th>综合分数</th></tr></thead>
-      <tbody>${rows.map((r) => {
-        const isMe = r.teacherName === currentUser.name;
+      <tbody>${displayRows.map((r) => {
+        const isMe = r.teacherId === currentUser.id;
         const isTop = r.rank === 1;
         return `<tr style="${isMe ? "background:#e8f4fd;font-weight:bold" : ""}">
           <td>${isTop ? "🥇" : r.rank === 2 ? "🥈" : r.rank === 3 ? "🥉" : r.rank}</td>
