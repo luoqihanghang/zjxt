@@ -957,6 +957,11 @@ table.data-table tr.rank-top {
   font-weight: 600;
 }
 
+table.data-table tr.diag-missing {
+  background: #fff5f5;
+  color: #c0392b;
+}
+
 .badge {
   display: inline-block;
   padding: 3px 10px;

@@ -154,6 +154,12 @@ const NAV_MENUS = {
       ]
     },
     {
+      group: "人员管理", icon: "👥", items: [
+        { id: "users", icon: "👩‍🏫", text: "教师名单管理" },
+        { id: "permissions", icon: "🔐", text: "权限管理" }
+      ]
+    },
+    {
       group: "成绩汇总", icon: "📈", items: [
         { id: "academic_upload_scores", icon: "📥", text: "上传全年级成绩（教务）" },
         { id: "grade_summary", icon: "📈", text: "年级成绩汇总" },
@@ -858,11 +864,20 @@ function renderDashboard() {
   `;
 }
 
-// ========== 管理员：教师名单 ==========
+// ========== 管理员/教务：教师名单 ==========
 function renderUsers() {
-  if (currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  if (currentUser.role !== "admin" && currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
 
-  const rows = DB.users.filter((u) => u.role !== "admin").map((u) => `
+  // 教务只能管理自己年级的教师
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const allUsers = myGrade
+    ? DB.users.filter((u) => u.role !== "admin" && u.grade === myGrade)
+    : DB.users.filter((u) => u.role !== "admin");
+  const teachers = allUsers.filter((u) => u.role === "teacher");
+  const headteachers = allUsers.filter((u) => u.role === "headteacher");
+  const academics = allUsers.filter((u) => u.role === "academic");
+
+  const rows = allUsers.map((u) => `
     <tr>
       <td>${esc(u.username)}</td>
       <td>${esc(u.name)}</td>
@@ -879,16 +894,24 @@ function renderUsers() {
     </tr>
   `).join("");
 
+  const summaryHtml = myGrade
+    ? `<div style="margin-bottom:12px;font-size:13px;color:var(--text-light)">
+        当前年级：<b>${myGrade}</b> ·
+        班主任 ${headteachers.length} 人 · 任课教师 ${teachers.length} 人 · 教务老师 ${academics.length} 人
+      </div>`
+    : "";
+
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">
-        <span>👥 教师名单管理（共 ${DB.users.filter((u) => u.role !== "admin").length} 人）</span>
+        <span>👥 教师名单管理（共 ${allUsers.length} 人）${myGrade ? `— ${myGrade}` : ""}</span>
         <span class="ct-actions">
           <button class="btn btn-primary" onclick="downloadTeacherTemplate()">📥 下载模板</button>
           <button class="btn btn-warning" onclick="showBatchUploadModal()">📤 批量上传</button>
           <button class="btn btn-success" onclick="editUser(null)">+ 添加教师</button>
         </span>
       </div>
+      ${summaryHtml}
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>所属年级</th><th>班级</th><th>任教学科</th><th>加入时间</th><th>操作</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8"><div class="empty-state"><div class="es-tip">暂无教师，点击右上角添加</div></div></td></tr>`}</tbody>
@@ -1034,9 +1057,11 @@ window.editUser = function (id) {
     const grade = $("m_grade").value.trim();
     const classNo = $("m_class").value.trim();
     const subjects = $("m_subjects").value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+    const isAcademic = currentUser.role === "academic";
 
     if (!username || !name) { showToast("账号和姓名不能为空", "error"); return false; }
     if (!u && DB.users.some((x) => x.username === username)) { showToast("账号已存在", "error"); return false; }
+    if (isAcademic && grade !== currentUser.grade) { showToast("教务只能管理本年级教师", "error"); return false; }
 
     if (u) {
       u.name = name; u.role = role; u.grade = grade; u.classNo = classNo; u.subjects = subjects;
@@ -1053,6 +1078,8 @@ window.editUser = function (id) {
 window.resetPwd = function (id) {
   const u = DB.users.find((x) => x.id === id);
   if (!u) return;
+  const isAcademic = currentUser.role === "academic";
+  if (isAcademic && u.grade !== currentUser.grade) { showToast("无权限操作此教师", "error"); return; }
   if (!confirm(`确认将 ${u.name} 的密码重置为 123456？`)) return;
   u.password = "123456"; saveDB(DB); showToast("密码已重置为 123456", "success");
 };
@@ -1060,7 +1087,9 @@ window.resetPwd = function (id) {
 window.delUser = function (id) {
   const u = DB.users.find((x) => x.id === id);
   if (!u) return;
-  if (!confirm(`确认删除 ${u.name}？此操作不可恢复。`)) return;
+  const isAcademic = currentUser.role === "academic";
+  if (isAcademic && (u.grade !== currentUser.grade || u.role === "academic")) { showToast("无权限删除此教师", "error"); return; }
+  if (!confirm(`确认删除教师「${u.name}」？此操作不可恢复。`)) return;
   DB.users = DB.users.filter((x) => x.id !== id); saveDB(DB); showToast("已删除", "success");
   renderUsers();
 };
@@ -1343,13 +1372,13 @@ function handleExcelFile(file) {
       if (rows.length === 0) { showToast("Excel 为空", "error"); return; }
 
       const grade = currentUser.grade;
-      const classNo = currentUser.classNo;
+      const classNo = displayClassNo(currentUser.classNo) || currentUser.classNo;
       const subjects = DB.subjects[grade] || [];
       const subjectNames = subjects.map((s) => s.name);
 
       // 从已有成绩数据中，构建"姓名 → 已有学号"映射，自动重用
       const existingNameToId = {};
-      DB.records.filter((r) => r.grade === grade && r.classNo === classNo).forEach((r) => {
+      DB.records.filter((r) => r.grade === grade && classNoEquals(r.classNo, classNo)).forEach((r) => {
         if (!existingNameToId[r.studentName]) existingNameToId[r.studentName] = r.studentId;
       });
       // 还要从即将解析的数据中构建学号冲突检查
@@ -1439,7 +1468,7 @@ function handleExcelFile(file) {
 
       $("confirm_upload").onclick = () => {
         const examId = $("u_exam").value;
-        DB.records = DB.records.filter((r) => !(r.examId === examId && r.grade === grade && r.classNo === classNo && parsed.some((p) => p.studentId === r.studentId)));
+        DB.records = DB.records.filter((r) => !(r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) && parsed.some((p) => p.studentId === r.studentId)));
         parsed.forEach((p) => DB.records.push(p));
         saveDB(DB);
         showToast(`成功导入 ${parsed.length} 条学生成绩`, "success");
@@ -1577,9 +1606,11 @@ function handleAcademicExcelFile(fileList) {
             const row = rows[rowIdx];
             let studentId = String(row["学号"] || row["学号（可留空）"] || row["id"] || "").trim();
             const studentName = String(row["姓名"] || row["name"] || "").trim();
-            const classNo = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
+            // 归一化班级号："7班" / "7" / "七班" 全部变为 "7班"
+            let classNoRaw = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
+            const classNo = displayClassNo(classNoRaw) || classNoRaw;
             if (!studentName) continue;
-            if (!classNo) {
+            if (!classNo || classNo === "") {
               conflictWarnings.push(`文件「${file.name}」学生「${studentName}」缺少班级信息，已跳过`);
               continue;
             }
@@ -2032,34 +2063,102 @@ function renderDownloadScores() {
   `;
 }
 
-// ========== 教务：教师排行榜 ==========
+// ========== 教师排行榜计算核心：返回 { subjects, rows }
+// 统一：判断 user 是否教 grade 的 classNo 的 subjectName
+//   - 班主任：subjects 包含该学科 AND u.classNo === classNo
+//   - 任课教师：subjects 包含该学科 AND (classNo 为空 → 全年级；否则按逗号分隔匹配)
+
+// 中文数字 → 阿拉伯数字（支持 一 到 九十九）
+function cn2num(s) {
+  if (!s) return "";
+  const map = { "零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9 };
+  // "十" / "十X" / "X十" / "X十Y"
+  if (/^[一二三四五六七八九]?十[一二三四五六七八九]?$/.test(s)) {
+    const parts = s.split("十");
+    const tens = parts[0] ? map[parts[0]] : 1;
+    const ones = parts[1] ? map[parts[1]] : 0;
+    return String(tens * 10 + ones);
+  }
+  if (/^十$/.test(s)) return "10";
+  // 单个中文数字
+  const single = s.match(/^[零〇一二两三四五六七八九]$/);
+  if (single) return String(map[s]);
+  return "";
+}
+
+// 班级号标准化：提取班级序号（同时兼容阿拉伯数字和中文数字）
+// "1班" → "1" | "7" → "7" | "七班" → "7" | "高一7班" → "7" | "十二班" → "12"
+function normalizeClassNo(c) {
+  if (!c) return "";
+  const s = String(c).trim();
+  // 1) 优先找阿拉伯数字
+  const m = s.match(/\d+/);
+  if (m) return m[0];
+  // 2) 没有阿拉伯数字 → 提取中文数字部分
+  const cn = s.match(/[零〇一二两三四五六七八九十]+/);
+  if (cn) return cn2num(cn[0]);
+  return "";
+}
+
+// 班级号归一化后显示（统一为 "X班" 格式）
+function displayClassNo(c) {
+  const n = normalizeClassNo(c);
+  return n ? `${n}班` : c;
+}
+
+// 精确匹配两个班级号
+function classNoEquals(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return normalizeClassNo(a) === normalizeClassNo(b);
+}
+
+function teacherTeaches(user, grade, classNo, subjectName) {
+  if (!user || user.grade !== grade) return false;
+  const subjects = user.subjects || [];
+  if (subjects.indexOf(subjectName) < 0) return false;
+  // 班主任：classNo 字段视为"所教班级列表"，支持多个（如 "1班,2班,3班"）
+  // 第一个通常是班主任班级，其余是其他任教班级——全部视为"任课"
+  if (user.role === "headteacher") {
+    if (!user.classNo) return false;
+    const classes = String(user.classNo).split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+    return classes.some((c) => classNoEquals(c, classNo));
+  }
+  if (user.role === "teacher") {
+    if (!user.classNo) return true;
+    const classes = String(user.classNo).split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+    return classes.some((c) => classNoEquals(c, classNo));
+  }
+  return false;
+}
+
+// 返回当前教师教的 classNo 集合（归一化形式）
+function getTeacherClassNos(user, grade) {
+  const subjects = user.subjects || [];
+  const classNos = [...new Set(
+    DB.records.filter((r) => r.grade === grade).map((r) => displayClassNo(r.classNo) || r.classNo)
+  )];
+  return classNos.filter((c) => subjects.some((sn) => teacherTeaches(user, grade, c, sn)));
+}
+
 function computeTeacherRanking(examId, grade) {
   const subjects = DB.subjects[grade] || [];
   const allRecords = DB.records.filter((r) => r.examId === examId && r.grade === grade);
   if (allRecords.length === 0) return { subjects: [], rows: [] };
+  // 按归一化后的班级号分组（"7班"/"7"/"七班" 全部归并为 "7班"）
   const byClass = {};
-  allRecords.forEach((r) => { if (!byClass[r.classNo]) byClass[r.classNo] = []; byClass[r.classNo].push(r); });
+  allRecords.forEach((r) => {
+    const key = displayClassNo(r.classNo);
+    if (!byClass[key]) byClass[key] = [];
+    byClass[key].push(r);
+  });
   const gradeStats = aggregateStats(allRecords, subjects);
 
-  // 辅助：判断教师是否教某班级某学科
-  // - 班主任：其 subjects 包含该学科 即视为该班该学科的教师
-  // - 任课教师：其 subjects 包含该学科，并且 (classNo 为空 || classNo 包含当前班级)
-  function getClassSubjectTeachers(classNo, subjectName) {
+  // 辅助：找某班级某学科的任课教师
+  function getClassSubjectTeachers(classNoKey, subjectName) {
     const teachers = [];
     DB.users.filter((u) => u.grade === grade).forEach((u) => {
-      const uSubjects = u.subjects || [];
-      if (uSubjects.indexOf(subjectName) < 0) return;
-      if (u.role === "headteacher") {
-        // 班主任且任教学科包含 → 他就是该班该学科的教师
-        if (u.classNo === classNo) teachers.push(u);
-      } else if (u.role === "teacher") {
-        // 任课教师：如果没填 classNo 视为教全年级；否则检查是否包含当前 classNo
-        if (!u.classNo) teachers.push(u);
-        else {
-          const classes = String(u.classNo).split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-          if (classes.indexOf(classNo) >= 0) teachers.push(u);
-        }
-      }
+      if (teacherTeaches(u, grade, classNoKey, subjectName)) teachers.push(u);
     });
     return teachers;
   }
@@ -2073,26 +2172,35 @@ function computeTeacherRanking(examId, grade) {
       const cs = aggregateStats(classRecs, [subject])[subject.name];
       if (!cs || cs.total === 0) return;
       const teachers = getClassSubjectTeachers(classNo, subject.name);
-      if (teachers.length === 0) return; // 没有指派教师的班级跳过（不生成虚假记录）
-      teachers.forEach((teacher) => {
-        const normalizedAvg = cs.avg / subject.fullScore;
-        const compositeScore = cs.excellentPct * 0.3 + cs.passPct * 0.3 + normalizedAvg * 0.4;
+      if (teachers.length === 0) {
+        // 没找到匹配教师 → 保留成绩统计，但标记"未分配教师"
         subjectRows.push({
           subject: subject.name,
-          teacherId: teacher.id,
-          teacherName: teacher.name,
+          teacherId: null, teacherName: `${classNo} ${subject.name}（未分配教师）`,
           classNo, total: cs.total, avg: cs.avg,
-          excellent: cs.excellent, excellentPct: cs.excellentPct,
-          excellentCount: cs.excellent,
+          excellent: cs.excellent, excellentPct: cs.excellentPct, excellentCount: cs.excellent,
           passCount: cs.passCount, passPct: cs.passPct,
-          good: cs.good, goodPct: cs.goodPct,
-          goodCount: cs.good,
-          low: cs.low, lowPct: cs.lowPct,
-          lowCount: cs.low,
-          normalizedAvg, compositeScore,
+          good: cs.good, goodPct: cs.goodPct, goodCount: cs.good,
+          low: cs.low, lowPct: cs.lowPct, lowCount: cs.low,
+          compositeScore: cs.excellentPct * 0.3 + cs.passPct * 0.3 + (cs.avg / subject.fullScore) * 0.4,
           gradeAvg: gradeStats[subject.name].avg
         });
-      });
+      } else {
+        teachers.forEach((teacher) => {
+          const normalizedAvg = cs.avg / subject.fullScore;
+          const compositeScore = cs.excellentPct * 0.3 + cs.passPct * 0.3 + normalizedAvg * 0.4;
+          subjectRows.push({
+            subject: subject.name, teacherId: teacher.id, teacherName: teacher.name,
+            classNo, total: cs.total, avg: cs.avg,
+            excellent: cs.excellent, excellentPct: cs.excellentPct, excellentCount: cs.excellent,
+            passCount: cs.passCount, passPct: cs.passPct,
+            good: cs.good, goodPct: cs.goodPct, goodCount: cs.good,
+            low: cs.low, lowPct: cs.lowPct, lowCount: cs.low,
+            normalizedAvg, compositeScore,
+            gradeAvg: gradeStats[subject.name].avg
+          });
+        });
+      }
     });
     subjectRows.sort((a, b) => b.compositeScore - a.compositeScore);
     subjectRows.forEach((r, idx) => { r.rank = idx + 1; });
@@ -2107,13 +2215,20 @@ function renderTeacherRanking() {
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
   $("pageContent").innerHTML = `
     <div class="card">
-      <div class="card-title">🎖️ 教师排行榜 - ${grade}</div>
+      <div class="card-title">
+        <span>🎖️ 教师排行榜 - ${grade}</span>
+        <span class="ct-actions">
+          <button class="btn btn-primary" onclick="showDiagnosisReport()">🔍 诊断</button>
+          <button class="btn btn-info" onclick="refreshTeacherRankingPage()">🔄 刷新</button>
+        </span>
+      </div>
       <div class="form-row">
         <div class="form-group"><label>选择考试</label><select id="tr_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select></div>
         <div class="form-group"><label>筛选学科</label><select id="tr_subject"><option value="">全部学科</option></select></div>
       </div>
       <div id="tr_result"></div>
     </div>
+    <div id="diagnosis_area" style="margin-top:16px"></div>
   `;
   const tr_exam = $("tr_exam"); const tr_subject = $("tr_subject");
   const subjectList = DB.subjects[grade] || [];
@@ -2123,21 +2238,126 @@ function renderTeacherRanking() {
   if (exams.length) refresh();
 }
 
+// 诊断报告：逐个班级×学科显示实际匹配到的教师
+window.showDiagnosisReport = function () {
+  const grade = currentUser.grade;
+  const classNosFromRecords = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => displayClassNo(r.classNo) || r.classNo))];
+  const teachers = DB.users.filter((u) => u.grade === grade && (u.role === "headteacher" || u.role === "teacher"));
+  const subjects = DB.subjects[grade] || [];
+
+  // 逐班级逐学科的匹配结果
+  let rows = [];
+  classNosFromRecords.forEach((cls) => {
+    subjects.forEach((subj) => {
+      const matched = teachers.filter((u) => teacherTeaches(u, grade, cls, subj.name));
+      rows.push({
+        classNo: cls,
+        subject: subj.name,
+        match: matched.length,
+        names: matched.map((u) => `${u.name}(${u.role === "headteacher" ? "班主任" : "任课教师"})`).join("、") || "❌ 未找到"
+      });
+    });
+  });
+
+  const teacherTable = teachers.map((u) => `<tr>
+    <td>${esc(u.name)}</td>
+    <td>${u.role === "headteacher" ? "班主任" : "任课教师"}</td>
+    <td>${esc(u.classNo || "（不填）")}</td>
+    <td>${esc((u.subjects || []).join("、") || "（不填）")}</td>
+  </tr>`).join("") || "<tr><td colspan='4'><i>本年级暂无教师</i></td></tr>";
+
+  const classHtml = classNosFromRecords.length
+    ? classNosFromRecords.join("、")
+    : "<i>暂无成绩数据</i>";
+
+  const rowHtml = rows.length
+    ? rows.map((r) => `<tr class="${r.match === 0 ? "diag-missing" : ""}">
+        <td>${esc(r.classNo)}</td>
+        <td>${esc(r.subject)}</td>
+        <td>${r.match}</td>
+        <td>${esc(r.names)}</td>
+      </tr>`).join("")
+    : `<tr><td colspan="4"><i>无数据可诊断</i></td></tr>`;
+
+  $("diagnosis_area").innerHTML = `
+    <div class="card">
+      <div class="card-title">🔍 教师排行榜诊断报告</div>
+      <div style="margin-bottom:16px;line-height:1.9">
+        <b>当前年级</b>：${esc(grade)}<br/>
+        <b>成绩记录涉及的班级</b>（共 ${classNosFromRecords.length} 个）：${classHtml}<br/>
+        <b>学科配置</b>（共 ${subjects.length} 个）：${subjects.map((s) => s.name).join("、") || "（无）"}
+      </div>
+      <div class="card-title" style="padding-top:0;border-top:none;font-size:14px">📋 本年级教师（共 ${teachers.length} 人）</div>
+      <div class="table-wrap" style="margin-bottom:16px"><table class="data-table">
+        <thead><tr><th>教师</th><th>角色</th><th>班级字段</th><th>任教学科</th></tr></thead>
+        <tbody>${teacherTable}</tbody>
+      </table></div>
+      <div class="card-title" style="padding-top:0;border-top:none;font-size:14px">🔬 每个班级×学科的匹配结果</div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>班级</th><th>学科</th><th>匹配教师数</th><th>匹配到的教师</th></tr></thead>
+        <tbody>${rowHtml}</tbody>
+      </table></div>
+      <p style="color:#888;margin-top:12px;font-size:12px">
+        说明：班主任若没填任教学科则不会出现在该学科的教师排行里；任课教师的「班级字段」不填代表教全年级所有班级，填写则只教对应班级。
+      </p>
+    </div>
+  `;
+  $("diagnosis_area").scrollIntoView({ behavior: "smooth" });
+};
+
+// 刷新按钮：从 localStorage 重新加载 DB，再重新渲染排行榜
+window.refreshTeacherRankingPage = async function () {
+  try {
+    const raw = localStorage.getItem("smart_edu_db");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.users) DB.users = parsed.users;
+      if (parsed.records) DB.records = parsed.records;
+    }
+  } catch (_) {}
+  renderTeacherRanking();
+  showToast("已刷新排行榜数据", "success");
+};
+
 function drawTeacherRanking(examId, grade, subjectFilter) {
   const { rows } = computeTeacherRanking(examId, grade);
-  if (rows.length === 0) { $("tr_result").innerHTML = `<div class="empty-state"><div class="es-title">暂无数据</div></div>`; return; }
+  if (rows.length === 0) {
+    $("tr_result").innerHTML = `<div class="empty-state">
+      <div class="es-title">暂无数据</div>
+      <div class="es-tip">请先上传成绩，或在「教师名单管理」中确认教师任教学科和班级已正确设置</div>
+    </div>`;
+    return;
+  }
+
   const filtered = subjectFilter ? rows.filter((r) => r.subject === subjectFilter) : rows;
-  const trs = filtered.map((r) => `<tr class="${r.rank === 1 ? "rank-top" : ""}">
+  const noTeacherRows = filtered.filter((r) => !r.teacherId);
+  const validRows = filtered.filter((r) => r.teacherId);
+
+  const noTeacherWarning = noTeacherRows.length > 0
+    ? `<div style="padding:10px 12px;background:#fff8e6;border-left:3px solid #e6a000;border-radius:4px;font-size:12px;margin-bottom:12px">
+        ⚠️ 有 <b>${noTeacherRows.length}</b> 个班级未分配任课教师（系统显示为灰色行），请在「教师名单管理」中为相关教师设置任教班级和学科
+      </div>`
+    : "";
+
+  const trs = validRows.map((r) => `<tr class="${r.rank === 1 ? "rank-top" : ""}">
     <td>${r.rank}</td><td><b>${r.subject}</b></td><td>${r.teacherName}</td><td>${r.classNo}</td>
     <td>${r.total}</td><td>${fmt(r.avg)}</td><td>${r.excellent}/${fmtPct(r.excellentPct)}</td>
     <td>${r.passCount}/${fmtPct(r.passPct)}</td><td>${r.good}/${fmtPct(r.goodPct)}</td>
     <td>${r.low}/${fmtPct(r.lowPct)}</td><td><b>${fmt(r.compositeScore * 100, 2)}</b></td>
   </tr>`).join("");
+
+  const noTeacherTrs = noTeacherRows.map((r) => `<tr style="background:#f5f5f5;color:#999">
+    <td>—</td><td><b>${r.subject}</b></td><td>—</td><td>${r.classNo}</td>
+    <td>${r.total}</td><td>${fmt(r.avg)}</td>
+    <td colspan="5"><i>未分配教师，请在「教师名单管理」中添加任课教师并设置任教班级</i></td>
+  </tr>`).join("");
+
   $("tr_result").innerHTML = `
     <p style="color:var(--text-light); margin-bottom:10px;">📘 综合分数 = 优秀率 × 0.3 + 及格率 × 0.3 + 标准化均分 × 0.4（同学科内排名）</p>
+    ${noTeacherWarning}
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>名次</th><th>学科</th><th>任课教师</th><th>班级</th><th>人数</th><th>均分</th><th>优秀</th><th>及格</th><th>良好</th><th>低分</th><th>综合分数</th></tr></thead>
-      <tbody>${trs}</tbody>
+      <tbody>${trs}${noTeacherTrs}</tbody>
     </table></div>
     <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-primary" onclick="downloadTeacherRanking('${examId}','${grade}')">⬇ 下载教师排行</button>
@@ -2706,64 +2926,66 @@ window.downloadHeadteacherAnalysis = function () {
 
 // 任课教师端：我的成绩 & 排行 & 分析
 function renderMyScores() {
-  // 任课教师 / 班主任均可访问（班主任也能看所教的学科成绩）
-  if (currentUser.role !== "teacher" && currentUser.role !== "headteacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  if (currentUser.role !== "teacher" && currentUser.role !== "headteacher") {
+    $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return;
+  }
   const grade = currentUser.grade;
   const subjects = currentUser.subjects || [];
   const exams = getSortedExams(grade);
 
-  // 我任教的学科：展示考试成绩（所有班级的均分对比）
   if (exams.length === 0 || subjects.length === 0) {
     $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-tip">暂无任教考试数据</div></div></div>`; return;
   }
 
+  // 只保留我教的班级（基于 subjects 推导）
+  const myClassNos = getTeacherClassNos(currentUser, grade);
+
   const sections = subjects.map((subjectName) => {
     const subject = (DB.subjects[grade] || []).find((s) => s.name === subjectName);
     if (!subject) return "";
-    const examLabels = exams.map((e) => e.name);
-    const classGroups = {};
-    exams.forEach((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade);
-      recs.forEach((r) => {
-        if (!classGroups[r.classNo]) classGroups[r.classNo] = [];
-        const scores = r.scores; if (scores[subjectName] != null) classGroups[r.classNo].push({ exam: e.id, score: scores[subjectName] });
-      });
-    });
-    const classes = Object.keys(classGroups).sort();
-    const ds = classes.map((c) => ({
-      label: c + " " + subjectName + "均分",
+    // 进一步筛选：只对这个学科我确实教的班级
+    const myClassesForSubject = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, subjectName));
+    if (myClassesForSubject.length === 0) return "";
+
+    const chartData = myClassesForSubject.map((c) => ({
+      label: c + " " + subjectName,
       data: exams.map((e) => {
         const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
         const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
-        if (vals.length === 0) return null;
+        if (!vals.length) return null;
         return +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
       })
     }));
-    return `<div class="card"><div class="card-title">📘 ${subjectName} - 各班级均分趋势</div>
+    return `<div class="card">
+      <div class="card-title">📘 ${subjectName} — ${myClassesForSubject.join("、")}</div>
       <div class="chart-box"><canvas id="chart_${subjectName}"></canvas></div>
       <div style="margin-top:12px;display:flex;gap:10px;justify-content:flex-end">
-        <button class="btn btn-primary" onclick='window._downloadMySubject(${JSON.stringify(subjectName)},${JSON.stringify(grade)})'>⬇ 下载 ${subjectName} 明细</button>
+        <button class="btn btn-primary" onclick='window._downloadMySubject(${JSON.stringify(subjectName)},${JSON.stringify(grade)},${JSON.stringify(currentUser.id)})'>⬇ 下载 ${subjectName} 明细</button>
       </div>
     </div>`;
   }).join("");
 
   $("pageContent").innerHTML = `
     <div class="card"><div class="card-title">📖 我的班级成绩</div>
-      <p style="color:var(--text-light); margin-bottom:14px;">任教科目：<b>${subjects.join("、") || "（尚未分配）"}</b> · 年级：${grade}</p>
+      <p style="color:var(--text-light); margin-bottom:14px;">
+        身份：${currentUser.role === "headteacher" ? "班主任" : "任课教师"} · 任教科目：<b>${subjects.join("、") || "（尚未分配）"}</b>
+        <br/>任教班级：<b>${myClassNos.length ? myClassNos.join("、") : "暂无"}</b> · 年级：${grade}
+      </p>
     </div>
-    ${sections}
+    ${sections || '<div class="card"><div class="empty-state"><div class="es-tip">暂无任教数据，请先上传成绩或检查任教学科设置</div></div></div>'}
   `;
   setTimeout(() => {
     subjects.forEach((sn) => {
       const subject = (DB.subjects[grade] || []).find((s) => s.name === sn);
       if (!subject) return;
-      const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
-      const ds = classes.map((c) => ({
+      const myClassesForSubject = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, sn));
+      if (myClassesForSubject.length === 0) return;
+      const ds = myClassesForSubject.map((c) => ({
         label: c,
         data: exams.map((e) => {
           const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
           const vals = recs.map((r) => r.scores[sn]).filter((v) => v != null);
-          if (vals.length === 0) return null;
+          if (!vals.length) return null;
           return +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
         })
       }));
@@ -2772,10 +2994,14 @@ function renderMyScores() {
   }, 50);
 }
 
-window._downloadMySubject = function (subjectName, grade) {
+window._downloadMySubject = function (subjectName, grade, teacherId) {
+  const teacher = DB.users.find((u) => u.id === teacherId) || currentUser;
+  const subjectNames = [subjectName];
+  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))]
+    .filter((c) => teacherTeaches(teacher, grade, c, subjectName));
+  const filtered = DB.records.filter((r) => r.grade === grade && myClasses.indexOf(r.classNo) >= 0 && r.scores[subjectName] != null);
   const rows = [["考试", "班级", "学号", "姓名", subjectName]];
-  const recs = DB.records.filter((r) => r.grade === grade && r.scores[subjectName] != null);
-  recs.forEach((r) => {
+  filtered.forEach((r) => {
     const exam = DB.exams.find((e) => e.id === r.examId);
     rows.push([exam ? exam.name : "-", r.classNo, r.studentId, r.studentName, r.scores[subjectName]]);
   });
@@ -2855,14 +3081,19 @@ function refreshTeacherAnalysis() {
   const exams = getSortedExams(grade);
   const selectedExam = exams.find((e) => e.id === examId) || exams[exams.length - 1];
   const subjects = currentUser.subjects || [];
-  const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+  const myClassNos = getTeacherClassNos(currentUser, grade);
 
-  let insights = [`• 任教科目：${subjects.join("、") || "暂无"}`];
+  let insights = [
+    `• 任教科目：${subjects.join("、") || "暂无"}`,
+    `• 任教班级：${myClassNos.length ? myClassNos.join("、") : "暂无"}`
+  ];
 
-  // 绘制各学科多班级对比图
+  // 绘制各学科多班级对比图（只显示我教的班级，每个学科独立）
   let chartSection = "";
   subjects.forEach((subjectName) => {
-    const ds = classes.map((c) => ({
+    const myClasses = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, subjectName));
+    if (myClasses.length === 0) return;
+    const ds = myClasses.map((c) => ({
       label: c,
       data: exams.map((e) => {
         const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
@@ -2871,13 +3102,15 @@ function refreshTeacherAnalysis() {
         return +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
       })
     }));
-    chartSection += `<div class="card"><div class="card-title">📊 ${esc(subjectName)} - 各班级均分趋势</div><div class="chart-box"><canvas id="ta_chart_${esc(subjectName)}"></canvas></div></div>`;
+    chartSection += `<div class="card"><div class="card-title">📊 ${esc(subjectName)} — ${myClasses.join("、")} 均分趋势</div><div class="chart-box"><canvas id="ta_chart_${esc(subjectName)}"></canvas></div></div>`;
   });
   $("ta_chart_section").innerHTML = chartSection;
 
   setTimeout(() => {
     subjects.forEach((subjectName) => {
-      const ds = classes.map((c) => ({
+      const myClasses = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, subjectName));
+      if (myClasses.length === 0) return;
+      const ds = myClasses.map((c) => ({
         label: c,
         data: exams.map((e) => {
           const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
@@ -2890,7 +3123,7 @@ function refreshTeacherAnalysis() {
     });
   }, 100);
 
-  // 教师排行榜
+  // 教师排行榜（只看自己任教班级的记录）
   const { rows } = computeTeacherRanking(selectedExam.id, grade);
   const myRows = rows.filter((r) => subjects.indexOf(r.subject) >= 0 && r.teacherId === currentUser.id);
 
@@ -2908,7 +3141,10 @@ function refreshTeacherAnalysis() {
 
   const displayRows = rows.filter((r) => subjects.indexOf(r.subject) >= 0);
   const rankingHTML = `<div class="card">
-    <div class="card-title">🏅 ${esc(selectedExam.name)} 任教科目教师排行榜（${subjects.join("、")}）</div>
+    <div class="card-title">🏅 ${esc(selectedExam.name)} 学科内排行（${subjects.join("、")}）</div>
+    <p style="color:var(--text-light); font-size:13px; margin-bottom:12px;">
+      这里展示的是：在你任教的学科内，各班级成绩在全年级同学科内的排名。你的班级已高亮。
+    </p>
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>名次</th><th>学科</th><th>班级</th><th>任课教师</th><th>班级人数</th><th>均分</th><th>优秀率</th><th>优秀人数</th><th>及格率</th><th>及格人数</th><th>良好率</th><th>良好人数</th><th>低分率</th><th>低分人数</th><th>综合分数</th></tr></thead>
       <tbody>${displayRows.map((r) => {
@@ -2939,15 +3175,16 @@ window.downloadTeacherAnalysis = function () {
   if (!exams.length) { showToast("暂无考试数据", "warning"); return; }
   const selectedExamId = $("ta_exam_select")?.value || exams[exams.length - 1].id;
   const selectedExam = exams.find((e) => e.id === selectedExamId) || exams[exams.length - 1];
-  const classes = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))].sort();
+  const myClassNos = getTeacherClassNos(currentUser, grade);
 
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: 学科趋势
+  // Sheet 1: 学科趋势（只含我教的班级）
   const trendHeader = ["学科", "班级", ...exams.map((e) => e.name)];
   const trendData = [];
   subjects.forEach((s) => {
-    classes.forEach((c) => {
+    const myClasses = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, s));
+    myClasses.forEach((c) => {
       const row = [s, c];
       exams.forEach((e) => {
         const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === c);
@@ -2959,10 +3196,11 @@ window.downloadTeacherAnalysis = function () {
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([trendHeader, ...trendData]), "学科均分趋势");
 
-  // Sheet 2: 教师排行榜
+  // Sheet 2: 教师排行榜（只含我教的学科）
   const { rows } = computeTeacherRanking(selectedExam.id, grade);
+  const myRows = rows.filter((r) => subjects.indexOf(r.subject) >= 0);
   const rankHeader = ["名次", "学科", "班级", "任课教师", "班级人数", "均分", "优秀率", "优秀人数", "及格率", "及格人数", "良好率", "良好人数", "低分率", "低分人数", "综合分数"];
-  const rankData = rows.map((r) => [r.rank, r.subject, r.classNo, r.teacherName, r.total, fmt(r.avg), fmtPct(r.excellentPct), r.excellentCount, fmtPct(r.passPct), r.passCount, fmtPct(r.goodPct), r.goodCount, fmtPct(r.lowPct), r.lowCount, fmt(r.compositeScore * 100, 2)]);
+  const rankData = myRows.map((r) => [r.rank, r.subject, r.classNo, r.teacherName, r.total, fmt(r.avg), fmtPct(r.excellentPct), r.excellentCount, fmtPct(r.passPct), r.passCount, fmtPct(r.goodPct), r.goodCount, fmtPct(r.lowPct), r.lowCount, fmt(r.compositeScore * 100, 2)]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([rankHeader, ...rankData]), "教师排行");
 
   XLSX.writeFile(wb, `${currentUser.name}_学科分析报告_${selectedExam.name}.xlsx`);
