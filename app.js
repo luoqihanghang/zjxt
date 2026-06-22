@@ -1924,6 +1924,7 @@ function handleAcademicExcelFile(fileList) {
   const grade = currentUser.grade;
   const subjects = DB.subjects[grade] || [];
   const subjectNames = subjects.map((s) => s.name);
+  const showStudentId = hasRoster(grade);
 
   // 从已有成绩数据中，构建"班级+姓名 → 学号"映射
   const existingKeyToId = {};
