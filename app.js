@@ -2091,7 +2091,7 @@ function aggregateStats(records, subjects) {
     const excellent = validScores.filter((v) => v >= s.excellent).length;
     const good = validScores.filter((v) => v >= s.good && v < s.excellent).length;
     const passCount = validScores.filter((v) => v >= s.pass).length;
-    const low = validScores.filter((v) => v < s.low).length;
+    const low = validScores.filter((v) => v <= s.low).length;
     const maxCount = validScores.filter((v) => v === max).length;
     const minCount = validScores.filter((v) => v === min).length;
     stats[s.name] = {
