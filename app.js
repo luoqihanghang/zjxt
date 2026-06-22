@@ -5220,39 +5220,47 @@ function renderStudentRoster() {
 
   // 获取已上传学生名单的班级
   const rosterClasses = Object.keys(DB.studentRoster[grade] || {}).sort();
+  const totalStudents = rosterClasses.reduce((sum, c) => sum + (DB.studentRoster[grade][c] || []).length, 0);
 
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">📋 ${grade} 学生名单管理</div>
-      <p style="color:var(--text-light);margin-bottom:16px">上传一次学生名单后，每次考试可直接提取使用。支持编辑和更新。</p>
-      <div class="form-row">
-        <div class="form-group">
-          <label>选择班级</label>
-          <select id="sr_class">${classes.map((c) => `<option value="${c}">${c}</option>`).join("")}</select>
+      <div style="margin-bottom:16px;padding:12px;background:var(--bg-light);border-radius:6px">
+        <div style="display:flex;gap:20px;flex-wrap:wrap">
+          <div>✅ <b>批量上传</b>：Excel 包含 学号、姓名、班级 三列，自动识别多班级</div>
+          <div>✅ <b>数据编辑</b>：上传后可直接修改学生信息、添加或删除</div>
+          <div>✅ <b>双模式保存</b>：合并模式（保留原有）或 替换模式（完全覆盖）</div>
         </div>
-        <div class="form-group" style="display:flex;align-items:flex-end;gap:10px">
-          <button class="btn btn-primary" onclick="window.downloadRosterTemplate()">⬇ 下载模板</button>
-          <button class="btn btn-success" onclick="document.getElementById('sr_file').click()">📤 上传名单</button>
-          <input type="file" id="sr_file" accept=".xlsx,.xls" style="display:none" onchange="handleRosterUpload(this)" />
+        <div style="margin-top:10px;color:var(--text-light);font-size:13px">
+          📊 已上传 ${rosterClasses.length} 个班级，共 ${totalStudents} 名学生。已上传的名单可在每次考试中直接提取使用。
         </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="window.downloadRosterTemplate()">⬇ 下载 Excel 模板</button>
+        <button class="btn btn-success" onclick="document.getElementById('sr_file').click()">📤 上传名单（支持多选）</button>
+        <input type="file" id="sr_file" accept=".xlsx,.xls" multiple style="display:none" onchange="handleRosterUpload(this)" />
+        ${rosterClasses.length > 0 ? `<button class="btn btn-info" onclick="downloadAllRoster()">📤 下载所有名单</button>` : ''}
       </div>
     </div>
 
     <div id="sr_preview" style="margin-top:20px"></div>
 
     <div class="card" style="margin-top:20px">
-      <div class="card-title">📊 已上传名单的班级</div>
+      <div class="card-title">📊 已上传学生名单（${rosterClasses.length} 个班级，共 ${totalStudents} 人）</div>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>班级</th><th>人数</th><th>操作</th></tr></thead>
+        <thead><tr><th>班级</th><th>人数</th><th>学生名单（前5名）</th><th>操作</th></tr></thead>
         <tbody>
-          ${rosterClasses.length === 0 ? `<tr><td colspan="3"><div class="empty-state"><div class="es-tip">暂无已上传的名单</div></div></td></tr>` : rosterClasses.map((c) => {
+          ${rosterClasses.length === 0 ? `<tr><td colspan="4"><div class="empty-state"><div class="es-tip">🗂️ 暂无已上传的名单，请先上传学生名单</div></div></td></tr>` : rosterClasses.map((c) => {
             const students = DB.studentRoster[grade][c] || [];
+            const previewNames = students.slice(0, 5).map((s) => esc(s.studentName)).join("、");
             return `<tr>
               <td><b>${esc(c)}</b></td>
               <td>${students.length} 人</td>
+              <td style="color:var(--text-light);font-size:12px">${esc(previewNames)}${students.length > 5 ? `等 ${students.length} 名学生` : ''}</td>
               <td>
                 <button class="btn btn-sm btn-primary" onclick="extractRosterToExam('${esc(c)}')">📥 提取到考试</button>
                 <button class="btn btn-sm btn-info" onclick="viewRosterClass('${esc(c)}')">👁️ 查看</button>
+                <button class="btn btn-sm btn-warning" onclick="editRosterClass('${esc(c)}')">✏️ 编辑</button>
                 <button class="btn btn-sm btn-danger" onclick="deleteRosterClass('${esc(c)}')">🗑️ 删除</button>
               </td>
             </tr>`;
@@ -5263,9 +5271,30 @@ function renderStudentRoster() {
   `;
 
   // 绑定班级切换事件
-  $("sr_class").onchange = () => viewRosterClass($("sr_class").value);
   if (classes.length > 0) viewRosterClass(classes[0]);
 }
+
+window.downloadAllRoster = function () {
+  const grade = currentUser.grade;
+  const rosterClasses = Object.keys(DB.studentRoster[grade] || {}).sort();
+  if (rosterClasses.length === 0) {
+    showToast("暂无已上传的名单", "warning");
+    return;
+  }
+
+  const rows = [["学号", "姓名", "班级"]];
+  rosterClasses.forEach((c) => {
+    const students = DB.studentRoster[grade][c] || [];
+    students.forEach((s) => {
+      rows.push([s.studentId || "", s.studentName || "", c]);
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "学生名单");
+  XLSX.writeFile(wb, `${grade}_学生名单_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  showToast("下载成功", "success");
+};
 
 window.downloadRosterTemplate = function () {
   const grade = currentUser.grade;
@@ -5278,72 +5307,198 @@ window.downloadRosterTemplate = function () {
 };
 
 function handleRosterUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const data = new Uint8Array(e.target.result);
-      const wb = XLSX.read(data, { type: "array" });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  const files = Array.from(input.files);
+  if (files.length === 0) return;
 
-      const grade = currentUser.grade;
-      if (!DB.studentRoster) DB.studentRoster = {};
-      if (!DB.studentRoster[grade]) DB.studentRoster[grade] = {};
+  if (files.length > 1) {
+    showToast(`正在处理 ${files.length} 个文件...`, "info");
+  }
 
-      const classGroups = {};
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const studentId = String(row["学号"] || row["id"] || "").trim();
-        const studentName = String(row["姓名"] || row["name"] || "").trim();
-        let classNoRaw = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
-        const classNo = displayClassNo(classNoRaw) || classNoRaw;
+  const grade = currentUser.grade;
+  if (!DB.studentRoster) DB.studentRoster = {};
+  if (!DB.studentRoster[grade]) DB.studentRoster[grade] = {};
 
-        if (!studentName || !classNo) continue;
-        if (!classGroups[classNo]) classGroups[classNo] = [];
-        classGroups[classNo].push({ studentId: studentId || `${classNo}-${classGroups[classNo].length + 1}`, studentName, classNo });
-      }
+  // 解析单个文件的函数
+  const parseFile = (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const wb = XLSX.read(data, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
-      const classList = Object.keys(classGroups).sort();
-      let html = `<div class="card"><div class="card-title">📋 解析结果预览</div>`;
-      html += `<p style="color:var(--text-light);margin-bottom:12px">共解析到 ${rows.length} 行数据，涉及 ${classList.length} 个班级：</p>`;
+          const classGroups = {};
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const studentId = String(row["学号"] || row["id"] || row["学生学号"] || "").trim();
+            const studentName = String(row["姓名"] || row["name"] || row["学生姓名"] || "").trim();
+            let classNoRaw = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
+            const classNo = displayClassNo(classNoRaw) || classNoRaw;
 
-      html += `<div class="roster-preview">`;
-      classList.forEach((c) => {
-        const newStudents = classGroups[c];
-        const existingStudents = DB.studentRoster[grade]?.[c] || [];
-        const isUpdate = existingStudents.length > 0;
-        const mergedStudents = isUpdate ? mergeRosterStudents(existingStudents, newStudents) : newStudents;
-
-        html += `<div class="roster-class-item ${isUpdate ? 'update' : 'new'}">
-          <div class="roster-class-header">
-            <span class="badge ${isUpdate ? 'badge-info' : 'badge-success'}">${isUpdate ? '更新' : '新增'}</span>
-            <b>${esc(c)}</b>
-            <span style="color:var(--text-light);font-size:12px">${isUpdate ? `原有 ${existingStudents.length} 人 → 新增 ${newStudents.length} 人` : `${newStudents.length} 名学生`}</span>
-          </div>
-          <div class="roster-student-list">
-            ${mergedStudents.slice(0, 5).map((s) => `<span class="student-chip">${esc(s.studentName)}</span>`).join("")}
-            ${mergedStudents.length > 5 ? `<span class="student-chip more">+${mergedStudents.length - 5} more</span>` : ""}
-          </div>
-        </div>`;
-      });
-      html += `</div>`;
-
-      html += `<div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
-        <button class="btn btn-secondary" onclick="renderStudentRoster()">取消</button>
-        <button class="btn btn-success" onclick="confirmRosterUpload()">✓ 确认保存（合并模式）</button>
-      </div></div>`;
-
-      $("sr_preview").innerHTML = html;
-      // 保存预览数据到临时变量
-      window._pendingRosterData = classGroups;
-      showToast(`已解析 ${rows.length} 行数据，涉及 ${classList.length} 个班级`, "success");
-    } catch (err) {
-      showToast("文件解析失败：" + err.message, "error");
-    }
+            if (!studentName || !classNo) continue;
+            if (!classGroups[classNo]) classGroups[classNo] = [];
+            classGroups[classNo].push({
+              studentId: studentId || `${classNo}-${classGroups[classNo].length + 1}`,
+              studentName,
+              classNo,
+              _sourceFile: file.name // 记录来源文件
+            });
+          }
+          resolve({ fileName: file.name, classGroups, totalRows: rows.length });
+        } catch (err) {
+          resolve({ fileName: file.name, classGroups: {}, totalRows: 0, error: err.message });
+        }
+      };
+      reader.onerror = () => resolve({ fileName: file.name, classGroups: {}, totalRows: 0, error: "读取文件失败" });
+      reader.readAsArrayBuffer(file);
+    });
   };
-  reader.readAsArrayBuffer(file);
+
+  // 并行处理所有文件
+  Promise.all(files.map(parseFile)).then((results) => {
+    // 合并所有文件的数据
+    const allClassGroups = {};
+    let totalSkipped = 0;
+    let totalValidRows = 0;
+
+    results.forEach(({ fileName, classGroups, totalRows, error }) => {
+      if (error) {
+        showToast(`文件 "${fileName}" 解析失败：${error}`, "error");
+        return;
+      }
+      const validRows = Object.values(classGroups).reduce((sum, arr) => sum + arr.length, 0);
+      totalSkipped += totalRows - validRows;
+      totalValidRows += validRows;
+
+      Object.keys(classGroups).forEach((c) => {
+        if (!allClassGroups[c]) allClassGroups[c] = [];
+        allClassGroups[c].push(...classGroups[c]);
+      });
+    });
+
+    if (totalValidRows === 0) {
+      showToast("未解析到任何有效数据，请检查文件格式", "warning");
+      return;
+    }
+
+    const classList = Object.keys(allClassGroups).sort();
+
+    let html = `<div class="card">
+      <div class="card-title">📋 上传预览与编辑（共 ${totalValidRows} 人，${classList.length} 个班级${totalSkipped > 0 ? "，跳过 " + totalSkipped + " 行无效数据" : ""}）</div>
+      <div style="margin-bottom:12px;padding:12px;background:var(--bg-light);border-radius:6px">
+        <b>💡 操作提示：</b>已选择 <b>${files.length}</b> 个文件。您可以直接编辑表格中的学号和姓名，或添加/删除学生。确认无误后选择保存模式进行保存。
+      </div>
+      <div id="roster_edit_accordion">`;
+
+    classList.forEach((c, classIdx) => {
+      const newStudents = allClassGroups[c];
+      const existingStudents = DB.studentRoster[grade]?.[c] || [];
+      const isUpdate = existingStudents.length > 0;
+
+      html += `<div class="accordion-item" style="margin-bottom:10px;border:1px solid var(--border-color);border-radius:8px">
+        <div class="accordion-header" onclick="toggleAccordion(${classIdx})" style="padding:12px;cursor:pointer;background:var(--bg-light);border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span class="badge ${isUpdate ? 'badge-info' : 'badge-success'}">${isUpdate ? '更新' : '新增'}</span>
+            <b style="margin-left:8px">${esc(c)}</b>
+            <span style="color:var(--text-light);font-size:12px;margin-left:8px">${isUpdate ? `原有 ${existingStudents.length} 人，本次新增/更新 ${newStudents.length} 人` : `${newStudents.length} 名学生`}</span>
+          </div>
+          <span id="acc_arrow_${classIdx}" style="font-size:12px">▼</span>
+        </div>
+        <div id="acc_content_${classIdx}" class="accordion-content" style="padding:12px;display:${classIdx === 0 ? 'block' : 'none'}">
+          <div style="margin-bottom:8px">
+            <button class="btn btn-sm btn-primary" onclick="addPendingStudent('${esc(c)}')">➕ 添加学生</button>
+          </div>
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th style="width:40%">学号</th><th style="width:45%">姓名</th><th style="width:15%">操作</th></tr></thead>
+            <tbody id="roster_pending_tbody_${esc(c)}">
+              ${newStudents.map((s, i) => `
+                <tr>
+                  <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-class="${esc(c)}" data-index="${i}" data-field="studentId" oninput="updatePendingStudent(this)" /></td>
+                  <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-class="${esc(c)}" data-index="${i}" data-field="studentName" oninput="updatePendingStudent(this)" /></td>
+                  <td><button class="btn btn-sm btn-danger" onclick="deletePendingStudent('${esc(c)}', ${i})">🗑️ 删除</button></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table></div>
+        </div>
+      </div>`;
+    });
+
+    html += `</div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-color);display:flex;gap:10px;justify-content:flex-end;align-items:center">
+        <div style="margin-right:auto">
+          <label style="margin-right:8px"><input type="radio" name="roster_save_mode" value="merge" checked /> 合并模式（保留原有学生，新增学号）</label>
+          <label><input type="radio" name="roster_save_mode" value="replace" /> 替换模式（覆盖所有班级的现有名单）</label>
+        </div>
+        <button class="btn btn-secondary" onclick="renderStudentRoster()">取消</button>
+        <button class="btn btn-success" onclick="confirmRosterUpload()">✓ 确认保存</button>
+      </div>
+    </div>`;
+
+    $("sr_preview").innerHTML = html;
+    window._pendingRosterData = allClassGroups;
+    showToast(`成功解析 ${totalValidRows} 名学生数据（${files.length} 个文件）`, "success");
+  });
+}
+
+function toggleAccordion(idx) {
+  const content = $(`acc_content_${idx}`);
+  const arrow = $(`acc_arrow_${idx}`);
+  if (content) {
+    content.style.display = content.style.display === "none" ? "block" : "none";
+    if (arrow) arrow.innerHTML = content.style.display === "none" ? "▶" : "▼";
+  }
+}
+
+function updatePendingStudent(input) {
+  const classNo = input.dataset.class;
+  const index = parseInt(input.dataset.index);
+  const field = input.dataset.field;
+  const value = input.value.trim();
+  if (window._pendingRosterData && window._pendingRosterData[classNo] && window._pendingRosterData[classNo][index]) {
+    window._pendingRosterData[classNo][index][field] = value || `${classNo}-${index + 1}`;
+  }
+}
+
+function deletePendingStudent(classNo, index) {
+  if (window._pendingRosterData && window._pendingRosterData[classNo]) {
+    window._pendingRosterData[classNo].splice(index, 1);
+    const tbody = $(`roster_pending_tbody_${classNo}`);
+    if (tbody) {
+      tbody.innerHTML = window._pendingRosterData[classNo].map((s, i) => `
+        <tr>
+          <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentId" oninput="updatePendingStudent(this)" /></td>
+          <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentName" oninput="updatePendingStudent(this)" /></td>
+          <td><button class="btn btn-sm btn-danger" onclick="deletePendingStudent('${esc(classNo)}', ${i})">🗑️ 删除</button></td>
+        </tr>
+      `).join("");
+    }
+    showToast("已删除", "success");
+  }
+}
+
+function addPendingStudent(classNo) {
+  if (!window._pendingRosterData) return;
+  if (!window._pendingRosterData[classNo]) window._pendingRosterData[classNo] = [];
+  const students = window._pendingRosterData[classNo];
+  students.push({
+    studentId: `${classNo}-${students.length + 1}`,
+    studentName: "",
+    classNo
+  });
+  const tbody = $(`roster_pending_tbody_${classNo}`);
+  if (tbody) {
+    tbody.innerHTML = students.map((s, i) => `
+      <tr>
+        <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentId" oninput="updatePendingStudent(this)" /></td>
+        <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentName" oninput="updatePendingStudent(this)" /></td>
+        <td><button class="btn btn-sm btn-danger" onclick="deletePendingStudent('${esc(classNo)}', ${i})">🗑️ 删除</button></td>
+      </tr>
+    `).join("");
+  }
+  showToast("已添加", "success");
 }
 
 // 合并学生名单：保留原有用学号匹配，新增的学号添加
@@ -5364,22 +5519,57 @@ function confirmRosterUpload() {
   const grade = currentUser.grade;
   const classGroups = window._pendingRosterData || {};
 
-  Object.keys(classGroups).forEach((c) => {
-    const newStudents = classGroups[c];
-    const existingStudents = DB.studentRoster[grade]?.[c] || [];
+  // 获取用户选择的保存模式
+  let saveMode = "merge";
+  const modeInputs = document.querySelectorAll('input[name="roster_save_mode"]');
+  modeInputs.forEach((input) => {
+    if (input.checked) saveMode = input.value;
+  });
 
-    if (existingStudents.length > 0) {
-      // 合并模式：保留原有，新增学号
-      DB.studentRoster[grade][c] = mergeRosterStudents(existingStudents, newStudents);
-    } else {
-      DB.studentRoster[grade][c] = newStudents;
+  // 验证数据
+  let totalStudents = 0;
+  const validClasses = [];
+  Object.keys(classGroups).forEach((c) => {
+    const students = classGroups[c].filter((s) => s.studentName && s.studentName.trim());
+    if (students.length > 0) {
+      validClasses.push({ classNo: c, students });
+      totalStudents += students.length;
     }
   });
 
-  saveDB(DB);
-  window._pendingRosterData = null;
-  showToast("学生名单已保存", "success");
-  renderStudentRoster();
+  if (totalStudents === 0) {
+    showToast("请至少填写一名学生的姓名", "warning");
+    return;
+  }
+
+  const modeText = saveMode === "replace" ? "替换模式" : "合并模式";
+
+  showModal("确认保存", `
+    <p>即将以 <b style="color:${saveMode === 'replace' ? '#dc3545' : '#28a745'}">${modeText}</b> 保存 <b>${totalStudents}</b> 名学生（涉及 ${validClasses.length} 个班级）：</p>
+    <div style="margin:12px 0;padding:10px;background:var(--bg-light);border-radius:6px">
+      ${validClasses.map(({ classNo, students }) => `<div style="padding:4px 0"><b>${esc(classNo)}</b>：${students.length} 名学生</div>`).join("")}
+    </div>
+    ${saveMode === "replace" ? `<p style="color:#dc3545;font-size:12px">⚠️ 替换模式将覆盖这些班级的所有现有学生名单！</p>` : `<p style="color:var(--text-light);font-size:12px">💡 合并模式将保留原有学生，仅新增新学号的学生。</p>`}
+  `, "✓ 确认保存", () => {
+    validClasses.forEach(({ classNo, students }) => {
+      const existingStudents = DB.studentRoster[grade]?.[classNo] || [];
+
+      if (saveMode === "replace") {
+        // 替换模式：直接覆盖
+        DB.studentRoster[grade][classNo] = students;
+      } else if (existingStudents.length > 0) {
+        // 合并模式：保留原有，新增学号
+        DB.studentRoster[grade][classNo] = mergeRosterStudents(existingStudents, students);
+      } else {
+        DB.studentRoster[grade][classNo] = students;
+      }
+    });
+
+    saveDB(DB);
+    window._pendingRosterData = null;
+    showToast(`成功保存 ${totalStudents} 名学生（${modeText}）`, "success");
+    renderStudentRoster();
+  }, "取消");
 }
 
 function viewRosterClass(classNo) {
@@ -5387,18 +5577,39 @@ function viewRosterClass(classNo) {
   const students = DB.studentRoster[grade]?.[classNo] || [];
 
   $("sr_preview").innerHTML = `
-    <div class="card"><div class="card-title">👥 ${esc(classNo)} 学生名单（${students.length}人）
-      <button class="btn btn-sm btn-info" onclick="editRosterClass('${esc(classNo)}')">✏️ 编辑</button>
+    <div class="card">
+      <div class="card-title">👥 ${esc(classNo)} 学生名单（${students.length}人）
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-sm btn-info" onclick="downloadRosterClass('${esc(classNo)}')">⬇ 下载名单</button>
+          <button class="btn btn-sm btn-warning" onclick="editRosterClass('${esc(classNo)}')">✏️ 编辑</button>
+          <button class="btn btn-sm btn-primary" onclick="extractRosterToExam('${esc(classNo)}')">📥 提取到考试</button>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th style="width:10%">序号</th><th style="width:30%">学号</th><th style="width:40%">姓名</th><th style="width:20%">班级</th></tr></thead>
+        <tbody>
+          ${students.length === 0 ? `<tr><td colspan="4"><div class="empty-state"><div class="es-tip">暂无数据，请上传名单或编辑添加学生</div></div></td></tr>` : students.map((s, i) => `<tr>
+            <td>${i + 1}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td><td>${esc(s.classNo)}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table></div>
     </div>
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>学号</th><th>姓名</th><th>班级</th></tr></thead>
-      <tbody>
-        ${students.length === 0 ? `<tr><td colspan="3"><div class="empty-state"><div class="es-tip">暂无数据</div></div></td></tr>` : students.map((s) => `<tr>
-          <td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td><td>${esc(s.classNo)}</td>
-        </tr>`).join("")}
-      </tbody>
-    </table></div></div>
   `;
+}
+
+function downloadRosterClass(classNo) {
+  const grade = currentUser.grade;
+  const students = DB.studentRoster[grade]?.[classNo] || [];
+  if (students.length === 0) {
+    showToast("该班级暂无学生数据", "warning");
+    return;
+  }
+  const rows = [["学号", "姓名", "班级"]];
+  students.forEach((s) => rows.push([s.studentId || "", s.studentName || "", classNo]));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), classNo);
+  XLSX.writeFile(wb, `${grade}_${classNo}_学生名单.xlsx`);
+  showToast("已下载名单", "success");
 }
 
 function editRosterClass(classNo) {
@@ -5406,19 +5617,23 @@ function editRosterClass(classNo) {
   const students = DB.studentRoster[grade]?.[classNo] || [];
 
   $("sr_preview").innerHTML = `
-    <div class="card"><div class="card-title">✏️ 编辑 ${esc(classNo)} 学生名单</div>
+    <div class="card">
+      <div class="card-title">✏️ 编辑 ${esc(classNo)} 学生名单（共 ${students.length} 人）</div>
+      <div style="margin-bottom:12px;padding:10px;background:var(--bg-light);border-radius:6px">
+        <b>💡 操作提示：</b>直接修改学号和姓名，点击右侧按钮删除学生，或点击下方按钮添加新学生。
+      </div>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>学号</th><th>姓名</th><th>操作</th></tr></thead>
+        <thead><tr><th style="width:35%">学号</th><th style="width:40%">姓名</th><th style="width:25%">操作</th></tr></thead>
         <tbody id="roster_edit_tbody">
           ${students.map((s, i) => `<tr>
-            <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-index="${i}" data-field="studentId" /></td>
-            <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-index="${i}" data-field="studentName" /></td>
-            <td><button class="btn btn-sm btn-danger" onclick="deleteRosterStudent(${i})">删除</button></td>
+            <td><input type="text" class="form-control" value="${esc(s.studentId)}" placeholder="学号" /></td>
+            <td><input type="text" class="form-control" value="${esc(s.studentName)}" placeholder="姓名" /></td>
+            <td><button class="btn btn-sm btn-danger" onclick="deleteRosterStudentInline(this)">🗑️ 删除</button></td>
           </tr>`).join("")}
         </tbody>
       </table></div>
-      <div style="margin-top:12px;display:flex;gap:10px">
-        <button class="btn btn-secondary" onclick="addRosterStudent()">➕ 添加学生</button>
+      <div style="margin-top:16px;display:flex;gap:10px">
+        <button class="btn btn-secondary" onclick="addRosterStudentInline()">➕ 添加学生</button>
         <button class="btn btn-success" onclick="saveRosterEdit('${esc(classNo)}')">✓ 保存修改</button>
         <button class="btn btn-secondary" onclick="viewRosterClass('${esc(classNo)}')">取消</button>
       </div>
@@ -5426,23 +5641,20 @@ function editRosterClass(classNo) {
   `;
 }
 
-function addRosterStudent() {
+function addRosterStudentInline() {
   const tbody = $("roster_edit_tbody");
   const tr = document.createElement("tr");
   tr.innerHTML = `<td><input type="text" class="form-control" value="" placeholder="学号" /></td>
     <td><input type="text" class="form-control" value="" placeholder="姓名" /></td>
-    <td><button class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()">删除</button></td>`;
+    <td><button class="btn btn-sm btn-danger" onclick="deleteRosterStudentInline(this)">🗑️ 删除</button></td>`;
   tbody.appendChild(tr);
+  showToast("已添加一行", "success");
 }
 
-function deleteRosterStudent(index) {
-  const grade = currentUser.grade;
-  const classNo = $("sr_class").value;
-  if (DB.studentRoster[grade]?.[classNo]) {
-    DB.studentRoster[grade][classNo].splice(index, 1);
-    saveDB(DB);
-    editRosterClass(classNo);
-  }
+function deleteRosterStudentInline(btn) {
+  const row = btn.closest("tr");
+  if (row) row.remove();
+  showToast("已删除", "success");
 }
 
 function saveRosterEdit(classNo) {
@@ -5453,21 +5665,26 @@ function saveRosterEdit(classNo) {
 
   rows.forEach((row) => {
     const inputs = row.querySelectorAll("input");
+    if (inputs.length < 2) return;
     const studentId = inputs[0].value.trim();
     const studentName = inputs[1].value.trim();
     if (studentName) {
-      newStudents.push({ studentId: studentId || `auto-${newStudents.length + 1}`, studentName, classNo });
+      newStudents.push({
+        studentId: studentId || `auto-${newStudents.length + 1}`,
+        studentName,
+        classNo
+      });
     }
   });
 
   if (newStudents.length === 0) {
-    showToast("名单不能为空", "warning");
+    showToast("名单不能为空，请至少添加一名学生", "warning");
     return;
   }
 
   DB.studentRoster[grade][classNo] = newStudents;
   saveDB(DB);
-  showToast("已保存修改", "success");
+  showToast(`已保存 ${newStudents.length} 名学生`, "success");
   viewRosterClass(classNo);
 }
 
