@@ -31,44 +31,35 @@ const getStudentIdFromRoster = (grade, classNo, studentName) => {
   return found ? found.studentId : "";
 };
 
-// 学号格式解析：根据格式解析学号，如 20260110 -> {gradeYear: 2026, classNo: "1班", index: 10}
+// 学号格式解析：根据格式解析学号，如 20260110 -> {yearPrefix: 2026, classNo: "1班", index: 10}
 const parseStudentId = (studentId) => {
-  if (!studentId || !DB.studentIdFormat || !DB.studentIdFormat.enabled) return null;
-  const pattern = DB.studentIdFormat.pattern;
+  if (!studentId) return null;
   const id = String(studentId);
   
-  // 默认格式：YYYYNNN## (4位年级 + N位班级 + 剩余序号)
-  // 例如：20260110 -> 年级2026, 班级01, 序号10
-  const gradeYearMatch = id.match(/^(\d{4})/);
-  if (!gradeYearMatch) return null;
-  const gradeYear = parseInt(gradeYearMatch[1]);
+  // 格式：YYYYNN## (4位年份前缀 + 2位班级号 + 2位序号)
+  // 例如：20260110 -> 年份前缀2026, 班级01, 序号10
+  const match = id.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (!match) return null;
   
-  // 提取班级号（2位数字）
-  const classMatch = id.match(/^\d{4}(\d{2})/);
-  const classNo = classMatch ? classMatch[1] + "班" : "";
+  const yearPrefix = match[1];
+  const classNum = parseInt(match[2]);
+  const index = parseInt(match[3]);
+  const classNo = classNum + "班";
   
-  // 提取序号（剩余数字）
-  const indexMatch = id.match(/^\d{6}(\d+)/);
-  const index = indexMatch ? parseInt(indexMatch[1]) : 0;
-  
-  return { gradeYear, classNo, index };
+  return { yearPrefix, classNum, classNo, index };
 };
 
 // 学号格式验证：根据格式验证学号是否符合规则
 const validateStudentIdFormat = (studentId, grade) => {
-  if (!studentId || !DB.studentIdFormat || !DB.studentIdFormat.enabled) return true;
+  if (!studentId) return true;
   
   const parsed = parseStudentId(studentId);
-  if (!parsed) return false;
+  if (!parsed) return { valid: false, reason: "学号格式不正确（应为8位数字：年份+班级+序号）" };
   
-  // 验证年级是否匹配（取当前年的后两位）
-  const currentYear = new Date().getFullYear();
-  const expectedYear = currentYear % 100 + (grade ? parseInt(grade.replace(/\D/g, '')) - 1 : 0);
-  const actualYear = parsed.gradeYear % 100;
-  
-  // 年级验证（允许±1年误差）
-  if (Math.abs(actualYear - expectedYear) > 1) {
-    return { valid: false, reason: `年级不匹配（学号显示${parsed.gradeYear}级）` };
+  // 验证年份前缀是否匹配设置
+  const expectedYearPrefix = DB.studentIdFormat?.yearPrefix || "2026";
+  if (parsed.yearPrefix !== expectedYearPrefix) {
+    return { valid: false, reason: `年份前缀不匹配（应为${expectedYearPrefix}）` };
   }
   
   return { valid: true };
@@ -76,37 +67,21 @@ const validateStudentIdFormat = (studentId, grade) => {
 
 // 生成学号：根据格式生成学号
 const generateStudentId = (grade, classNo, index) => {
-  if (!DB.studentIdFormat || !DB.studentIdFormat.enabled) {
-    // 默认格式：班级-序号
-    const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
-    return `${classPrefix}-${String(index).padStart(3, "0")}`;
-  }
-  
-  // 自定义格式
-  const pattern = DB.studentIdFormat.pattern;
-  const currentYear = new Date().getFullYear();
-  const gradeNum = parseInt(grade.replace(/\D/g, '')) || 1;
-  const gradeYear = currentYear - (1 - gradeNum); // 根据年级计算入学年份
+  // 获取年份前缀（可自定义）
+  const yearPrefix = DB.studentIdFormat?.yearPrefix || "2026";
   
   // 提取班级数字
   const classNum = parseInt(classNo.replace(/\D/g, '')) || 1;
   
-  // 替换格式中的占位符
-  let result = pattern
-    .replace(/YYYY/g, String(gradeYear))
-    .replace(/YY/g, String(gradeYear % 100).padStart(2, '0'))
-    .replace(/NNN/g, String(classNum).padStart(3, '0'))
-    .replace(/NN/g, String(classNum).padStart(2, '0'))
-    .replace(/##/g, String(index).padStart(2, '0'));
-  
-  return result;
+  // 格式：YYYYNN## (年份前缀 + 两位班级号 + 两位序号)
+  return `${yearPrefix}${String(classNum).padStart(2, '0')}${String(index).padStart(2, '0')}`;
 };
 
 // 显示学号翻译：根据学号格式显示可读信息
 const displayStudentIdInfo = (studentId) => {
   const parsed = parseStudentId(studentId);
   if (!parsed) return "";
-  return `${parsed.gradeYear}级${parsed.classNo}第${parsed.index}位`;
+  return `${parsed.yearPrefix}级${parsed.classNo}第${parsed.index}号`;
 };
 
 function showToast(msg, type = "info", duration = 2500) {
@@ -196,7 +171,12 @@ function initDefaultDB() {
     rankSends: [],
     groups: {},
     studentRoster: {},  // 学生名单 { grade: { classNo: [{studentId, studentName, classNo}] } }
-    studentIdFormat: { enabled: false, pattern: "YYYYNNN##", description: "学号格式：YYYY=年级 NNN=班级 ##=序号" },  // 学号格式设置
+    studentIdFormat: { 
+      enabled: true, 
+      pattern: "YYYYNN##", 
+      yearPrefix: "2026",  // 年份前缀（可自定义）
+      description: "学号格式：YYYY（年份前缀）+ NN（两位班级号）+ ##（两位班级人数顺序）" 
+    },  // 学号格式设置
     scoreReviews: [],   // 成绩审核记录
     gradeNotifications: [],  // 全年组通知弹窗 [{id, grade, title, content, level, createdBy, createdAt, readBy: {userId: true}}]
     dismissedNotifications: {}   // 用户已关闭的通知 {userId: {notifId: true}}
@@ -1553,7 +1533,8 @@ function renderUploadScores() {
       <div class="card-title">📋 Excel 模板说明</div>
       <p style="color:var(--text-light); line-height:1.9;">
         • Excel 首行为表头：<b>学号（可留空）、姓名、${subjects.map((s) => s.name).join("、")}</b><br/>
-        • <b>学号列为可选</b>：留空时系统自动分配格式「班级-序号」（如 1-001），下次上传同名学生自动沿用，<b>班主任无需手打学号</b><br/>
+        • <b>学号列为可选</b>：留空时系统自动分配格式「年份+班级+序号」（如 20260101），下次上传同名学生自动沿用，<b>班主任无需手打学号</b><br/>
+        • 学号格式：<b>YYYYNN##</b>（年份前缀${DB.studentIdFormat?.yearPrefix || "2026"} + 两位班级号 + 两位班级人数顺序）<br/>
         • 同班同名学生必须手动补充学号区分（如「张三1」「张三2」或填入学号），系统会检测并提示<br/>
         • 学生姓名是唯一识别方式，请确保姓名填写准确<br/>
         • 留空的分数视为0分<br/>
@@ -1791,11 +1772,11 @@ function handleExcelFile(file) {
           if (existingNameToId[studentName]) {
             studentId = existingNameToId[studentName];
           } else {
-            const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
-            const countSoFar = parsed.filter((p) => p.studentName === studentName).length;
-            if (countSoFar === 0) {
-              studentId = `${classPrefix}-${String(parsed.filter((p) => !existingNameToId[p.studentName]).length + 1).padStart(3, "0")}`;
-              autoGenNotes.push(studentName);
+            // 使用新的学号生成格式：YYYYNN##
+            const countSoFar = parsed.filter((p) => !existingNameToId[p.studentName]).length + 1;
+            if (parsed.filter((p) => p.studentName === studentName).length === 0) {
+              studentId = generateStudentId(grade, classNo, countSoFar);
+              autoGenNotes.push(`${studentName}(${studentId})`);
             } else {
               conflictWarnings.push(`第 ${rowIdx + 2} 行：同班同名「${studentName}」，请手动补充学号区分`);
               continue;
@@ -2082,7 +2063,8 @@ function renderAcademicUploadScores() {
       <p style="color:var(--text-light); line-height:1.9;">
         • Excel 首行为表头：<b>学号（可留空）、姓名、班级、${examSubjects.map((s) => s.name).join("、")}</b><br/>
         • <b>「班级」列必填</b>：系统据此按班级拆分并写入成绩<br/>
-        • <b>学号列为可选</b>：留空时系统自动分配「班级-序号」（如 1-001）<br/>
+        • 学号格式：<b>YYYYNN##</b>（年份前缀${DB.studentIdFormat?.yearPrefix || "2026"} + 两位班级号 + 两位班级人数顺序）<br/>
+        • <b>学号列为可选</b>：留空时系统自动分配学号（如 20260101）<br/>
         • 支持同一文件中混合多个班级<br/>
         • 留空的分数视为0分
       </p>
@@ -2330,10 +2312,11 @@ function handleAcademicExcelFile(fileList) {
               } else if (existing && existing.studentId) {
                 studentId = existing.studentId;
               } else {
-                const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
+                // 使用新的学号生成格式：YYYYNN##
+                const classPrefix = classNo.replace(/\D/g, '') || "1";
                 classCounter[classPrefix] = (classCounter[classPrefix] || 0) + 1;
-                studentId = `${classPrefix}-${String(classCounter[classPrefix]).padStart(3, "0")}`;
-                autoGenNotes.push(`${classNo} ${studentName}`);
+                studentId = generateStudentId(grade, classNo, classCounter[classPrefix]);
+                autoGenNotes.push(`${classNo} ${studentName}(${studentId})`);
               }
             } else {
               if (globalRowIds.has(studentId)) {
@@ -6636,6 +6619,31 @@ function renderScoreReview() {
       </div>
     </div>
 
+    <!-- 学号格式设置 -->
+    <div class="card" style="margin-top:16px">
+      <div class="card-title">🔢 学号格式设置</div>
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group">
+          <label>年份前缀（YYYY）</label>
+          <input type="text" id="yearPrefixInput" value="${DB.studentIdFormat?.yearPrefix || "2026"}" maxlength="4" style="width:120px" placeholder="如2026">
+        </div>
+        <div class="form-group">
+          <label>当前格式</label>
+          <input type="text" value="${DB.studentIdFormat?.yearPrefix || "2026"}NN##" readonly style="width:150px;background:#f5f5f5">
+        </div>
+        <div class="form-group" style="flex:1">
+          <label>格式说明</label>
+          <div style="color:var(--text-light);font-size:12px;padding:8px 0">
+            YYYY = 年份前缀（自定义） + NN = 两位班级号 + ## = 两位班级人数顺序<br>
+            例如：年份前缀设为 <b>2026</b>，则 1班第5位学生的学号为 <b>20260105</b>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn btn-primary" onclick="saveStudentIdFormat()">💾 保存学号格式</button>
+      </div>
+    </div>
+
     <div class="card" style="margin-top:16px">
       <div class="card-title">📊 数据总览（按考试 × 班级）</div>
       <div class="table-wrap" style="margin-top:12px"><table class="data-table">
@@ -6864,6 +6872,27 @@ window.clearAllScores = function() {
     showToast(`已清空 ${targets.length} 条成绩记录`, "success");
     renderScoreReview();
   });
+};
+
+// 保存学号格式设置
+window.saveStudentIdFormat = function() {
+  const yearPrefix = $("yearPrefixInput")?.value?.trim();
+  
+  if (!yearPrefix || !/^\d{4}$/.test(yearPrefix)) {
+    showToast("年份前缀必须是4位数字（如2026）", "error");
+    return;
+  }
+  
+  DB.studentIdFormat = {
+    enabled: true,
+    pattern: "YYYYNN##",
+    yearPrefix: yearPrefix,
+    description: `学号格式：${yearPrefix}（年份前缀）+ NN（两位班级号）+ ##（两位班级人数顺序）`
+  };
+  
+  saveDB(DB);
+  showToast(`学号格式已保存：${yearPrefix}NN##`, "success");
+  renderScoreReview();
 };
 
 // 一键全确认某考试
