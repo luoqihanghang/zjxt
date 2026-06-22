@@ -1624,12 +1624,15 @@ function handleExcelFile(file) {
       const mode = document.querySelector('input[name="u_mode"]:checked').value;
       const selectedSubject = window._selectedSubject || null;
 
-      // 判断是全科还是单科模式
+      if (!examId) {
+        showToast("请先选择考试", "warning");
+        return;
+      }
+
       const isSingleMode = mode === "single" && selectedSubject;
       const targetSubjects = isSingleMode ? [selectedSubject] : subjects.map((s) => s.name);
 
-      // 从已有成绩数据中，构建"姓名 → 已有学号/记录"映射
-      const existingRecords = {};  // studentName -> record
+      const existingRecords = {};
       DB.records.filter((r) => r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo)).forEach((r) => {
         if (!existingRecords[r.studentName]) existingRecords[r.studentName] = r;
       });
@@ -1639,7 +1642,7 @@ function handleExcelFile(file) {
       });
 
       const parsedRowIds = new Set();
-      const parsed = [];  // { studentName, studentId, scores, isNew, oldScores }
+      const parsed = [];
       const autoGenNotes = [];
       const conflictWarnings = [];
 
@@ -1649,10 +1652,8 @@ function handleExcelFile(file) {
         const studentName = String(row["姓名"] || row["name"] || "").trim();
         if (!studentName) continue;
 
-        // 检查该学生在已有记录中的情况
         const existingRecord = existingRecords[studentName];
 
-        // 学号处理
         if (!studentId) {
           if (existingNameToId[studentName]) {
             studentId = existingNameToId[studentName];
@@ -1675,14 +1676,12 @@ function handleExcelFile(file) {
           parsedRowIds.add(studentId);
         }
 
-        // 解析分数
         const scores = {};
         targetSubjects.forEach((sn) => {
           const v = row[sn];
           if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
         });
 
-        // 获取旧分数（单科模式需要）
         const oldScores = existingRecord ? { ...existingRecord.scores } : {};
 
         parsed.push({
@@ -1708,12 +1707,10 @@ function handleExcelFile(file) {
         ? `<div style="padding:10px 12px;background:#fff0f0;border-left:3px solid #c0392b;border-radius:4px;font-size:12px;margin-bottom:10px">⚠️ ${conflictWarnings.join("；")}</div>`
         : "";
 
-      // 单科模式提示
       const modeNote = isSingleMode
-        ? `<div style="padding:10px 12px;background:#e3f2fd;border-left:3px solid #1976d2;border-radius:4px;font-size:12px;margin-bottom:10px">📝 单科上传模式：将更新 <b>${selectedSubject}</b> 科目，已有数据不会被覆盖（仅更新本次上传的科目）</div>`
+        ? `<div style="padding:10px 12px;background:#e3f2fd;border-left:3px solid #1976d2;border-radius:4px;font-size:12px;margin-bottom:10px">📝 单科上传模式：将更新 <b>${selectedSubject}</b> 科目，已有数据不会被覆盖</div>`
         : "";
 
-      // 预览表格
       const previewRows = parsed.slice(0, 30).map((r) => {
         const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, r.studentName) : "";
         const scoreCells = subjectNames2.map((n) => {
@@ -1730,24 +1727,17 @@ function handleExcelFile(file) {
           }
           return `<td><span style='color:#ccc'>-</span></td>`;
         }).join("");
-        return `<tr>
-          ${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}
-          <td>${esc(r.studentName)}</td>
-          ${scoreCells}
-          ${isSingleMode ? "" : `<td><b>${calculateTotal(r.scores, subjects)}</b></td>`}
-          <td>${r.isNew ? "<span class='tag tag-info'>新增</span>" : "<span class='tag tag-success'>更新</span>"}</td>
-        </tr>`;
+        const total = isSingleMode ? "" : `<td><b>${calculateTotal(r.scores, subjects)}</b></td>`;
+        return `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td>${esc(r.studentName)}</td>${scoreCells}${total}<td>${r.isNew ? "<span class='tag tag-info'>新增</span>" : "<span class='tag tag-success'>更新</span>"}</td></tr>`;
       }).join("");
 
       const preview = `
-        <div class="card-title" style="border:none;padding:0;margin-bottom:12px">
-          📋 已解析 ${parsed.length} 名学生 - ${grade} ${classNo} ${isSingleMode ? `（${selectedSubject}）` : ""}
-        </div>
+        <div class="card-title" style="border:none;padding:0;margin-bottom:12px">📋 已解析 ${parsed.length} 名学生 - ${grade} ${classNo}${isSingleMode ? `（${selectedSubject}）` : ""}</div>
         ${modeNote}
         ${autoNote}
         ${conflictNote}
         <div class="review-tip" style="background:#fff3cd;color:#856404;margin:12px 0">
-          ℹ️ 提交后，本班级成绩将进入 <b>「待审核」</b> 状态，教务老师确认后会汇总到全年级并通知相关教师。
+          ℹ️ 提交后，本班级成绩将进入 <b>「待审核」</b> 状态，教务老师确认后会汇总到全年级。
         </div>
         <div class="table-wrap"><table class="data-table">
           <thead><tr>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th>${subjectNames2.map((n) => `<th>${n}</th>`).join("")}${isSingleMode ? "" : "<th>总分</th>"}<th>状态</th></tr></thead>
@@ -1761,7 +1751,6 @@ function handleExcelFile(file) {
       `;
       $("u_preview").innerHTML = preview;
 
-      // 确认提交
       $("confirm_upload").onclick = () => {
         const examName = $("u_exam").selectedOptions[0].text;
         const existingConfirmed = DB.records.filter((r) => r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) && r.status === "confirmed").length;
@@ -1770,7 +1759,7 @@ function handleExcelFile(file) {
           <p>将把 <b>${parsed.length}</b> 名学生${isSingleMode ? `的 <b>${selectedSubject}</b> 成绩` : "成绩"}上传到 <b>${esc(examName)}</b>。</p>
           ${isSingleMode ? `<p style="color:#1976d2;margin-top:8px">📝 单科模式：仅更新 <b>${selectedSubject}</b> 科目，其他科目数据保留不变。</p>` : ""}
           <p style="color:#856404;margin-top:8px">ℹ️ 提交后数据为<b>「待审核」</b>状态，由教务老师确认后才会汇总到全年级。</p>
-          ${existingConfirmed > 0 ? `<p style="color:#28a745;margin-top:8px">✅ 当前班级已有 <b>${existingConfirmed}</b> 条成绩已确认，将予以保留，不会被覆盖。</p>` : ""}
+          ${existingConfirmed > 0 ? `<p style="color:#28a745;margin-top:8px">✅ 当前班级已有 <b>${existingConfirmed}</b> 条成绩已确认，将予以保留。</p>` : ""}
         </div>`, "✓ 确认上传", () => {
           let newRecords = [];
           let updatedCount = 0;
@@ -1778,61 +1767,41 @@ function handleExcelFile(file) {
 
           parsed.forEach((p) => {
             const existing = existingRecords[p.studentName];
-
             if (existing) {
-              // 更新现有记录
-              // 单科模式：只更新选中的科目
-              // 全科模式：完全替换（先清除所有科目分数再设置新分数）
               if (isSingleMode) {
                 Object.assign(existing.scores, p.scores);
               } else {
-                // 全科模式：清除所有科目，重新设置
                 const allSubjects = subjects.map((s) => s.name);
                 allSubjects.forEach((sn) => delete existing.scores[sn]);
                 Object.assign(existing.scores, p.scores);
               }
-
-              // 重新计算总分
               existing.total = calculateTotal(existing.scores, subjects);
               existing.uploadedBy = currentUser.id;
               existing.uploadedAt = Date.now();
-              // 如果原记录是已确认的，保持确认状态；否则设为待审核
               if (existing.status !== "confirmed") {
                 existing.status = "pending";
               }
               updatedCount++;
             } else {
-              // 新建记录
               const scores = {};
               targetSubjects.forEach((sn) => { if (p.scores[sn] != null) scores[sn] = p.scores[sn]; });
               const total = calculateTotal(scores, subjects);
               newRecords.push({
-                id: uid(),
-                examId,
-                grade,
-                classNo,
-                studentId: p.studentId,
-                studentName: p.studentName,
-                scores,
-                total,
-                uploadedBy: currentUser.id,
-                uploadedAt: Date.now(),
-                status: "pending",
-                confirmedAt: null,
-                confirmedBy: null
+                id: uid(), examId, grade, classNo,
+                studentId: p.studentId, studentName: p.studentName, scores, total,
+                uploadedBy: currentUser.id, uploadedAt: Date.now(),
+                status: "pending", confirmedAt: null, confirmedBy: null
               });
               newCount++;
             }
           });
 
-          // 删除原有的待审核记录（姓名匹配）
           const namesToUpdate = new Set(parsed.map((p) => p.studentName));
           DB.records = DB.records.filter((r) => !(
             r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) &&
             r.status === "pending" && namesToUpdate.has(r.studentName)
           ));
 
-          // 添加新记录
           DB.records.push(...newRecords);
           saveDB(DB);
 
@@ -1843,12 +1812,15 @@ function handleExcelFile(file) {
       };
     } catch (err) {
       showToast("文件解析失败：" + err.message, "error");
+      console.error("上传错误:", err);
     }
+  };
+  reader.onerror = function(err) {
+    showToast("文件读取失败：" + err.message, "error");
   };
   reader.readAsArrayBuffer(file);
 }
 
-// 计算总分
 function calculateTotal(scores, subjects) {
   let total = 0;
   subjects.forEach((s) => {
