@@ -31,6 +31,84 @@ const getStudentIdFromRoster = (grade, classNo, studentName) => {
   return found ? found.studentId : "";
 };
 
+// 学号格式解析：根据格式解析学号，如 20260110 -> {gradeYear: 2026, classNo: "1班", index: 10}
+const parseStudentId = (studentId) => {
+  if (!studentId || !DB.studentIdFormat || !DB.studentIdFormat.enabled) return null;
+  const pattern = DB.studentIdFormat.pattern;
+  const id = String(studentId);
+  
+  // 默认格式：YYYYNNN## (4位年级 + N位班级 + 剩余序号)
+  // 例如：20260110 -> 年级2026, 班级01, 序号10
+  const gradeYearMatch = id.match(/^(\d{4})/);
+  if (!gradeYearMatch) return null;
+  const gradeYear = parseInt(gradeYearMatch[1]);
+  
+  // 提取班级号（2位数字）
+  const classMatch = id.match(/^\d{4}(\d{2})/);
+  const classNo = classMatch ? classMatch[1] + "班" : "";
+  
+  // 提取序号（剩余数字）
+  const indexMatch = id.match(/^\d{6}(\d+)/);
+  const index = indexMatch ? parseInt(indexMatch[1]) : 0;
+  
+  return { gradeYear, classNo, index };
+};
+
+// 学号格式验证：根据格式验证学号是否符合规则
+const validateStudentIdFormat = (studentId, grade) => {
+  if (!studentId || !DB.studentIdFormat || !DB.studentIdFormat.enabled) return true;
+  
+  const parsed = parseStudentId(studentId);
+  if (!parsed) return false;
+  
+  // 验证年级是否匹配（取当前年的后两位）
+  const currentYear = new Date().getFullYear();
+  const expectedYear = currentYear % 100 + (grade ? parseInt(grade.replace(/\D/g, '')) - 1 : 0);
+  const actualYear = parsed.gradeYear % 100;
+  
+  // 年级验证（允许±1年误差）
+  if (Math.abs(actualYear - expectedYear) > 1) {
+    return { valid: false, reason: `年级不匹配（学号显示${parsed.gradeYear}级）` };
+  }
+  
+  return { valid: true };
+};
+
+// 生成学号：根据格式生成学号
+const generateStudentId = (grade, classNo, index) => {
+  if (!DB.studentIdFormat || !DB.studentIdFormat.enabled) {
+    // 默认格式：班级-序号
+    const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
+    return `${classPrefix}-${String(index).padStart(3, "0")}`;
+  }
+  
+  // 自定义格式
+  const pattern = DB.studentIdFormat.pattern;
+  const currentYear = new Date().getFullYear();
+  const gradeNum = parseInt(grade.replace(/\D/g, '')) || 1;
+  const gradeYear = currentYear - (1 - gradeNum); // 根据年级计算入学年份
+  
+  // 提取班级数字
+  const classNum = parseInt(classNo.replace(/\D/g, '')) || 1;
+  
+  // 替换格式中的占位符
+  let result = pattern
+    .replace(/YYYY/g, String(gradeYear))
+    .replace(/YY/g, String(gradeYear % 100).padStart(2, '0'))
+    .replace(/NNN/g, String(classNum).padStart(3, '0'))
+    .replace(/NN/g, String(classNum).padStart(2, '0'))
+    .replace(/##/g, String(index).padStart(2, '0'));
+  
+  return result;
+};
+
+// 显示学号翻译：根据学号格式显示可读信息
+const displayStudentIdInfo = (studentId) => {
+  const parsed = parseStudentId(studentId);
+  if (!parsed) return "";
+  return `${parsed.gradeYear}级${parsed.classNo}第${parsed.index}位`;
+};
+
 function showToast(msg, type = "info", duration = 2500) {
   const toast = $("toast");
   toast.className = `toast toast-${type}`;
@@ -118,6 +196,7 @@ function initDefaultDB() {
     rankSends: [],
     groups: {},
     studentRoster: {},  // 学生名单 { grade: { classNo: [{studentId, studentName, classNo}] } }
+    studentIdFormat: { enabled: false, pattern: "YYYYNNN##", description: "学号格式：YYYY=年级 NNN=班级 ##=序号" },  // 学号格式设置
     scoreReviews: [],   // 成绩审核记录
     gradeNotifications: [],  // 全年组通知弹窗 [{id, grade, title, content, level, createdBy, createdAt, readBy: {userId: true}}]
     dismissedNotifications: {}   // 用户已关闭的通知 {userId: {notifId: true}}
@@ -175,7 +254,8 @@ const NAV_MENUS = {
     {
       group: "基础设置", icon: "⚙️", items: [
         { id: "subjects", icon: "📚", text: "学科/分值设置" },
-        { id: "exams", icon: "📝", text: "考试管理" }
+        { id: "exams", icon: "📝", text: "考试管理" },
+        { id: "student_roster", icon: "📋", text: "学生名单管理" }
       ]
     },
     {
@@ -185,15 +265,9 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "学生名单", icon: "🎓", items: [
-        { id: "student_roster", icon: "📋", text: "学生名单管理" }
-      ]
-    },
-    {
       group: "成绩汇总", icon: "📈", items: [
         { id: "academic_upload_scores", icon: "📥", text: "上传全年级成绩（教务）" },
         { id: "score_review", icon: "✅", text: "成绩审核（复审一键确认）" },
-        { id: "grade_summary", icon: "📈", text: "年级成绩汇总" },
         { id: "class_ranking", icon: "🏆", text: "全年级排名" },
         { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" }
       ]
@@ -1207,9 +1281,11 @@ function renderExams() {
   const exams = currentUser.grade ? DB.exams.filter((e) => e.grade === currentUser.grade) : DB.exams;
   const rows = exams.slice().sort((a, b) => b.createdAt - a.createdAt).map((e) => {
     const n = DB.records.filter((r) => r.examId === e.id).length;
+    const subjects = e.subjects ? e.subjects.map((s) => s.name).join(", ") : "未设置";
     return `<tr>
-      <td>${e.name}</td><td>${e.grade}</td><td>${e.date}</td><td>${n}</td>
+      <td>${e.name}</td><td>${e.grade}</td><td>${e.date}</td><td>${subjects}</td><td>${n}</td>
       <td style="display:flex;gap:6px">
+        ${canEdit ? `<button class="btn btn-sm btn-primary" onclick="editExamSubjects('${e.id}')">设置科目</button>` : ""}
         ${canEdit ? `<button class="btn btn-sm btn-danger" onclick="delExam('${e.id}')">删除</button>` : ""}
       </td>
     </tr>`;
@@ -1221,9 +1297,10 @@ function renderExams() {
         <span>📝 考试管理（共 ${exams.length} 次）</span>
         <span class="ct-actions">${canEdit ? `<button class="btn btn-success" onclick="addExam()">+ 新建考试</button>` : ""}</span>
       </div>
+      <p style="color:var(--text-light); margin-bottom:14px;">💡 创建考试后，请设置考试科目及分值。</p>
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>考试名称</th><th>所属年级</th><th>考试日期</th><th>已上传学生数</th><th>操作</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="5"><div class="empty-state"><div class="es-tip">暂无考试</div></div></td></tr>`}</tbody>
+        <thead><tr><th>考试名称</th><th>所属年级</th><th>考试日期</th><th>考试科目</th><th>已上传学生数</th><th>操作</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="6"><div class="empty-state"><div class="es-tip">暂无考试</div></div></td></tr>`}</tbody>
       </table></div>
     </div>
   `;
@@ -1244,8 +1321,57 @@ window.addExam = function () {
     const grade = $("m_exam_grade").value.trim();
     const date = $("m_exam_date").value;
     if (!name || !grade || !date) { showToast("请完整填写信息", "error"); return false; }
-    DB.exams.push({ id: uid(), name, grade, date, createdAt: Date.now() }); saveDB(DB);
-    showToast("考试创建成功", "success"); renderExams();
+    DB.exams.push({ id: uid(), name, grade, date, createdAt: Date.now(), subjects: [] }); saveDB(DB);
+    showToast("考试创建成功，请设置考试科目", "success"); renderExams();
+  });
+};
+
+window.editExamSubjects = function (examId) {
+  const exam = DB.exams.find((e) => e.id === examId);
+  if (!exam) return;
+  
+  const gradeSubjects = DB.subjects[exam.grade] || [];
+  const existingSubjects = exam.subjects || [];
+  const existingNames = new Set(existingSubjects.map((s) => s.name));
+  
+  const subjectOptions = gradeSubjects.map((s) => {
+    const isChecked = existingNames.has(s.name);
+    return `<label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding:8px;background:var(--bg-light);border-radius:6px;">
+      <input type="checkbox" name="exam_subject" value="${s.name}" ${isChecked ? "checked" : ""} />
+      <span>${s.name}</span>
+      <input type="number" placeholder="满分" value="${isChecked ? (existingSubjects.find((es) => es.name === s.name)?.fullScore || s.fullScore) : s.fullScore}" 
+             style="width:80px;padding:4px;border:1px solid var(--border);border-radius:4px;margin-left:auto;" />
+    </label>`;
+  }).join("");
+
+  showModal(`设置考试科目 - ${exam.name}`, `
+    <div style="max-height:400px;overflow-y:auto;">
+      ${subjectOptions || "<p style='color:var(--text-light)'>请先在学科设置中添加学科</p>"}
+    </div>
+  `, "保存", () => {
+    const checkboxes = document.querySelectorAll('input[name="exam_subject"]');
+    const selectedSubjects = [];
+    
+    checkboxes.forEach((cb) => {
+      if (cb.checked) {
+        const label = cb.parentElement;
+        const fullScoreInput = label.querySelector('input[type="number"]');
+        const fullScore = fullScoreInput ? +fullScoreInput.value || 100 : 100;
+        selectedSubjects.push({
+          name: cb.value,
+          fullScore: fullScore,
+          excellent: Math.round(fullScore * 0.85),
+          good: Math.round(fullScore * 0.7),
+          pass: Math.round(fullScore * 0.6),
+          low: Math.round(fullScore * 0.4)
+        });
+      }
+    });
+    
+    exam.subjects = selectedSubjects;
+    saveDB(DB);
+    showToast("考试科目设置成功", "success");
+    renderExams();
   });
 };
 
@@ -1837,32 +1963,93 @@ function renderAcademicUploadScores() {
   const grade = currentUser.grade;
   const exams = DB.exams.filter((e) => e.grade === grade);
   const subjects = DB.subjects[grade] || [];
-  const showStudentId = hasRoster(grade);
 
   if (subjects.length === 0) {
     $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">⚠️</div><div class="es-title">${grade} 尚未配置学科</div><div class="es-tip">请先进行学科设置</div></div></div>`;
     return;
   }
 
+  if (exams.length === 0) {
+    $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📝</div><div class="es-title">暂无考试</div><div class="es-tip">请先在考试管理中创建考试</div></div></div>`;
+    return;
+  }
+
+  // 获取当前选中考试的科目配置
+  const selectedExam = exams[0];
+  const examSubjects = selectedExam.subjects && selectedExam.subjects.length > 0 
+    ? selectedExam.subjects 
+    : subjects.map((s) => ({ name: s.name, fullScore: s.fullScore }));
+
+  // 渲染科目上传进度（接受 examId 参数，避免依赖未插入的 DOM 元素）
+  const renderSubjectProgress = (progressExamId) => {
+    const eid = progressExamId || (exams[0] ? exams[0].id : null);
+    if (!eid) return `<div style="padding:12px;background:var(--bg-light);border-radius:6px;text-align:center;color:var(--text-light)">暂无考试</div>`;
+    const recs = DB.records.filter((r) => r.examId === eid && r.grade === grade);
+    const studentCount = new Set(recs.map((r) => `${r.classNo}|${r.studentName}`)).size;
+
+    if (studentCount === 0) {
+      return `<div style="padding:12px;background:var(--bg-light);border-radius:6px;text-align:center;color:var(--text-light)">暂无上传数据</div>`;
+    }
+
+    const progressHtml = examSubjects.map((s) => {
+      const uploaded = recs.filter((r) => r.scores[s.name] != null && r.scores[s.name] !== "").length;
+      const pct = Math.round((uploaded / studentCount) * 100);
+      const color = pct === 100 ? '#1a7f37' : '#1976d2';
+      return `<div style="flex:1;min-width:100px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:12px">
+          <span>${s.name}</span><span>${uploaded}/${studentCount}</span>
+        </div>
+        <div style="height:6px;background:var(--border-color);border-radius:3px">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width 0.3s"></div>
+        </div>
+      </div>`;
+    }).join("");
+
+    return `<div style="padding:12px;background:var(--bg-light);border-radius:6px">
+      <div style="font-weight:600;margin-bottom:10px">📊 各科目上传进度（${studentCount} 名学生）</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">${progressHtml}</div>
+    </div>`;
+  };
+
   $("pageContent").innerHTML = `
     <div class="card">
-      <div class="card-title">📥 上传 ${grade} 全年级成绩（所有班级一次导入）</div>
+      <div class="card-title">📥 上传 ${grade} 全年级成绩</div>
       <div class="form-row">
-        <div class="form-group"><label>选择考试</label>
-          <select id="a_exam">
+        <div class="form-group" style="flex:1"><label>选择考试</label>
+          <select id="a_exam" onchange="window.onAcademicExamChange()">
             ${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}
-            ${exams.length === 0 ? `<option>暂无考试</option>` : ""}
           </select>
         </div>
-        <div class="form-group" style="display:flex;align-items:flex-end">
-          <button class="btn btn-info" onclick="window.downloadAcademicTemplate()">⬇ 下载全年级Excel模板</button>
+      </div>
+
+      <!-- 科目上传进度 -->
+      <div id="a_subject_progress" style="margin-bottom:16px">${renderSubjectProgress()}</div>
+
+      <!-- 上传模式 -->
+      <div style="margin-bottom:16px">
+        <div style="display:flex;gap:16px;margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="radio" name="a_mode" value="full" checked onchange="window.onAcademicModeChange()" /> 全科上传
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="radio" name="a_mode" value="single" onchange="window.onAcademicModeChange()" /> 单科上传
+          </label>
         </div>
+        <div id="a_subject_select" style="display:none">
+          <div style="margin-bottom:8px;font-size:13px;color:var(--text-light)">选择要上传的科目：</div>
+          <div id="a_subject_buttons" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
+      </div>
+
+      <div class="form-group" style="display:flex;align-items:flex-end;gap:10px">
+        <button class="btn btn-info" onclick="window.downloadAcademicTemplate()">⬇ 下载Excel模板</button>
+        <button class="btn btn-secondary" onclick="window.downloadAcademicSingleTemplate()" id="a_dl_single" style="display:none">⬇ 下载单科模板</button>
       </div>
 
       <div id="a_uploadArea" class="upload-area">
         <div class="ua-icon">📂</div>
-        <div class="ua-title">点击选择多个 Excel 文件（每班一个，可一次框选 .xlsx / .xls）</div>
-        <div class="ua-tip">或直接拖拽多个文件到此区域。系统按「班级」列合并，一次提交全部班级</div>
+        <div class="ua-title" id="a_upload_title">点击选择多个 Excel 文件（每班一个，可一次框选）</div>
+        <div class="ua-tip" id="a_upload_tip">系统按「班级」列合并，自动匹配学生</div>
         <input type="file" id="a_file" accept=".xlsx,.xls" multiple style="display:none" />
       </div>
 
@@ -1871,22 +2058,114 @@ function renderAcademicUploadScores() {
     <div class="card">
       <div class="card-title">📋 Excel 模板说明（教务端）</div>
       <p style="color:var(--text-light); line-height:1.9;">
-        • Excel 首行为表头：<b>学号（可留空）、姓名、班级、${subjects.map((s) => s.name).join("、")}</b><br/>
+        • Excel 首行为表头：<b>学号（可留空）、姓名、班级、${examSubjects.map((s) => s.name).join("、")}</b><br/>
         • <b>「班级」列必填</b>：系统据此按班级拆分并写入成绩<br/>
-        • <b>学号列为可选</b>：留空时系统自动分配「班级-序号」（如 1-001、2-003），下次上传同班级同名学生自动沿用<br/>
-        • 支持同一文件中混合多个班级（如：1班、2班、3班……）<br/>
-        • 同班同名学生必须手动补充学号区分（如「张三1」「张三2」），系统会检测并提示<br/>
+        • <b>学号列为可选</b>：留空时系统自动分配「班级-序号」（如 1-001）<br/>
+        • 支持同一文件中混合多个班级<br/>
         • 留空的分数视为缺考，不计入统计
       </p>
     </div>
   `;
 
+  // 渲染科目按钮
+  window.renderAcademicSubjectButtons = function () {
+    const examId = $("a_exam").value;
+    const recs = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+    const uploadedSubjects = new Set();
+    examSubjects.forEach((s) => {
+      const hasScore = recs.some((r) => r.scores[s.name] != null && r.scores[s.name] !== "");
+      if (hasScore) uploadedSubjects.add(s.name);
+    });
+
+    const container = $("a_subject_buttons");
+    container.innerHTML = examSubjects.map((s) => {
+      const isUploaded = uploadedSubjects.has(s.name);
+      const isSelected = window._aSelectedSubject === s.name;
+      const cls = isSelected ? "btn btn-primary" : (isUploaded ? "btn btn-success" : "btn btn-secondary");
+      return `<button class="${cls}" onclick="window.selectAcademicSubject('${s.name}')" style="min-width:80px">
+        ${isSelected ? "✓" : (isUploaded ? "✓" : "○")} ${s.name}
+      </button>`;
+    }).join("");
+  };
+
+  // 初始化
+  window._aSelectedSubject = null;
+  renderAcademicSubjectButtons();
+
+  // 考试切换
+  window.onAcademicExamChange = function () {
+    renderAcademicSubjectProgress();
+    renderAcademicSubjectButtons();
+  };
+
+  // 模式切换
+  window.onAcademicModeChange = function () {
+    const mode = document.querySelector('input[name="a_mode"]:checked').value;
+    $("a_subject_select").style.display = mode === "single" ? "block" : "none";
+    $("a_dl_single").style.display = mode === "single" ? "inline-block" : "none";
+    $("a_upload_title").textContent = mode === "single" 
+      ? "选择要上传科目的 Excel 文件" 
+      : "点击选择多个 Excel 文件（每班一个，可一次框选）";
+    window._aSelectedSubject = null;
+    renderAcademicSubjectButtons();
+  };
+
+  // 选择科目
+  window.selectAcademicSubject = function (subjectName) {
+    window._aSelectedSubject = subjectName;
+    renderAcademicSubjectButtons();
+    $("a_preview").innerHTML = "";
+  };
+
+  // 渲染进度
+  function renderAcademicSubjectProgress() {
+    const examId = $("a_exam").value;
+    const recs = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+    const studentCount = new Set(recs.map((r) => `${r.classNo}|${r.studentName}`)).size;
+
+    if (studentCount === 0) {
+      $("a_subject_progress").innerHTML = `<div style="padding:12px;background:var(--bg-light);border-radius:6px;text-align:center;color:var(--text-light)">暂无上传数据</div>`;
+      return;
+    }
+
+    const progressHtml = examSubjects.map((s) => {
+      const uploaded = recs.filter((r) => r.scores[s.name] != null && r.scores[s.name] !== "").length;
+      const pct = Math.round((uploaded / studentCount) * 100);
+      const color = pct === 100 ? '#1a7f37' : '#1976d2';
+      return `<div style="flex:1;min-width:100px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:12px">
+          <span>${s.name}</span><span>${uploaded}/${studentCount}</span>
+        </div>
+        <div style="height:6px;background:var(--border-color);border-radius:3px">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width 0.3s"></div>
+        </div>
+      </div>`;
+    }).join("");
+
+    $("a_subject_progress").innerHTML = `<div style="padding:12px;background:var(--bg-light);border-radius:6px">
+      <div style="font-weight:600;margin-bottom:10px">📊 各科目上传进度（${studentCount} 名学生）</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap">${progressHtml}</div>
+    </div>`;
+  }
+
   const ua = $("a_uploadArea");
-  ua.onclick = () => $("a_file").click();
+  ua.onclick = () => {
+    const mode = document.querySelector('input[name="a_mode"]:checked').value;
+    if (mode === "single" && !window._aSelectedSubject) {
+      showToast("请先选择要上传的科目", "warning");
+      return;
+    }
+    $("a_file").click();
+  };
   ua.addEventListener("dragover", (e) => { e.preventDefault(); ua.classList.add("dragover"); });
   ua.addEventListener("dragleave", () => ua.classList.remove("dragover"));
   ua.addEventListener("drop", (e) => {
     e.preventDefault(); ua.classList.remove("dragover");
+    const mode = document.querySelector('input[name="a_mode"]:checked').value;
+    if (mode === "single" && !window._aSelectedSubject) {
+      showToast("请先选择要上传的科目", "warning");
+      return;
+    }
     if (e.dataTransfer.files.length) handleAcademicExcelFile(e.dataTransfer.files);
   });
   $("a_file").addEventListener("change", (e) => {
@@ -1896,17 +2175,22 @@ function renderAcademicUploadScores() {
 
 window.downloadAcademicTemplate = function () {
   const grade = currentUser.grade;
-  const subjects = DB.subjects[grade] || [];
+  const examId = $("a_exam")?.value;
+  const exam = examId ? DB.exams.find((e) => e.id === examId) : null;
+  const subjects = exam && exam.subjects && exam.subjects.length > 0 
+    ? exam.subjects 
+    : (DB.subjects[grade] || []);
+  
   const headers = ["学号（可留空）", "姓名", "班级", ...subjects.map((s) => s.name)];
   const rows = [headers];
   const sampleClasses = ["1班", "2班", "3班"];
   sampleClasses.forEach((c) => {
     for (let i = 1; i <= 3; i++) {
       rows.push([
-        "",  // 学号留空，系统自动分配
+        "",
         `${c}学生${i}`,
         c,
-        ...subjects.map((s) => Math.floor(Math.random() * s.fullScore))
+        ...subjects.map((s) => Math.floor(Math.random() * (s.fullScore || 100)))
       ]);
     }
   });
@@ -1917,34 +2201,63 @@ window.downloadAcademicTemplate = function () {
   showToast("模板已下载", "success");
 };
 
+window.downloadAcademicSingleTemplate = function () {
+  if (!window._aSelectedSubject) {
+    showToast("请先选择科目", "warning");
+    return;
+  }
+  const grade = currentUser.grade;
+  const subject = window._aSelectedSubject;
+  const headers = ["学号（可留空）", "姓名", "班级", subject];
+  const rows = [headers];
+  const sampleClasses = ["1班", "2班", "3班"];
+  sampleClasses.forEach((c) => {
+    for (let i = 1; i <= 3; i++) {
+      rows.push(["", `${c}学生${i}`, c, Math.floor(Math.random() * 80 + 20)]);
+    }
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `${subject}成绩`);
+  XLSX.writeFile(wb, `${grade}_${subject}_成绩模板.xlsx`);
+  showToast(`「${subject}」模板已下载`, "success");
+};
+
 function handleAcademicExcelFile(fileList) {
   const files = Array.from(fileList);
   if (files.length === 0) return;
 
   const grade = currentUser.grade;
-  const subjects = DB.subjects[grade] || [];
-  const subjectNames = subjects.map((s) => s.name);
+  const examId = $("a_exam").value;
+  const exam = DB.exams.find((e) => e.id === examId);
+  const gradeSubjects = DB.subjects[grade] || [];
+  const examSubjects = exam && exam.subjects && exam.subjects.length > 0 
+    ? exam.subjects 
+    : gradeSubjects.map((s) => ({ name: s.name, fullScore: s.fullScore }));
   const showStudentId = hasRoster(grade);
+  const mode = document.querySelector('input[name="a_mode"]:checked')?.value || "full";
+  const selectedSubject = window._aSelectedSubject || null;
+  const isSingleMode = mode === "single" && selectedSubject;
 
-  // 从已有成绩数据中，构建"班级+姓名 → 学号"映射
-  const existingKeyToId = {};
-  DB.records.filter((r) => r.grade === grade).forEach((r) => {
+  // 确定要解析的科目
+  const targetSubjects = isSingleMode ? [selectedSubject] : examSubjects.map((s) => s.name);
+
+  // 从已有成绩数据中，构建"班级+姓名 → 记录"映射
+  const existingRecords = {};
+  DB.records.filter((r) => r.examId === examId && r.grade === grade).forEach((r) => {
     const key = `${r.classNo}|${r.studentName}`;
-    if (!existingKeyToId[key]) existingKeyToId[key] = r.studentId;
+    if (!existingRecords[key]) existingRecords[key] = r;
   });
 
   const allParsed = [];
   const conflictWarnings = [];
   const autoGenNotes = [];
   const classStat = {};
-  const classCounter = {};      // 各班级内部计数器（用于自增学号）
-  const globalRowIds = new Set(); // 跨文件检查学号冲突
-
-  // 逐个文件异步解析
-  let processed = 0;
+  const classCounter = {};
+  const globalRowIds = new Set();
   const totalFiles = files.length;
 
-  function parseSingleFile(file, fileIdx) {
+  function parseSingleFile(file) {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = function (e) {
@@ -1958,56 +2271,44 @@ function handleAcademicExcelFile(fileList) {
             const row = rows[rowIdx];
             let studentId = String(row["学号"] || row["学号（可留空）"] || row["id"] || "").trim();
             const studentName = String(row["姓名"] || row["name"] || "").trim();
-            // 归一化班级号："7班" / "7" / "七班" 全部变为 "7班"
             let classNoRaw = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
             const classNo = displayClassNo(classNoRaw) || classNoRaw;
             if (!studentName) continue;
             if (!classNo || classNo === "") {
-              conflictWarnings.push(`文件「${file.name}」学生「${studentName}」缺少班级信息，已跳过`);
+              conflictWarnings.push(`文件「${file.name}」学生「${studentName}」缺少班级信息`);
               continue;
             }
 
             const key = `${classNo}|${studentName}`;
+            const existing = existingRecords[key];
 
             if (!studentId) {
-              if (existingKeyToId[key]) {
-                // 同班同姓名已有历史学号 → 复用
-                studentId = existingKeyToId[key];
+              if (existing && existing.studentId) {
+                studentId = existing.studentId;
               } else {
-                // 本次解析内已出现该班级+姓名 → 冲突
-                const localCount = allParsed.filter((p) => p.classNo === classNo && p.studentName === studentName).length;
-                if (localCount === 0) {
-                  // 新学生 → 自动分配
-                  const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
-                  classCounter[classPrefix] = (classCounter[classPrefix] || 0) + 1;
-                  studentId = `${classPrefix}-${String(classCounter[classPrefix]).padStart(3, "0")}`;
-                  autoGenNotes.push(`${classNo} ${studentName}`);
-                } else {
-                  conflictWarnings.push(`文件「${file.name}」第 ${rowIdx + 2} 行：${classNo} 同班同名「${studentName}」，请手动补充学号区分`);
-                  continue;
-                }
+                const classPrefix = classNo.replace(/[^0-9A-Za-z]/g, '') || classNo;
+                classCounter[classPrefix] = (classCounter[classPrefix] || 0) + 1;
+                studentId = `${classPrefix}-${String(classCounter[classPrefix]).padStart(3, "0")}`;
+                autoGenNotes.push(`${classNo} ${studentName}`);
               }
             } else {
-              // 用户自己填了学号，跨文件检查冲突
               if (globalRowIds.has(studentId)) {
-                conflictWarnings.push(`文件「${file.name}」中学号「${studentId}」与其他文件重复：${studentName}`);
+                conflictWarnings.push(`学号「${studentId}」重复：${studentName}`);
                 continue;
               }
               globalRowIds.add(studentId);
             }
 
             const scores = {};
-            subjectNames.forEach((sn) => {
+            targetSubjects.forEach((sn) => {
               const v = row[sn];
               if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
             });
-            let total = 0;
-            subjectNames.forEach((sn) => { if (scores[sn] != null) total += scores[sn]; });
+
             allParsed.push({
-              id: uid(), examId: $("a_exam").value, grade, classNo,
-              studentId, studentName, scores, total,
-              uploadedBy: currentUser.id, uploadedAt: Date.now(),
-              status: "confirmed", confirmedAt: Date.now(), confirmedBy: currentUser.id
+              classNo, studentId, studentName, scores,
+              existingScores: existing ? { ...existing.scores } : {},
+              isUpdate: !!existing
             });
             classStat[classNo] = (classStat[classNo] || 0) + 1;
           }
@@ -2021,14 +2322,13 @@ function handleAcademicExcelFile(fileList) {
     });
   }
 
-  // 按顺序解析所有文件；完成后统一渲染
   (async function () {
     for (let i = 0; i < files.length; i++) {
-      await parseSingleFile(files[i], i);
+      await parseSingleFile(files[i]);
     }
 
     if (allParsed.length === 0) {
-      showToast(conflictWarnings.length ? `未能解析有效学生：${conflictWarnings[0]}` : "未能解析任何有效学生，请检查列名", "error");
+      showToast(conflictWarnings.length ? `未能解析：${conflictWarnings[0]}` : "未能解析有效学生", "error");
       return;
     }
 
@@ -2036,44 +2336,97 @@ function handleAcademicExcelFile(fileList) {
     const classInfo = classList.map((c) => `${c}（${classStat[c]}人）`).join("、");
 
     const autoNote = autoGenNotes.length > 0
-      ? `<div style="padding:10px 12px;background:#e6f7ea;border-left:3px solid #1a7f37;border-radius:4px;font-size:12px;margin-bottom:10px">💡 已为 ${autoGenNotes.length} 位学生自动分配学号：${autoGenNotes.slice(0, 6).join("、")}${autoGenNotes.length > 6 ? "……" : ""}</div>`
+      ? `<div style="padding:10px 12px;background:#e6f7ea;border-left:3px solid #1a7f37;border-radius:4px;font-size:12px;margin-bottom:10px">💡 已为 ${autoGenNotes.length} 位学生自动分配学号</div>`
       : "";
     const conflictNote = conflictWarnings.length > 0
-      ? `<div style="padding:10px 12px;background:#fff0f0;border-left:3px solid #c0392b;border-radius:4px;font-size:12px;margin-bottom:10px">⚠️ ${conflictWarnings.slice(0, 8).join("；")}${conflictWarnings.length > 8 ? `（共${conflictWarnings.length}条）` : ""}</div>`
+      ? `<div style="padding:10px 12px;background:#fff0f0;border-left:3px solid #c0392b;border-radius:4px;font-size:12px;margin-bottom:10px">⚠️ ${conflictWarnings.slice(0, 5).join("；")}${conflictWarnings.length > 5 ? "……" : ""}</div>`
       : "";
+    const modeNote = isSingleMode
+      ? `<div style="padding:10px 12px;background:#e3f2fd;border-left:3px solid #1976d2;border-radius:4px;font-size:12px;margin-bottom:10px">📝 单科上传模式：仅更新「${selectedSubject}」科目数据</div>`
+      : "";
+
+    const previewRows = allParsed.slice(0, 40).map((r) => {
+      const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
+      const scoreCells = targetSubjects.map((sn) => {
+        const newScore = r.scores[sn];
+        const oldScore = r.existingScores[sn];
+        if (newScore != null) {
+          if (oldScore != null && oldScore !== newScore) {
+            return `<td style="color:#d35400"><b>${newScore}</b> <span style="font-size:11px">（原${oldScore}）</span></td>`;
+          }
+          return `<td><b>${newScore}</b></td>`;
+        }
+        if (oldScore != null) {
+          return `<td style="color:#888">${oldScore} <span style="font-size:11px">（保留）</span></td>`;
+        }
+        return `<td><span style='color:#ccc'>-</span></td>`;
+      }).join("");
+      return `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td>${esc(r.studentName)}</td>${scoreCells}<td>${r.isUpdate ? "<span class='tag tag-success'>更新</span>" : "<span class='tag tag-info'>新增</span>"}</td></tr>`;
+    }).join("");
 
     $("a_preview").innerHTML = `
       <div class="card-title" style="border:none;padding:0;margin-bottom:12px">
-        📋 已解析 ${totalFiles} 个文件 · ${allParsed.length} 名学生 · 共 ${classList.length} 个班级：${esc(classInfo)}
+        📋 已解析 ${totalFiles} 个文件 · ${allParsed.length} 名学生 · ${isSingleMode ? `（${selectedSubject}）` : ""}
       </div>
+      ${modeNote}
       ${autoNote}
       ${conflictNote}
       <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>班级</th>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th>${subjectNames.map((n) => `<th>${n}</th>`).join("")}<th>总分</th></tr></thead>
-        <tbody>${allParsed.slice(0, 40).map((r) => {
-          const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
-          return `<tr><td><b>${esc(r.classNo)}</b></td>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td>${esc(r.studentName)}</td>${subjectNames.map((n) => `<td>${r.scores[n] != null ? r.scores[n] : "<span style='color:#ccc'>缺考</span>"}</td>`).join("")}<td><b>${r.total}</b></td></tr>`;
-        }).join("")}</tbody>
+        <thead><tr>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th>${targetSubjects.map((n) => `<th>${n}</th>`).join("")}<th>状态</th></tr></thead>
+        <tbody>${previewRows}</tbody>
       </table></div>
       ${allParsed.length > 40 ? `<p style="text-align:center;color:var(--text-light);margin-top:10px">仅显示前 40 行，共 ${allParsed.length} 行</p>` : ""}
       <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end">
         <button class="btn btn-secondary" onclick="renderAcademicUploadScores()">取消</button>
-        <button class="btn btn-success" id="a_confirm_upload">✓ 确认导入 ${allParsed.length} 条成绩（${classList.length} 个班级）</button>
+        <button class="btn btn-success" id="a_confirm_upload">✓ 确认导入</button>
       </div>
     `;
 
     $("a_confirm_upload").onclick = () => {
-      const examId = $("a_exam").value;
-      DB.records = DB.records.filter((r) => {
-        if (r.examId !== examId || r.grade !== grade) return true;
-        if (!classList.includes(r.classNo)) return true;
-        const match = allParsed.find((p) => p.classNo === r.classNo && p.studentId === r.studentId);
-        return !match;
+      let newCount = 0, updateCount = 0;
+
+      allParsed.forEach((p) => {
+        const key = `${p.classNo}|${p.studentName}`;
+        const existing = existingRecords[key];
+
+        if (existing) {
+          // 更新现有记录
+          if (isSingleMode) {
+            Object.assign(existing.scores, p.scores);
+          } else {
+            gradeSubjects.forEach((s) => delete existing.scores[s.name]);
+            Object.assign(existing.scores, p.scores);
+          }
+          existing.total = 0;
+          gradeSubjects.forEach((s) => {
+            if (existing.scores[s.name] != null) existing.total += existing.scores[s.name];
+          });
+          existing.uploadedBy = currentUser.id;
+          existing.uploadedAt = Date.now();
+          updateCount++;
+        } else {
+          // 新建记录
+          const scores = {};
+          targetSubjects.forEach((sn) => { if (p.scores[sn] != null) scores[sn] = p.scores[sn]; });
+          let total = 0;
+          gradeSubjects.forEach((s) => {
+            if (scores[s.name] != null) total += scores[s.name];
+          });
+          DB.records.push({
+            id: uid(), examId, grade, classNo: p.classNo,
+            studentId: p.studentId, studentName: p.studentName, scores, total,
+            uploadedBy: currentUser.id, uploadedAt: Date.now(),
+            status: "confirmed", confirmedAt: Date.now(), confirmedBy: currentUser.id
+          });
+          newCount++;
+        }
       });
-      allParsed.forEach((p) => DB.records.push(p));
+
       saveDB(DB);
-      showToast(`成功导入 ${allParsed.length} 条学生成绩（${classList.length} 个班级）`, "success");
+      showToast(`成功新增 ${newCount} 条、更新 ${updateCount} 条${isSingleMode ? `「${selectedSubject}」科目` : ""}成绩`, "success");
       $("a_preview").innerHTML = "";
+      // 刷新进度显示
+      if (window.onAcademicExamChange) window.onAcademicExamChange();
     };
   })();
 }
@@ -2198,18 +2551,7 @@ function exportSummaryExcel(examId, grade) {
   const records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
   if (records.length === 0) { showToast("没有数据", "error"); return; }
 
-  const classGroups = {};
-  records.forEach((r) => { if (!classGroups[r.classNo]) classGroups[r.classNo] = []; classGroups[r.classNo].push(r); });
-  const classes = Object.keys(classGroups).sort();
   const totalStats = aggregateStats(records, subjects);
-
-  // 各班均分表
-  const t1 = [["班级", "人数", ...subjects.map((s) => s.name + "均分"), "总分均分"]];
-  classes.forEach((cls) => {
-    const cs = aggregateStats(classGroups[cls], subjects);
-    t1.push([cls, classGroups[cls].length, ...subjects.map((s) => +fmt(cs[s.name].avg)), +fmt(cs["总分"].avg)]);
-  });
-  t1.push(["全年级", records.length, ...subjects.map((s) => +fmt(totalStats[s.name].avg)), +fmt(totalStats["总分"].avg)]);
 
   const showStudentId = hasRoster(grade);
   const thId = showStudentId ? ["学号"] : [];
@@ -2229,7 +2571,6 @@ function exportSummaryExcel(examId, grade) {
   });
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t1), "各班均分");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t2), "学生明细");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t3), "统计详情");
   XLSX.writeFile(wb, `${grade}_${exam.name}_成绩汇总.xlsx`);
@@ -5509,6 +5850,67 @@ window.downloadCustomAnalysis = function () {
   showToast("报告已下载", "success");
 };
 
+// ========== 教务端：学号格式设置 ==========
+window.openStudentIdFormatSettings = function () {
+  const format = DB.studentIdFormat || { enabled: false, pattern: "YYYYNNN##" };
+  
+  showModal("📑 学号格式设置", `
+    <div style="max-width:500px">
+      <div style="margin-bottom:16px;padding:12px;background:#fff3cd;border-radius:6px;font-size:13px">
+        <b>学号格式说明：</b><br/>
+        • <code>YYYY</code> = 4位入学年份（如 2026）<br/>
+        • <code>NNN</code> = 3位班级号（不足补0，如 001）<br/>
+        • <code>##</code> = 2位序号（不足补0，如 10）<br/>
+        <br/>
+        <b>示例：</b><code>20260110</code> → 翻译为 <b>2026级1班第10位学生</b>
+      </div>
+      
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="id_format_enabled" ${format.enabled ? "checked" : ""} />
+          启用自定义学号格式
+        </label>
+      </div>
+      
+      <div class="form-group" style="margin-top:12px">
+        <label>学号格式</label>
+        <input type="text" id="id_format_pattern" value="${format.pattern}" placeholder="如 YYYYNNN##"
+               style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px" />
+        <div style="font-size:12px;color:var(--text-light);margin-top:4px">
+          提示：YYYY=年份 NNN=班级号 ##=序号
+        </div>
+      </div>
+      
+      <div style="margin-top:16px;padding:12px;background:var(--bg-light);border-radius:6px">
+        <b>格式预览：</b>
+        <div style="margin-top:8px;font-size:13px">
+          <div>2026级1班第1位学生 → <code>20260101</code></div>
+          <div>2026级1班第10位学生 → <code>20260110</code></div>
+          <div>2026级2班第5位学生 → <code>20260205</code></div>
+          <div>2026级12班第100位学生 → <code>202612100</code></div>
+        </div>
+      </div>
+    </div>
+  `, "保存", () => {
+    const enabled = document.getElementById("id_format_enabled").checked;
+    const pattern = document.getElementById("id_format_pattern").value.trim();
+    
+    if (enabled && !pattern) {
+      showToast("请输入学号格式", "warning");
+      return false;
+    }
+    
+    DB.studentIdFormat = {
+      enabled,
+      pattern: enabled ? pattern : "YYYYNNN##",
+      description: enabled ? `学号格式：${pattern}` : "使用默认格式"
+    };
+    saveDB(DB);
+    showToast("学号格式设置已保存", "success");
+    renderStudentRoster();
+  });
+};
+
 // ========== 教务端：学生名单管理 ==========
 function renderStudentRoster() {
   if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
@@ -5525,6 +5927,11 @@ function renderStudentRoster() {
   const rosterClasses = Object.keys(DB.studentRoster[grade] || {}).sort();
   const totalStudents = rosterClasses.reduce((sum, c) => sum + (DB.studentRoster[grade][c] || []).length, 0);
 
+  const idFormat = DB.studentIdFormat || { enabled: false, pattern: "YYYYNNN##" };
+  const formatStatus = idFormat.enabled 
+    ? `<span style="color:#1a7f37">✓ 已启用</span> - 格式：${idFormat.pattern}` 
+    : `<span style="color:var(--text-light)">未启用（使用默认格式）</span>`;
+
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">📋 ${grade} 学生名单管理</div>
@@ -5536,6 +5943,17 @@ function renderStudentRoster() {
         </div>
         <div style="margin-top:10px;color:var(--text-light);font-size:13px">
           📊 已上传 ${rosterClasses.length} 个班级，共 ${totalStudents} 名学生。已上传的名单可在每次考试中直接提取使用。
+        </div>
+      </div>
+      <div style="margin-bottom:16px;padding:12px;background:#e3f2fd;border-left:3px solid #1976d2;border-radius:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <b>📑 学号格式设置</b>：${formatStatus}
+            <div style="font-size:12px;color:var(--text-light);margin-top:4px">
+              格式示例：如 <code>20260110</code> → 翻译为 <b>2026级1班第10位学生</b>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="window.openStudentIdFormatSettings()">⚙️ 设置学号格式</button>
         </div>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
