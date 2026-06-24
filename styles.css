@@ -1202,6 +1202,388 @@ table.data-table tr.diag-missing {
 
 .tab:hover { color: var(--primary); }
 
+/* ===== 成绩分析模块专用样式 ===== */
+.analysis-section { margin-bottom: 24px; }
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--primary-light);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title .st-icon { font-size: 20px; }
+.section-annotation {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #f0f7ff, #f5f0ff);
+  border-radius: 8px;
+  border-left: 4px solid var(--primary);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--text);
+}
+.section-annotation h5 {
+  color: var(--primary);
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+/* 建议动作列表 */
+.action-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.action-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  transition: all 0.2s;
+}
+.action-item:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  transform: translateX(4px);
+}
+.action-priority {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+}
+.action-item.p1 { border-left-color: #dc3545; }
+.action-item.p1 .action-priority { background: #dc3545; }
+.action-item.p2 { border-left-color: #fd7e14; }
+.action-item.p2 .action-priority { background: #fd7e14; }
+.action-item.p3 { border-left-color: #ffc107; }
+.action-item.p3 .action-priority { background: #ffc107; color: #333; }
+.action-item.p4 { border-left-color: #28a745; }
+.action-item.p4 .action-priority { background: #28a745; }
+.action-content { flex: 1; }
+.action-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 4px;
+  color: var(--text);
+}
+.action-desc {
+  font-size: 12.5px;
+  color: var(--text-light);
+  line-height: 1.6;
+}
+.action-suggestion {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #f0f7ff;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--primary-dark);
+}
+
+/* 热力图 */
+.heatmap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.heatmap-table th,
+.heatmap-table td {
+  padding: 10px 12px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.heatmap-table th {
+  background: #f8f9fc;
+  font-weight: 600;
+}
+.heatmap-cell {
+  font-weight: 600;
+  transition: all 0.2s;
+  position: relative;
+}
+.heatmap-cell.above {
+  background: #d4edda;
+  color: #155724;
+}
+.heatmap-cell.above-strong {
+  background: #28a745;
+  color: #fff;
+}
+.heatmap-cell.below {
+  background: #f8d7da;
+  color: #721c24;
+}
+.heatmap-cell.below-strong {
+  background: #dc3545;
+  color: #fff;
+}
+.heatmap-cell.equal {
+  background: #fff3cd;
+  color: #856404;
+}
+.heatmap-cell:hover {
+  transform: scale(1.05);
+  z-index: 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.heatmap-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.heatmap-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.heatmap-legend-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* 分数段分布 */
+.score-segment-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.score-segment-table th,
+.score-segment-table td {
+  padding: 10px 12px;
+  text-align: center;
+  border: 1px solid var(--border);
+}
+.score-segment-table th {
+  background: #f8f9fc;
+  font-weight: 600;
+}
+.segment-high { color: #155724; font-weight: 600; }
+.segment-low { color: #721c24; font-weight: 600; }
+.segment-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+.segment-bar {
+  width: 80px;
+  height: 8px;
+  background: #e9ecef;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.segment-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+
+/* 关注学生标签页 */
+.student-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 2px solid var(--border);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.student-tab {
+  padding: 10px 18px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  color: var(--text-light);
+  transition: all 0.2s;
+  border-radius: 6px 6px 0 0;
+}
+.student-tab:hover { color: var(--primary); }
+.student-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  font-weight: 600;
+  background: #f0f7ff;
+}
+.student-tab .tab-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 学生卡片网格 */
+.student-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+.student-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  transition: all 0.2s;
+}
+.student-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  transform: translateY(-2px);
+}
+.student-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+.student-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.student-info { flex: 1; }
+.student-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+}
+.student-class {
+  font-size: 12px;
+  color: var(--text-light);
+}
+.student-card-badge {
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.badge-partial { background: #fff3cd; color: #856404; }
+.badge-below { background: #f8d7da; color: #721c24; }
+.badge-progress { background: #d4edda; color: #155724; }
+.badge-regress { background: #f8d7da; color: #721c24; }
+.student-card-body { font-size: 12.5px; line-height: 1.7; }
+.student-card-body .sc-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+}
+.student-card-body .sc-label { color: var(--text-light); }
+.student-card-body .sc-value { font-weight: 600; color: var(--text); }
+.subject-bar-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #eee;
+}
+.subject-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  margin-bottom: 4px;
+}
+.subject-bar-item .sb-name {
+  width: 40px;
+  flex-shrink: 0;
+  color: var(--text-light);
+}
+.subject-bar-item .sb-bar {
+  flex: 1;
+  height: 6px;
+  background: #e9ecef;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.subject-bar-item .sb-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.subject-bar-item .sb-val {
+  width: 36px;
+  text-align: right;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+/* 年级总览统计卡片 */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+.overview-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  text-align: center;
+  transition: all 0.2s;
+}
+.overview-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.oc-label {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 6px;
+}
+.oc-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.oc-unit {
+  font-size: 12px;
+  color: var(--text-light);
+  margin-left: 2px;
+}
+.oc-sub {
+  font-size: 11.5px;
+  color: var(--text-light);
+  margin-top: 4px;
+}
+.overview-card.success .oc-value { color: var(--success); }
+.overview-card.warning .oc-value { color: var(--warning); }
+.overview-card.danger .oc-value { color: var(--danger); }
+.overview-card.info .oc-value { color: var(--info); }
+
+/* 进退步分布 */
+.progress-chart-wrap {
+  position: relative;
+  height: 350px;
+}
+
 /* 响应式 */
 @media (max-width: 900px) {
   .sidebar { width: 70px; }
