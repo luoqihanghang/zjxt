@@ -425,6 +425,10 @@ function doLogout() {
   $("loginPage").classList.remove("hidden");
   $("loginUsername").value = "";
   $("loginPassword").value = "";
+  const btn = $("eduAssistantBtn");
+  const panel = $("eduAssistant");
+  if (btn) btn.style.display = "none";
+  if (panel) panel.classList.add("hidden");
 }
 
 function enterApp() {
@@ -435,6 +439,8 @@ function enterApp() {
   renderAnnouncement();
   renderSyncStatus();
   navigate("dashboard");
+  const btn = $("eduAssistantBtn");
+  if (btn) btn.style.display = "flex";
 }
 
 // ========== GitHub 同步状态 ==========
@@ -811,25 +817,49 @@ function renderDashboard() {
   const totalRecords = DB.records.length;
   const totalAnnouncements = DB.announcements.length;
 
-  let cards = `
-    <div class="stats-grid">
-      <div class="stat-card success"><div class="sc-icon">👥</div><div class="sc-label">教师总数</div><div class="sc-value">${totalUsers}</div></div>
-      <div class="stat-card info"><div class="sc-icon">📝</div><div class="sc-label">考试次数</div><div class="sc-value">${totalExams}</div></div>
-      <div class="stat-card warning"><div class="sc-icon">📊</div><div class="sc-label">成绩记录</div><div class="sc-value">${totalRecords}</div></div>
-      <div class="stat-card danger"><div class="sc-icon">📢</div><div class="sc-label">公告数量</div><div class="sc-value">${totalAnnouncements}</div></div>
+  // 计算活跃数据（30天内）
+  const now = Date.now();
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+  const recentExams = DB.exams.filter(e => (e.createdAt || 0) > now - thirtyDays).length;
+  const recentRecords = DB.records.filter(r => (r.createdAt || 0) > now - thirtyDays).length;
+
+  let statsCards = `
+    <div class="dashboard-stats">
+      <div class="dash-stat-card primary">
+        <div class="dsc-icon">👥</div>
+        <div class="dsc-content">
+          <div class="dsc-value">${totalUsers}</div>
+          <div class="dsc-label">教师总数</div>
+        </div>
+      </div>
+      <div class="dash-stat-card success">
+        <div class="dsc-icon">📝</div>
+        <div class="dsc-content">
+          <div class="dsc-value">${totalExams}</div>
+          <div class="dsc-label">考试次数</div>
+        </div>
+      </div>
+      <div class="dash-stat-card info">
+        <div class="dsc-icon">📢</div>
+        <div class="dsc-content">
+          <div class="dsc-value">${totalAnnouncements}</div>
+          <div class="dsc-label">公告数量</div>
+        </div>
+      </div>
     </div>
   `;
 
   let roleSection = "";
+
   if (currentUser.role === "admin") {
     // ===== 管理员：全学校视角 =====
     const grades = Object.keys(DB.subjects);
+
     // 计算每个年级的核心数据
     const gradeRows = grades.map((g) => {
       const userCount = DB.users.filter((u) => u.grade === g).length;
       const examCount = DB.exams.filter((e) => e.grade === g).length;
       const recCount = DB.records.filter((r) => r.grade === g).length;
-      // 最近一次考试的年级总均分
       const recentExam = DB.exams.filter((e) => e.grade === g).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
       let recentAvg = "-";
       if (recentExam) {
@@ -840,54 +870,80 @@ function renderDashboard() {
             if (vs.length === 0) return null;
             return vs.reduce((a, b) => a + b, 0) / vs.length;
           }).filter(v => v != null);
-          if (totalAvg.length > 0) {
-            recentAvg = fmt(totalAvg.reduce((a, b) => a + b, 0) / totalAvg.length);
-          }
+          if (totalAvg.length > 0) recentAvg = fmt(totalAvg.reduce((a, b) => a + b, 0) / totalAvg.length);
         }
       }
-      // 班主任人数
       const htCount = DB.users.filter((u) => u.grade === g && u.role === "headteacher").length;
       const subjectCount = (DB.subjects[g] || []).length;
       return { grade: g, users: userCount, exams: examCount, recs: recCount, avg: recentAvg, ht: htCount, subjects: subjectCount };
     });
 
-    // 各年级考试数量的图表数据
+    // 图表数据
     const gradeChartLabels = gradeRows.map((r) => r.grade);
     const examCounts = gradeRows.map((r) => r.exams);
     const recCounts = gradeRows.map((r) => r.recs);
 
+    // 功能模块介绍
+    const adminModules = `
+      <div class="dashboard-modules">
+        <div class="module-card" onclick="navigate('users')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">👥</div>
+          <div class="mc-content">
+            <div class="mc-title">教师名单管理</div>
+            <div class="mc-desc">批量导入导出教师信息，管理教师账号、角色、任课学科，支持Excel模板下载</div>
+            <div class="mc-tags"><span class="mc-tag">批量导入</span><span class="mc-tag">角色管理</span><span class="mc-tag">密码重置</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('grades')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">🏫</div>
+          <div class="mc-content">
+            <div class="mc-title">年级设置</div>
+            <div class="mc-desc">管理学校年级信息，查看各年级教师、学生数据统计，支持多年级数据隔离</div>
+            <div class="mc-tags"><span class="mc-tag">年级管理</span><span class="mc-tag">数据统计</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('exams')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">📝</div>
+          <div class="mc-content">
+            <div class="mc-title">考试管理</div>
+            <div class="mc-desc">创建和管理考试，设置考试科目，查看考试进度，支持成绩汇总分析</div>
+            <div class="mc-tags"><span class="mc-tag">考试创建</span><span class="mc-tag">进度跟踪</span><span class="mc-tag">成绩汇总</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('announcements_all')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)">📢</div>
+          <div class="mc-content">
+            <div class="mc-title">公告管理</div>
+            <div class="mc-desc">发布和管理系统公告，向指定年级广播通知，支持消息推送和历史记录</div>
+            <div class="mc-tags"><span class="mc-tag">消息发布</span><span class="mc-tag">年级广播</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+      </div>
+    `;
+
     roleSection = `
-      <div class="card">
-        <div class="card-title">🏫 校园总览 - 各年级概况</div>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>年级</th><th>学科数</th><th>教师数</th><th>班主任数</th><th>考试数</th><th>成绩记录</th><th>最近一次考试年级均分</th></tr></thead>
-          <tbody>
-            ${gradeRows.length === 0 ? `<tr><td colspan="7"><div class="empty-state"><div class="es-tip">暂无年级数据，请先添加年级</div></div></td></tr>` : gradeRows.map((r) => `<tr>
-              <td><b>${r.grade}</b></td>
-              <td>${r.subjects}</td>
-              <td>${r.users}</td>
-              <td>${r.ht}</td>
-              <td>${r.exams}</td>
-              <td>${r.recs}</td>
-              <td><b style="color:#0b6bcb">${r.avg}</b></td>
-            </tr>`).join("")}
-          </tbody>
-        </table></div>
-      </div>
+      ${adminModules}
 
-      <div class="card">
-        <div class="card-title">📊 各年级考试与成绩记录对比</div>
-        <div class="chart-box"><canvas id="adminGradeChart"></canvas></div>
-      </div>
+      <div class="dashboard-grid-2">
+        <div class="card">
+          <div class="card-title">🏫 各年级数据概况</div>
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>年级</th><th>学科</th><th>教师</th><th>班主任</th><th>考试</th><th>成绩</th><th>均分</th></tr></thead>
+            <tbody>
+              ${gradeRows.length === 0 ? `<tr><td colspan="7"><div class="empty-state"><div class="es-tip">暂无年级数据</div></div></td></tr>` : gradeRows.map((r) => `<tr>
+                <td><b>${r.grade}</b></td><td>${r.subjects}</td><td>${r.users}</td><td>${r.ht}</td><td>${r.exams}</td><td>${r.recs}</td><td><b style="color:#3b82f6">${r.avg}</b></td>
+              </tr>`).join("")}
+            </tbody>
+          </table></div>
+        </div>
 
-      <div class="card">
-        <div class="card-title">📌 管理员工作台</div>
-        <div class="form-row">
-          <button class="btn btn-primary btn-lg" onclick="navigate('users')">➜ 教师名单管理</button>
-          <button class="btn btn-info btn-lg" onclick="navigate('grades')">➜ 年级设置</button>
-          <button class="btn btn-success btn-lg" onclick="navigate('exams')">➜ 考试管理</button>
-          <button class="btn btn-warning btn-lg" onclick="navigate('announcements_all')">➜ 公告管理</button>
-          <button class="btn btn-secondary btn-lg" onclick="navigate('account_profile')">🔐 修改密码</button>
+        <div class="card">
+          <div class="card-title">📊 考试与成绩趋势</div>
+          <div class="chart-box" style="height:280px"><canvas id="adminGradeChart"></canvas></div>
         </div>
       </div>
     `;
@@ -896,69 +952,331 @@ function renderDashboard() {
       if (gradeChartLabels.length === 0) return;
       drawChart("adminGradeChart", "bar", gradeChartLabels, [
         { label: "考试数", data: examCounts, color: "#3b82f6" },
-        { label: "成绩记录", data: recCounts, color: "#f59e0b" }
+        { label: "成绩记录", data: recCounts, color: "#10b981" }
       ]);
     }, 50);
   } else if (currentUser.role === "academic") {
-    roleSection = `
-      <div class="card">
-        <div class="card-title">📌 教务工作台 - ${currentUser.grade || ""}</div>
-        <div class="form-row">
-          <button class="btn btn-primary btn-lg" onclick="navigate('subjects')">➜ 学科/分值设置</button>
-          <button class="btn btn-info btn-lg" onclick="navigate('exams')">➜ 新建考试</button>
-          <button class="btn btn-success btn-lg" onclick="navigate('grade_summary')">➜ 成绩汇总</button>
-          <button class="btn btn-warning btn-lg" onclick="navigate('teacher_ranking')">➜ 教师排行</button>
+    // ===== 教务老师 =====
+    const grade = currentUser.grade;
+    const gradeExams = DB.exams.filter(e => e.grade === grade);
+    const gradeRecords = DB.records.filter(r => r.grade === grade);
+    const gradeSubjects = (DB.subjects[grade] || []).length;
+    const teachers = DB.users.filter(u => u.grade === grade && u.role !== "admin").length;
+
+    // 最近的考试数据
+    const recentExam = gradeExams.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    let examStats = { avg: "-", records: 0 };
+    if (recentExam) {
+      const recs = gradeRecords.filter(r => r.examId === recentExam.id);
+      examStats.records = recs.length;
+      if (recs.length > 0) {
+        const avgs = recs.map(r => {
+          const vs = Object.values(r.scores || {}).filter(v => v != null);
+          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
+        }).filter(v => v != null);
+        examStats.avg = avgs.length ? fmt(avgs.reduce((a, b) => a + b, 0) / avgs.length) : "-";
+      }
+    }
+
+    const academicModules = `
+      <div class="dashboard-modules">
+        <div class="module-card" onclick="navigate('subjects')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">📚</div>
+          <div class="mc-content">
+            <div class="mc-title">学科/分值设置</div>
+            <div class="mc-desc">配置年级学科、满分、优秀线、良好线、及格线，支持批量导入导出Excel模板</div>
+            <div class="mc-tags"><span class="mc-tag">学科配置</span><span class="mc-tag">分值设置</span><span class="mc-tag">批量导入</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('exams')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">📝</div>
+          <div class="mc-content">
+            <div class="mc-title">新建考试</div>
+            <div class="mc-desc">创建新考试，设置考试名称和时间，选择参考班级和科目，支持成绩汇总</div>
+            <div class="mc-tags"><span class="mc-tag">考试创建</span><span class="mc-tag">成绩汇总</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('grade_summary')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">📊</div>
+          <div class="mc-content">
+            <div class="mc-title">成绩汇总</div>
+            <div class="mc-desc">汇总各班级成绩数据，审核班主任上传的成绩，生成年级成绩总表</div>
+            <div class="mc-tags"><span class="mc-tag">成绩审核</span><span class="mc-tag">数据汇总</span><span class="mc-tag">导出报表</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('teacher_ranking')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#ec4899,#f472b6)">🏆</div>
+          <div class="mc-content">
+            <div class="mc-title">教师排行榜</div>
+            <div class="mc-desc">查看各学科教师教学成绩排名，分析班级平均分对比，激励教学竞争</div>
+            <div class="mc-tags"><span class="mc-tag">成绩排名</span><span class="mc-tag">班级对比</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('academic_analysis')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">🔍</div>
+          <div class="mc-content">
+            <div class="mc-title">全平台智能分析</div>
+            <div class="mc-desc">AI智能分析年级成绩数据，提供薄弱学科诊断、教学建议、学生关注名单</div>
+            <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">智能诊断</span><span class="mc-tag">教学建议</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
         </div>
       </div>
     `;
-  } else if (currentUser.role === "headteacher") {
+
     roleSection = `
-      <div class="card">
-        <div class="card-title">📌 班主任工作台 - ${currentUser.grade || ""} ${currentUser.classNo || ""}</div>
-        <div style="color:var(--text-light); font-size:13px; margin-bottom:12px;">
-          身份：班主任 · 任教学科：<b>${(currentUser.subjects || []).join("、") || "（尚未设置）"}</b>
+      <div class="dashboard-quick-stats">
+        <div class="qs-item">
+          <div class="qs-value">${gradeExams.length}</div>
+          <div class="qs-label">累计考试</div>
         </div>
-        <div class="form-row">
-          <button class="btn btn-primary btn-lg" onclick="navigate('upload_scores')">➜ 上传班级成绩</button>
-          <button class="btn btn-info btn-lg" onclick="navigate('my_class_scores')">➜ 查看本班成绩</button>
-          <button class="btn btn-success btn-lg" onclick="navigate('download_scores')">➜ 下载Excel</button>
-          <button class="btn btn-warning btn-lg" onclick="navigate('headteacher_analysis')">➜ 智能对比分析</button>
+        <div class="qs-item">
+          <div class="qs-value">${gradeSubjects}</div>
+          <div class="qs-label">学科配置</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${teachers}</div>
+          <div class="qs-label">年级教师</div>
+        </div>
+        <div class="qs-item highlight">
+          <div class="qs-value">${recentExam ? recentExam.name : '-'}</div>
+          <div class="qs-label">最近考试</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${examStats.avg}</div>
+          <div class="qs-label">年级均分</div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-title">📘 我的任教科目分析</div>
-        <div class="form-row">
-          <button class="btn btn-primary btn-lg" onclick="navigate('my_scores')">📖 我的班级成绩</button>
-          <button class="btn btn-info btn-lg" onclick="navigate('my_ranking')">🏅 我的排行信息</button>
-          <button class="btn btn-success btn-lg" onclick="navigate('teacher_analysis')">🔍 学科对比分析</button>
-          <button class="btn btn-secondary btn-lg" onclick="navigate('group_scores')">👥 小组成绩分析</button>
+      ${academicModules}
+    `;
+  } else if (currentUser.role === "headteacher") {
+    // ===== 班主任 =====
+    const grade = currentUser.grade;
+    const classNo = currentUser.classNo;
+    const mySubjects = currentUser.subjects || [];
+
+    // 班级数据统计
+    const classExams = DB.exams.filter(e => e.grade === grade);
+    const classRecords = DB.records.filter(r => r.grade === grade && r.classNo === classNo);
+    const confirmedRecs = classRecords.filter(r => r.status === "confirmed").length;
+
+    // 最近考试数据
+    const recentExam = classExams.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    let classAvg = "-";
+    if (recentExam) {
+      const recs = classRecords.filter(r => r.examId === recentExam.id && r.status === "confirmed");
+      if (recs.length > 0) {
+        const avgs = recs.map(r => {
+          const vs = Object.values(r.scores || {}).filter(v => v != null);
+          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
+        }).filter(v => v != null);
+        classAvg = avgs.length ? fmt(avgs.reduce((a, b) => a + b, 0) / avgs.length) : "-";
+      }
+    }
+
+    const htModules = `
+      <div class="dashboard-modules">
+        <div class="module-card" onclick="navigate('upload_scores')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">📤</div>
+          <div class="mc-content">
+            <div class="mc-title">上传班级成绩</div>
+            <div class="mc-desc">批量导入学生成绩，支持Excel表格上传，自动计算总分和班级统计</div>
+            <div class="mc-tags"><span class="mc-tag">Excel导入</span><span class="mc-tag">批量上传</span><span class="mc-tag">自动统计</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('my_class_scores')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">📖</div>
+          <div class="mc-content">
+            <div class="mc-title">查看本班成绩</div>
+            <div class="mc-desc">查看班级成绩明细，支持按科目筛选，查看学生排名和分数分布</div>
+            <div class="mc-tags"><span class="mc-tag">成绩查看</span><span class="mc-tag">排名分析</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('download_scores')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">📥</div>
+          <div class="mc-content">
+            <div class="mc-title">下载Excel成绩单</div>
+            <div class="mc-desc">导出班级成绩到Excel，包含学生各科成绩、总分、班级排名等</div>
+            <div class="mc-tags"><span class="mc-tag">成绩导出</span><span class="mc-tag">Excel下载</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('headteacher_analysis')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)">🔍</div>
+          <div class="mc-content">
+            <div class="mc-title">智能对比分析</div>
+            <div class="mc-desc">AI智能分析班级成绩，对比年级数据，提供班级薄弱学科诊断和教学建议</div>
+            <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">班级对比</span><span class="mc-tag">智能诊断</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('my_scores')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">📊</div>
+          <div class="mc-content">
+            <div class="mc-title">我的任教科目成绩</div>
+            <div class="mc-desc">查看自己任教科目的成绩数据，分析学生得分分布，对比年级水平</div>
+            <div class="mc-tags"><span class="mc-tag">学科分析</span><span class="mc-tag">得分分布</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('teacher_analysis')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#ec4899,#f472b6)">📈</div>
+          <div class="mc-content">
+            <div class="mc-title">学科对比分析</div>
+            <div class="mc-desc">对比不同班级同一学科的成绩，分析任教班级的优势和改进空间</div>
+            <div class="mc-tags"><span class="mc-tag">班级对比</span><span class="mc-tag">学科分析</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
         </div>
       </div>
     `;
-  } else {
+
     roleSection = `
-      <div class="card">
-        <div class="card-title">📌 任课教师工作台 - ${currentUser.grade || ""} · 任教：${(currentUser.subjects || []).join("、") || "暂未设置"}</div>
-        <div class="form-row">
-          <button class="btn btn-primary btn-lg" onclick="navigate('my_scores')">➜ 查看班级成绩</button>
-          <button class="btn btn-info btn-lg" onclick="navigate('my_ranking')">➜ 我的排行</button>
-          <button class="btn btn-success btn-lg" onclick="navigate('teacher_analysis')">➜ 学科对比分析</button>
+      <div class="dashboard-quick-stats">
+        <div class="qs-item">
+          <div class="qs-value">${classNo}</div>
+          <div class="qs-label">我的班级</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${mySubjects.length || '-'}</div>
+          <div class="qs-label">任教学科</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${confirmedRecs}</div>
+          <div class="qs-label">已审核</div>
+        </div>
+        <div class="qs-item highlight">
+          <div class="qs-value">${recentExam ? recentExam.name : '-'}</div>
+          <div class="qs-label">最近考试</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${classAvg}</div>
+          <div class="qs-label">班级均分</div>
         </div>
       </div>
+
+      ${htModules}
+    `;
+  } else {
+    // ===== 任课教师 =====
+    const grade = currentUser.grade;
+    const mySubjects = currentUser.subjects || [];
+
+    // 计算任教数据
+    const myRecs = DB.records.filter(r => r.grade === grade && mySubjects.some(s => r.scores && r.scores[s] != null));
+    const myClasses = [...new Set(myRecs.map(r => r.classNo).filter(Boolean))];
+
+    // 最近任教成绩统计
+    const recentExam = DB.exams.filter(e => e.grade === grade).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+    let myAvg = "-";
+    if (recentExam && mySubjects.length > 0) {
+      const recs = myRecs.filter(r => r.examId === recentExam.id);
+      const scores = recs.map(r => r.scores[mySubjects[0]]).filter(v => v != null);
+      if (scores.length > 0) myAvg = fmt(scores.reduce((a, b) => a + b, 0) / scores.length);
+    }
+
+    const teacherModules = `
+      <div class="dashboard-modules">
+        <div class="module-card" onclick="navigate('my_scores')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">📖</div>
+          <div class="mc-content">
+            <div class="mc-title">查看班级成绩</div>
+            <div class="mc-desc">查看任教班级的成绩数据，按科目筛选学生成绩，分析得分情况</div>
+            <div class="mc-tags"><span class="mc-tag">成绩查看</span><span class="mc-tag">科目筛选</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('my_ranking')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">🏆</div>
+          <div class="mc-content">
+            <div class="mc-title">我的任教排行</div>
+            <div class="mc-desc">查看任教科目的班级排名情况，分析教学效果，激励教学提升</div>
+            <div class="mc-tags"><span class="mc-tag">班级排名</span><span class="mc-tag">教学效果</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+        <div class="module-card" onclick="navigate('teacher_analysis')">
+          <div class="mc-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">🔍</div>
+          <div class="mc-content">
+            <div class="mc-title">学科对比分析</div>
+            <div class="mc-desc">AI智能分析任教科目成绩，提供学生关注名单、薄弱知识点诊断</div>
+            <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">智能诊断</span><span class="mc-tag">学生关注</span></div>
+          </div>
+          <div class="mc-arrow">→</div>
+        </div>
+      </div>
+    `;
+
+    roleSection = `
+      <div class="dashboard-quick-stats">
+        <div class="qs-item">
+          <div class="qs-value">${mySubjects.join('、') || '-'}</div>
+          <div class="qs-label">任教学科</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${myClasses.length}</div>
+          <div class="qs-label">任教班级</div>
+        </div>
+        <div class="qs-item highlight">
+          <div class="qs-value">${recentExam ? recentExam.name : '-'}</div>
+          <div class="qs-label">最近考试</div>
+        </div>
+        <div class="qs-item">
+          <div class="qs-value">${myAvg}</div>
+          <div class="qs-label">任教均分</div>
+        </div>
+      </div>
+
+      ${teacherModules}
     `;
   }
 
+  // 最近公告
   const recentAnn = DB.announcements.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
   const annHtml = recentAnn.length === 0
-    ? `<div class="empty-state"><div class="es-tip">暂无公告</div></div>`
-    : `<table class="data-table"><thead><tr><th style="width:60%">标题 / 内容</th><th>发布人</th><th>时间</th></tr></thead><tbody>
-      ${recentAnn.map((a) => `<tr><td><b>${a.title}</b> - ${a.content}</td><td>${a.createdBy}</td><td>${new Date(a.createdAt).toLocaleString()}</td></tr>`).join("")}
-    </tbody></table>`;
+    ? `<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">暂无公告</div></div>`
+    : recentAnn.map((a) => `
+      <div class="ann-item">
+        <div class="ann-title">${a.title}</div>
+        <div class="ann-content">${a.content}</div>
+        <div class="ann-meta"><span>${a.createdBy}</span> · <span>${new Date(a.createdAt).toLocaleString()}</span></div>
+      </div>
+    `).join("");
 
-  $("pageContent").innerHTML = cards + roleSection + `
-    <div class="card"><div class="card-title">📢 最近公告</div>${annHtml}</div>
+  $("pageContent").innerHTML = `
+    <div class="dashboard-welcome">
+      <div class="dw-content">
+        <h1 class="dw-title">欢迎回来，${currentUser.name}！</h1>
+        <p class="dw-subtitle">${getRoleWelcome(currentUser.role)} · ${currentUser.grade || ""}</p>
+      </div>
+      <div class="dw-icon">🎓</div>
+    </div>
+
+    ${statsCards}
+    ${roleSection}
+
+    <div class="card">
+      <div class="card-title">📢 最近公告</div>
+      <div class="ann-list">${annHtml}</div>
+    </div>
   `;
+}
+
+function getRoleWelcome(role) {
+  const welcomes = {
+    admin: "系统管理员",
+    academic: "教务老师",
+    headteacher: "班主任",
+    teacher: "任课教师"
+  };
+  return welcomes[role] || "用户";
 }
 
 // ========== 管理员/教务：教师名单 ==========
@@ -1003,8 +1321,9 @@ function renderUsers() {
       <div class="card-title">
         <span>👥 教师名单管理（共 ${allUsers.length} 人）${myGrade ? `— ${myGrade}` : ""}</span>
         <span class="ct-actions">
+          <button class="btn btn-info" onclick="exportTeacherExcel()">📥 批量导出</button>
           <button class="btn btn-primary" onclick="downloadTeacherTemplate()">📥 下载模板</button>
-          <button class="btn btn-warning" onclick="showBatchUploadModal()">📤 批量上传</button>
+          <button class="btn btn-warning" onclick="showBatchUploadModal()">📤 批量导入</button>
           <button class="btn btn-success" onclick="editUser(null)">+ 添加教师</button>
         </span>
       </div>
@@ -1032,6 +1351,34 @@ window.downloadTeacherTemplate = function () {
   XLSX.utils.book_append_sheet(wb, ws, "教师名单");
   XLSX.writeFile(wb, "教师批量上传模板.xlsx");
   showToast("模板已下载", "success");
+};
+
+// 批量导出教师名单
+window.exportTeacherExcel = function () {
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const allUsers = myGrade
+    ? DB.users.filter((u) => u.role !== "admin" && u.grade === myGrade)
+    : DB.users.filter((u) => u.role !== "admin");
+  const roleNameMap = { "headteacher": "班主任", "teacher": "任课教师", "academic": "教务老师" };
+  const data = [
+    ["账号", "姓名", "角色", "所属年级", "班级", "任教学科", "加入时间"],
+    ...allUsers.map((u) => [
+      u.username,
+      u.name,
+      roleNameMap[u.role] || u.role,
+      u.grade || "",
+      u.classNo || "",
+      (u.subjects && u.subjects.length) ? u.subjects.join(",") : "",
+      new Date(u.createdAt).toLocaleDateString()
+    ])
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [{ wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 12 }];
+  XLSX.utils.book_append_sheet(wb, ws, "教师名单");
+  const dateStr = new Date().toLocaleDateString().replace(/\//g, "-");
+  XLSX.writeFile(wb, `教师名单_${dateStr}.xlsx`);
+  showToast(`已导出 ${allUsers.length} 名教师`, "success");
 };
 
 // 批量上传教师弹窗
@@ -1385,7 +1732,12 @@ function renderSubjects() {
     <div class="card">
       <div class="card-title">
         <span>📚 学科与分值设置 - ${grade}</span>
-        <span class="ct-actions"><button class="btn btn-success" onclick="addSubject('${grade}')">+ 添加学科</button></span>
+        <span class="ct-actions">
+          <button class="btn btn-info" onclick="exportSubjectExcel('${grade}')">📥 批量导出</button>
+          <button class="btn btn-primary" onclick="downloadSubjectTemplate('${grade}')">📥 下载模板</button>
+          <button class="btn btn-warning" onclick="showSubjectBatchUpload('${grade}')">📤 批量导入</button>
+          <button class="btn btn-success" onclick="addSubject('${grade}')">+ 添加学科</button>
+        </span>
       </div>
       <p style="color:var(--text-light); margin-bottom:14px;">💡 直接在表格中修改数值，系统自动保存。</p>
       <div class="table-wrap"><table class="data-table">
@@ -1428,6 +1780,107 @@ window.addSubject = function (grade) {
 window.delSubject = function (grade, idx) {
   if (!confirm("确认删除此学科？")) return;
   DB.subjects[grade].splice(idx, 1); saveDB(DB); showToast("已删除", "success"); renderSubjects();
+};
+
+// 下载学科批量上传模板
+window.downloadSubjectTemplate = function (grade) {
+  const data = [
+    ["学科", "满分", "优秀线", "良好线", "及格线", "低分线"],
+    ["语文", "150", "135", "120", "90", "60"],
+    ["数学", "150", "135", "120", "90", "60"],
+    ["英语", "150", "135", "120", "90", "60"],
+    ["物理", "100", "90", "80", "60", "40"],
+    ["化学", "100", "90", "80", "60", "40"]
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }];
+  XLSX.utils.book_append_sheet(wb, ws, "学科分值设置");
+  XLSX.writeFile(wb, `${grade}_学科分值模板.xlsx`);
+  showToast("模板已下载", "success");
+};
+
+// 批量导入学科
+window.showSubjectBatchUpload = function (grade) {
+  showModal("📤 批量导入学科", `
+    <div style="margin-bottom:16px;padding:16px;background:#f0f7ff;border-radius:8px;font-size:13px">
+      <p style="margin-bottom:8px"><b>📋 Excel 格式要求：</b></p>
+      <p style="color:#666">• 第一行为表头：学科、满分、优秀线、良好线、及格线、低分线</p>
+      <p style="color:#666">• 满分：学科总分（如 150、100）</p>
+      <p style="color:#666">• 优秀线：≥此分为优秀（如 135、90）</p>
+      <p style="color:#666">• 良好线：≥此分为良好</p>
+      <p style="color:#666">• 及格线：≥此分为及格</p>
+      <p style="color:#666">• 低分线：<此分为需要关注</p>
+    </div>
+    <div class="form-group">
+      <label>选择 Excel 文件</label>
+      <input type="file" id="batch_subject_file" accept=".xlsx,.xls,.csv" style="padding:8px" />
+    </div>
+  `, "开始导入", () => {
+    const fileInput = $("batch_subject_file");
+    if (!fileInput.files[0]) { showToast("请选择文件", "error"); return false; }
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        if (json.length < 2) { showToast("文件内容为空或格式不正确", "error"); return false; }
+        const headers = json[0].map((h) => String(h || "").trim());
+        const requiredCols = ["学科", "满分"];
+        const missing = requiredCols.filter((c) => !headers.includes(c));
+        if (missing.length > 0) { showToast(`缺少必填列：${missing.join("、")}`, "error"); return false; }
+        const idx = (name) => headers.indexOf(name);
+        let added = 0, skipped = 0, errors = [];
+        const existingNames = (DB.subjects[grade] || []).map((s) => s.name);
+        for (let i = 1; i < json.length; i++) {
+          const row = json[i];
+          if (!row[idx("学科")]) { skipped++; continue; }
+          const name = String(row[idx("学科")] || "").trim();
+          if (existingNames.includes(name)) { errors.push(`第${i + 1}行：学科"${name}"已存在`); skipped++; continue; }
+          if (!DB.subjects[grade]) DB.subjects[grade] = [];
+          DB.subjects[grade].push({
+            name,
+            fullScore: +row[idx("满分")] || 100,
+            excellent: +row[idx("优秀线")] || 85,
+            good: +row[idx("良好线")] || 75,
+            pass: +row[idx("及格线")] || 60,
+            low: +row[idx("低分线")] || 40
+          });
+          existingNames.push(name);
+          added++;
+        }
+        saveDB(DB);
+        showToast(`成功添加 ${added} 个学科${skipped > 0 ? `，跳过 ${skipped} 行` : ""}`, added > 0 ? "success" : "warning");
+        if (errors.length > 0) { showToast(errors.slice(0, 3).join("；"), "warning", 4000); }
+        renderSubjects();
+      } catch (err) {
+        showToast("文件解析失败：" + err.message, "error");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    return true;
+  });
+};
+
+// 批量导出学科
+window.exportSubjectExcel = function (grade) {
+  const list = DB.subjects[grade] || [];
+  if (list.length === 0) { showToast("暂无学科可导出", "warning"); return; }
+  const data = [
+    ["学科", "满分", "优秀线", "良好线", "及格线", "低分线"],
+    ...list.map((s) => [s.name, s.fullScore, s.excellent, s.good, s.pass, s.low])
+  ];
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(data);
+  ws["!cols"] = [{ wch: 10 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }];
+  XLSX.utils.book_append_sheet(wb, ws, "学科分值设置");
+  const dateStr = new Date().toLocaleDateString().replace(/\//g, "-");
+  XLSX.writeFile(wb, `${grade}_学科分值_${dateStr}.xlsx`);
+  showToast(`已导出 ${list.length} 个学科`, "success");
 };
 
 // ========== 班主任：上传成绩 ==========
@@ -2535,8 +2988,8 @@ function aggregateStats(records, subjects) {
     avg: n > 0 ? totals.reduce((a, b) => a + b, 0) / n : 0,
     max: n > 0 ? Math.max(...totals) : 0,
     min: n > 0 ? Math.min(...totals) : 0,
-    maxCount: totals.filter((v) => v === Math.max(...totals)).length,
-    minCount: totals.filter((v) => v === Math.min(...totals)).length
+    maxCount: n > 0 ? totals.filter((v) => v === Math.max(...totals)).length : 0,
+    minCount: n > 0 ? totals.filter((v) => v === Math.min(...totals)).length : 0
   };
   return stats;
 }
@@ -3908,8 +4361,19 @@ function refreshAcademicAnalysis() {
   const subjects = DB.subjects[grade] || [];
   const allRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade);
 
-  if (allRecs.length === 0) {
-    $("pageContent").innerHTML += `<div class="card"><div class="empty-state"><div class="es-tip">本次考试暂无成绩数据</div></div></div>`;
+  if (allRecs.length === 0 || subjects.length === 0) {
+    const msg = allRecs.length === 0 ? "本次考试暂无成绩数据" : "请先在「学科/分值设置」中配置学科";
+    $("aa_overview").innerHTML = `<div class="empty-state"><div class="es-icon">📊</div><div class="es-title">${msg}</div><div class="es-tip">${allRecs.length === 0 ? "请先上传成绩" : "无学科配置无法进行分析"}</div></div>`;
+    $("aa_actions").innerHTML = "";
+    $("aa_histogram_anno").innerHTML = "";
+    $("aa_segments").innerHTML = "";
+    $("aa_segments_anno").innerHTML = "";
+    $("aa_heatmap").innerHTML = "";
+    $("aa_progress_wrap").innerHTML = "";
+    $("aa_progress_anno").innerHTML = "";
+    $("aa_subject_perf").innerHTML = "";
+    $("aa_students_grid").innerHTML = "";
+    $("aa_student_tabs").innerHTML = "";
     return;
   }
 
@@ -3944,15 +4408,21 @@ function refreshAcademicAnalysis() {
 
 // ---------- ① 年级总览 ----------
 function renderOverview(records, stats, subjects, totalFullScore) {
-  const totalAvg = stats["总分"].avg;
-  const avgRate = (totalAvg / totalFullScore * 100).toFixed(1);
+  if (!records.length || !subjects.length) {
+    $("aa_overview").innerHTML = `<div class="empty-state"><div class="es-tip">暂无数据</div></div>`;
+    return;
+  }
+  const totalAvg = stats["总分"].avg || 0;
+  const avgRate = totalFullScore > 0 ? (totalAvg / totalFullScore * 100).toFixed(1) : "0.0";
 
   let bestSubject = null, bestRate = 0;
   let worstSubject = null, worstRate = 100;
   subjects.forEach((s) => {
-    const rate = stats[s.name].avg / s.fullScore * 100;
-    if (rate > bestRate) { bestRate = rate; bestSubject = s.name; }
-    if (rate < worstRate) { worstRate = rate; worstSubject = s.name; }
+    if (s.fullScore > 0) {
+      const rate = (stats[s.name]?.avg || 0) / s.fullScore * 100;
+      if (rate > bestRate) { bestRate = rate; bestSubject = s.name; }
+      if (rate < worstRate) { worstRate = rate; worstSubject = s.name; }
+    }
   });
 
   const classCounts = {};
@@ -3977,18 +4447,18 @@ function renderOverview(records, stats, subjects, totalFullScore) {
       </div>
       <div class="overview-card success">
         <div class="oc-label">总分最高</div>
-        <div class="oc-value">${fmt(stats["总分"].max, 1)}<span class="oc-unit">分</span></div>
-        <div class="oc-sub">${stats["总分"].maxCount} 人并列</div>
+        <div class="oc-value">${fmt(stats["总分"]?.max || 0, 1)}<span class="oc-unit">分</span></div>
+        <div class="oc-sub">${stats["总分"]?.maxCount || 0} 人并列</div>
       </div>
       <div class="overview-card danger">
         <div class="oc-label">总分最低</div>
-        <div class="oc-value">${fmt(stats["总分"].min, 1)}<span class="oc-unit">分</span></div>
-        <div class="oc-sub">${stats["总分"].minCount} 人并列</div>
+        <div class="oc-value">${fmt(stats["总分"]?.min || 0, 1)}<span class="oc-unit">分</span></div>
+        <div class="oc-sub">${stats["总分"]?.minCount || 0} 人并列</div>
       </div>
       <div class="overview-card success">
         <div class="oc-label">全部及格人数</div>
         <div class="oc-value">${passCount}<span class="oc-unit">人</span></div>
-        <div class="oc-sub">占比 ${(passCount / records.length * 100).toFixed(1)}%</div>
+        <div class="oc-sub">占比 ${(records.length > 0 ? (passCount / records.length * 100) : 0).toFixed(1)}%</div>
       </div>
       <div class="overview-card warning">
         <div class="oc-label">优势学科</div>
@@ -4011,23 +4481,27 @@ function renderOverview(records, stats, subjects, totalFullScore) {
 
 // ---------- ② 本次最值得做的事 ----------
 function renderActions(records, stats, subjects, exams, selectedExam, grade, totalFullScore) {
+  if (!records.length || !subjects.length) {
+    $("aa_actions").innerHTML = `<div class="empty-state"><div class="es-tip">暂无建议数据</div></div>`;
+    return;
+  }
   const actions = [];
 
   const subjectRates = subjects.map((s) => ({
     name: s.name,
-    rate: stats[s.name].avg / s.fullScore * 100,
-    avg: stats[s.name].avg,
+    rate: s.fullScore > 0 ? ((stats[s.name]?.avg || 0) / s.fullScore * 100) : 0,
+    avg: stats[s.name]?.avg || 0,
     fullScore: s.fullScore,
-    passPct: stats[s.name].passPct,
-    excellentPct: stats[s.name].excellentPct,
-    failCount: stats[s.name].total - stats[s.name].passCount,
-    total: stats[s.name].total,
-    stdDev: stats[s.name].stdDev || 0
+    passPct: stats[s.name]?.passPct || 0,
+    excellentPct: stats[s.name]?.excellentPct || 0,
+    failCount: (stats[s.name]?.total || 0) - (stats[s.name]?.passCount || 0),
+    total: stats[s.name]?.total || 0,
+    stdDev: stats[s.name]?.stdDev || 0
   })).sort((a, b) => a.rate - b.rate);
 
   const weakest = subjectRates[0];
-  if (weakest && weakest.rate < 70) {
-    const failRate = (weakest.failCount / weakest.total * 100).toFixed(1);
+  if (weakest && weakest.rate < 70 && weakest.total > 0) {
+    const failRate = weakest.total > 0 ? (weakest.failCount / weakest.total * 100).toFixed(1) : "0.0";
     actions.push({
       priority: 1,
       level: "p1",
@@ -4041,7 +4515,7 @@ function renderActions(records, stats, subjects, exams, selectedExam, grade, tot
 
   const mostFail = subjectRates.slice().sort((a, b) => b.failCount - a.failCount)[0];
   if (mostFail && mostFail.failCount > 0 && mostFail.name !== weakest?.name) {
-    const failRate = (mostFail.failCount / mostFail.total * 100).toFixed(1);
+    const failRate = mostFail.total > 0 ? (mostFail.failCount / mostFail.total * 100).toFixed(1) : "0.0";
     actions.push({
       priority: 2,
       level: "p2",
@@ -4152,6 +4626,10 @@ function renderActions(records, stats, subjects, exams, selectedExam, grade, tot
 
 // ---------- ③ 总分分布直方图 ----------
 function renderHistogram(records, totalFullScore) {
+  if (!records.length || totalFullScore <= 0) {
+    $("aa_histogram_anno").innerHTML = `<div class="empty-state"><div class="es-tip">暂无分布数据</div></div>`;
+    return;
+  }
   const totals = records.map((r) => r.total).sort((a, b) => a - b);
   const min = Math.floor(Math.min(...totals) / 10) * 10;
   const max = Math.ceil(Math.max(...totals) / 10) * 10;
@@ -4220,6 +4698,11 @@ function renderHistogram(records, totalFullScore) {
 
 // ---------- ④ 总分分数段分布 ----------
 function renderScoreSegments(records, subjects, totalFullScore) {
+  if (!records.length || !subjects.length || totalFullScore <= 0) {
+    $("aa_segments").innerHTML = `<div class="empty-state"><div class="es-tip">暂无分数段数据</div></div>`;
+    $("aa_segments_anno").innerHTML = "";
+    return;
+  }
   const segments = [
     { name: "优秀（≥90%）", min: 0.9, color: "#28a745" },
     { name: "良好（80%~90%）", min: 0.8, max: 0.9, color: "#17a2b8" },
@@ -4310,6 +4793,10 @@ function renderScoreSegments(records, subjects, totalFullScore) {
 
 // ---------- ⑤ 班级学科热力图 ----------
 function renderHeatmap(records, subjects, gradeStats) {
+  if (!records.length || !subjects.length) {
+    $("aa_heatmap").innerHTML = `<div class="empty-state"><div class="es-tip">暂无热力图数据</div></div>`;
+    return;
+  }
   const classList = [...new Set(records.map((r) => r.classNo))].sort();
   const classStats = {};
   classList.forEach((c) => {
@@ -4470,16 +4957,21 @@ function renderProgressDistribution(exams, selectedExam, grade, currentRecs) {
 
 // ---------- ⑦ 科目表现 ----------
 function renderSubjectPerformance(stats, subjects) {
+  if (!subjects.length) {
+    $("aa_subject_perf").innerHTML = `<div class="empty-state"><div class="es-tip">暂无科目数据</div></div>`;
+    return;
+  }
   const rows = subjects.map((s) => {
     const st = stats[s.name];
     const failCount = st.total - st.passCount;
     const failPct = st.total > 0 ? (failCount / st.total) : 0;
+    const scoreRate = s.fullScore > 0 ? (st.avg / s.fullScore * 100).toFixed(1) : "0.0";
     return `
       <tr>
         <td><b>${esc(s.name)}</b></td>
         <td>${st.total}</td>
         <td>${fmt(st.avg, 1)} / ${s.fullScore}</td>
-        <td>${fmt(st.avg / s.fullScore * 100, 1)}%</td>
+        <td>${scoreRate}%</td>
         <td class="segment-high">${st.excellent}</td>
         <td class="segment-high">${fmt(st.excellentPct * 100, 1)}%</td>
         <td style="color:#17a2b8;font-weight:600">${st.good}</td>
@@ -4517,6 +5009,10 @@ function renderSubjectPerformance(stats, subjects) {
 
 // ---------- ⑧ 需要关注的学生 ----------
 function renderStudentsToWatch(records, exams, selectedExam, grade, subjects) {
+  if (!records.length || !selectedExam || !subjects.length) {
+    $("aa_students_grid").innerHTML = `<div class="empty-state"><div class="es-tip">暂无学生数据</div></div>`;
+    return;
+  }
   const examIdx = exams.findIndex((e) => e.id === selectedExam.id);
   const prevExam = examIdx > 0 ? exams[examIdx - 1] : null;
   const prevRecs = prevExam ? DB.records.filter((r) => r.examId === prevExam.id && r.grade === grade) : [];
@@ -4943,29 +5439,59 @@ function renderHeadteacherActions(classRecs, gradeRecs, classStats, gradeStats, 
   const weakest = subjectGaps[0];
   if (weakest && weakest.gap < -3) {
     const failRate = fmt(weakest.failCount / Math.max(weakest.total, 1) * 100, 1);
-    actions.push({ level: "danger", title: `${weakest.name} 学科薄弱（低于年级均分 ${fmt(Math.abs(weakest.gap), 1)} 分）`, desc: `本班 ${weakest.name} 均分 ${fmt(weakest.classAvg, 1)}，年级均分 ${fmt(weakest.gradeAvg, 1)}，差距达 ${fmt(Math.abs(weakest.gap), 1)} 分。该学科是制约班级排名的最大短板，不及格 ${weakest.failCount} 人（${failRate}%）。根据"短板效应"，提升该学科对班级总分的边际贡献最大。`, suggestion: `【精准诊断】① 知识点归因：与学科老师配合，将失分按知识模块拆解，定位3-5个高频失分点（建议占该学科总失分的60%以上）；② 人群定位：区分是"大面积学困生"还是"个别学生拖后腿"——若不及格人数>班级1/3，说明是教学层面问题；若集中在少数学生，则是个性化问题。
+    actions.push({ level: "danger", title: `【班主任重点关注】${weakest.name} 学科薄弱（低于年级均分 ${fmt(Math.abs(weakest.gap), 1)} 分）`, desc: `作为 ${classNo} 班主任，您需要关注：${weakest.name} 均分 ${fmt(weakest.classAvg, 1)}，年级均分 ${fmt(weakest.gradeAvg, 1)}，差距达 ${fmt(Math.abs(weakest.gap), 1)} 分。该学科是制约班级排名的最大短板，不及格 ${weakest.failCount} 人（${failRate}%）。根据"短板效应"，提升该学科对班级总分的边际贡献最大。`, suggestion: `【作为班主任，您可以这样行动】
 
-【班主任行动】③ 建立"学科攻坚小组"：将 ${weakest.name} 薄弱学生编组，任命学科课代表为组长，开展每日一题、每周一测的小组互助学习；④ 时间保障：协调自习课、课后服务时间，每周安排2-3次该学科的专项辅导时段；⑤ 家校联动：给薄弱学生家长发送"学科提升建议书"，指导家长在家如何配合督促和检查；⑥ 正向激励：设立"进步最快奖"，对 ${weakest.name} 进步最大的学生及时表彰，用成就感驱动学习动力；⑦ 目标设定：下次考试该学科均分差距缩小至2分以内，及格率提升10个百分点。` });
+① 学科联动：第一时间与 ${weakest.name} 任课老师沟通，了解课堂情况，共同分析学生失分原因；
+
+② 组建攻坚小组：将 ${weakest.name} 薄弱学生编组，安排课代表或优秀学生担任组长，开展"每日一题、每周一测"互助学习；
+
+③ 时间保障：协调自习课、课后服务时间，每周安排2-3次该学科的专项辅导时段；
+
+④ 家校联动：给薄弱学生家长发送"学科提升建议书"，指导家长在家如何配合督促和检查；
+
+⑤ 正向激励：设立"进步最快奖"，对 ${weakest.name} 进步最大的学生及时表彰，用成就感驱动学习动力；
+
+⑥ 目标设定：与任课老师共同制定目标——下次考试该学科均分差距缩小至2分以内，及格率提升10个百分点。` });
   }
 
   const failStudents = classRecs.filter((r) => r.total / totalFullScore < 0.6);
   if (failStudents.length > 0) {
     const failRate = fmt(failStudents.length / classRecs.length * 100, 1);
     const names = failStudents.slice(0, 5).map((r) => r.studentName).join("、");
-    actions.push({ level: "danger", title: `不及格学生 ${failStudents.length} 人（不及格率 ${failRate}%）`, desc: `总分未达及格线共 ${failStudents.length} 人：${names}${failStudents.length > 5 ? " 等" : ""}。从教育统计学看，总分不及格意味着多学科同时薄弱，学生处于"学业困境"状态，如不及时干预可能进入"成绩差→没信心→更差"的恶性循环。`, suggestion: `【分层分类干预】① 临界生（得分率55%-60%）：这是提分性价比最高的群体，通常只需突破1-2门学科的薄弱知识点就能跨越及格线，列为"重点突破对象"；② 学困生（得分率40%-55%）：多学科基础薄弱，需要"补基础+养习惯"双管齐下；③ 特困生（得分率<40%）：优先解决学习动机和学习习惯问题，降低学业难度要求，先建立自信。
+    actions.push({ level: "danger", title: `【班主任重点关注】不及格学生 ${failStudents.length} 人（不及格率 ${failRate}%）`, desc: `作为 ${classNo} 班主任请注意：总分未达及格线共 ${failStudents.length} 人：${names}${failStudents.length > 5 ? " 等" : ""}。从教育统计学看，总分不及格意味着多学科同时薄弱，学生处于"学业困境"状态，如不及时干预可能进入"成绩差→没信心→更差"的恶性循环。`, suggestion: `【班主任干预策略】
 
-【班主任工作清单】④ 一人一档：为每位不及格学生建立"学业成长档案"，记录每次考试的各科成绩、排名变化、薄弱点分析；⑤ 一生一策：与各学科老师共同制定个性化提升方案，明确每科的突破重点和阶段目标；⑥ 导师结对：每位不及格学生匹配1名"导师"（可以是优势学科老师或品学兼优的同学），每周至少1次谈心+辅导；⑦ 家校协同：每2周与不及格学生家长沟通1次，做到"报进步也报问题、给方法也给信心"，避免家长焦虑传导给孩子；⑧ 小步快跑：设置周目标（如本周数学基础题正确率提升5%），用微小进步积累自信；⑨ 心理建设：不及格学生往往伴随自卑心理，班主任要善于发现闪光点，用"多元评价"代替"唯分数论"。` });
+① 一人一档：为每位不及格学生建立"学业成长档案"，记录每次考试的各科成绩、排名变化、薄弱点分析；
+
+② 一生一策：与各学科老师共同制定个性化提升方案，明确每科的突破重点和阶段目标；
+
+③ 导师结对：每位不及格学生匹配1名"导师"（可以是优势学科老师或品学兼优的同学），每周至少1次谈心+辅导；
+
+④ 家校协同：每2周与不及格学生家长沟通1次，做到"报进步也报问题、给方法也给信心"，避免家长焦虑传导给孩子；
+
+⑤ 小步快跑：设置周目标（如本周数学基础题正确率提升5%），用微小进步积累自信；
+
+⑥ 心理建设：不及格学生往往伴随自卑心理，班主任要善于发现闪光点，用"多元评价"代替"唯分数论"；
+
+⑦ 重点突破：识别"临界生"（得分率55%-60%），这些学生提分性价比最高，是您帮扶的重点对象。` });
   }
 
   const failSubjects = subjectGaps.filter((s) => s.passPct < 0.7).sort((a, b) => a.passPct - b.passPct);
   if (failSubjects.length > 0) {
     const fs = failSubjects[0];
     const passPct = fmt(fs.passPct * 100, 1);
-    actions.push({ level: "warning", title: `${fs.name} 及格率偏低（仅 ${passPct}%）`, desc: `${fs.name} 及格 ${classStats[fs.name]?.passCount || 0} 人，不及格 ${fs.failCount} 人。该学科及格率显著低于班级平均水平，是拉低班级整体合格率的主要学科。`, suggestion: `【课堂层面】① 与学科老师深度沟通：了解课堂上中下三层学生的参与度，分析"听不懂→跟不上→放弃"的链条在哪一环断裂；② 作业诊断：检查学困生的作业完成质量和订正情况，判断是"不会做"还是"不认真做"。
+    actions.push({ level: "warning", title: `【班主任协调】${fs.name} 及格率偏低（仅 ${passPct}%）`, desc: `作为班主任您需要关注：${fs.name} 及格 ${classStats[fs.name]?.passCount || 0} 人，不及格 ${fs.failCount} 人。该学科及格率显著低于班级平均水平，是拉低班级整体合格率的主要学科。`, suggestion: `【班主任协调行动】
 
-【训练层面】③ 基础过关制度：建立 ${fs.name} "每日基础题"制度，每天5道基础题，当天批改订正，确保基础题得分率达到85%以上；④ 分层作业设计：学困生只做基础题+少量中档题，减少挫败感；中等生主攻中档题；优等生挑战难题；⑤ 错题管理：要求学生建立错题本，每周回顾1次同类错题，做到"不二错"。
+① 与任课老师深度沟通：了解 ${fs.name} 课堂上中下三层学生的参与度，分析"听不懂→跟不上→放弃"的链条在哪一环断裂；
 
-【管理层面】⑥ 小组竞赛：将班级分成若干学习小组，以小组 ${fs.name} 平均分为指标开展竞赛，用集体荣誉感驱动每个人努力；⑦ 小老师制：选拔 ${fs.name} 优秀学生担任"小老师"，利用课间帮助学困生讲题，输出式学习让双方都受益；⑧ 预期目标：1个月内及格率提升至75%以上，不及格人数减少1/3。` });
+② 作业诊断：协助任课老师检查学困生的作业完成质量和订正情况，判断是"不会做"还是"不认真做"；
+
+③ 小组竞赛：将班级分成若干学习小组，以小组 ${fs.name} 平均分为指标开展竞赛，用集体荣誉感驱动每个人努力；
+
+④ 小组互助：安排 ${fs.name} 优秀学生担任"小老师"，利用课间帮助学困生讲题，输出式学习让双方都受益；
+
+⑤ 基础过关：协助任课老师建立"每日基础题"制度，每天5道基础题，当天批改订正；
+
+⑥ 预期目标：与任课老师共同设定——1个月内及格率提升至75%以上，不及格人数减少1/3。` });
   }
 
   const partialStudents = classRecs.filter((r) => {
@@ -4981,14 +5507,32 @@ function renderHeadteacherActions(classRecs, gradeRecs, classStats, gradeStats, 
   });
   if (partialStudents.length > 0) {
     const names = partialStudents.slice(0, 3).map((r) => r.studentName).join("、");
-    actions.push({ level: "warning", title: `偏科学生 ${partialStudents.length} 人（总分提升的金矿）`, desc: `有 ${partialStudents.length} 名学生同时存在"优势学科优秀+薄弱学科不及格"的偏科现象，如：${names} 等。这些学生学习能力强、有成功经验，是班级总分提升最具潜力的群体——薄弱学科每提升10分，对总分排名的拉动效果远大于优势学科再提升。`, suggestion: `【偏科诊断分型】① 能力型偏科：优势学科思维方式与薄弱学科差异大（如理科好但文科弱），需要针对性的学习方法转换；② 态度型偏科：因不喜欢某科老师或对学科有畏难情绪而"主动放弃"，需要从情感和动机入手；③ 基础型偏科：某一阶段知识断层导致后续跟不上（如小学英语没学好→初中跟不上），需要系统补基础。
+    actions.push({ level: "warning", title: `【班主任关注】偏科学生 ${partialStudents.length} 人（总分提升的金矿）`, desc: `作为班主任请注意：您班上有 ${partialStudents.length} 名学生同时存在"优势学科优秀+薄弱学科不及格"的偏科现象，如：${names} 等。这些学生学习能力强、有成功经验，是班级总分提升最具潜力的群体——薄弱学科每提升10分，对总分排名的拉动效果远大于优势学科再提升。`, suggestion: `【班主任干预策略】
 
-【班主任干预策略】④ 优势迁移对话：与偏科生一起复盘"你是怎么把优势学科学好的"，将成功经验（如整理错题、归纳总结、大量练习）提炼出来，引导其迁移到薄弱学科；⑤ 学科联结：帮学生找到优势学科与薄弱学科的关联点（如数学好→物理公式推导快、语文好→英语阅读理解强），建立"我能学好"的心理暗示；⑥ "1+1"帮扶：让偏科生A（数学强英语弱）和偏科生B（英语强数学弱）结对，互相讲解优势学科，实现双赢；⑦ 阶梯目标：薄弱学科设定"小目标"——第一个月从不及格到及格（60分），第二个月到70分，循序渐进，避免目标过高导致挫败；⑧ 时间分配指导：帮助偏科生合理分配学习时间，建议薄弱学科多投入30%-50%的时间，但不放弃优势学科的保温。` });
+① 优势迁移对话：与偏科生一起复盘"你是怎么把优势学科学好的"，将成功经验（如整理错题、归纳总结、大量练习）提炼出来，引导其迁移到薄弱学科；
+
+② 学科联结：帮学生找到优势学科与薄弱学科的关联点（如数学好→物理公式推导快、语文好→英语阅读理解强），建立"我能学好"的心理暗示；
+
+③ "1+1"帮扶：让偏科生A（数学强英语弱）和偏科生B（英语强数学弱）结对，互相讲解优势学科，实现双赢；
+
+④ 阶梯目标：协助偏科生设定"小目标"——第一个月从不及格到及格（60分），第二个月到70分，循序渐进；
+
+⑤ 时间分配指导：帮助偏科生合理分配学习时间，建议薄弱学科多投入30%-50%的时间。` });
   }
 
   if (classAvg - gradeAvg > 3) {
     const rankInGrade = 0;
-    actions.push({ level: "success", title: `班级整体表现优秀（高于年级均分 ${fmt(classAvg - gradeAvg, 1)} 分）`, desc: `本班整体实力处于年级前列，总分均分高出年级 ${fmt(classAvg - gradeAvg, 1)} 分。这是师生共同努力的结果，也是班级学风优良的体现。但要警惕"高原期"——当成绩达到一定高度后，提升难度会指数级增加。`, suggestion: `【持续精进方向】① 高位均衡：关注高分段学生的学科均衡度，避免"偏科的尖子生"在关键时刻掉链子；② 临界培优：瞄准年级前50名/前100名的临界生，针对性补弱，争取更多学生进入顶尖行列；③ 学风建设：将班级优秀的学习方法（如错题本制度、小组讨论、时间管理）系统化、制度化，形成可复制的"班级学习模式"；④ 精神引领：树立"追求卓越"的班级精神，不满足于现状，鼓励学生挑战自我，设定更高远的目标；⑤ 家校共育：召开优秀学生家长会，分享家庭教育经验，形成家校合力的良性循环；⑥ 经验辐射：作为优秀班级，主动与兄弟班级分享管理经验，在帮助他人的同时也倒逼自己进步。` });
+    actions.push({ level: "success", title: `【班级喜报】${classNo} 整体表现优秀（高于年级均分 ${fmt(classAvg - gradeAvg, 1)} 分）`, desc: `恭喜！${classNo} 全体师生：班级总分均分高出年级 ${fmt(classAvg - gradeAvg, 1)} 分，整体实力处于年级前列。这是班级学风优良的体现，也是您班级管理智慧的结晶。`, suggestion: `【作为优秀班级的班主任，您可以】
+
+① 经验总结：组织班科老师联席会议，总结本次成绩领先的关键因素，形成可复制的班级管理经验；
+
+② 高位均衡：关注高分段学生的学科均衡度，避免"偏科的尖子生"在关键时刻掉链子；
+
+③ 学风升级：将班级优秀的学习方法（如错题本制度、小组讨论、时间管理）系统化，形成" ${classNo} 学习模式"；
+
+④ 经验辐射：作为优秀班级，可考虑向年级分享班级管理经验，同时精进自我；
+
+⑤ 设定新目标：在年级中设定更高的对标目标，争取年级排名更进一步。` });
   }
 
   const last2 = exams.slice(-2);
@@ -4998,22 +5542,60 @@ function renderHeadteacherActions(classRecs, gradeRecs, classStats, gradeStats, 
     const prevAvg = prevRecs.length ? prevRecs.reduce((a, b) => a + b.total, 0) / prevRecs.length : 0;
     const trend = classAvg - prevAvg;
     if (trend > 5) {
-      actions.push({ level: "info", title: `班级整体进步明显（较上次提升 ${fmt(trend, 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，班级均分从 ${fmt(prevAvg, 1)} 提升到 ${fmt(classAvg, 1)}，进步 ${fmt(trend, 1)} 分，幅度显著。这说明近期的教学和管理措施有效，需要及时总结和固化。`, suggestion: `【巩固进步成果】① 归因分析：和各科老师一起分析——是哪几科进步最大？是哪些学生群体带动的进步？是教学方法改进了还是学生状态变好了？找到"成功因子"并复制推广；② 正向强化：在班级公开表扬进步，尤其表扬进步幅度大的学生和进步显著的小组，用"进步文化"替代"名次文化"，让每个人都有奔头；③ 经验分享：请进步最大的3-5名学生分享学习方法和心得，同伴的经验最有说服力；④ 防骄戒躁：提醒同学们"打江山易守江山难"，进步后容易出现松懈，要保持清醒，乘势而上；⑤ 设新目标：和同学们一起制定下一次考试的"踮踮脚够得着"的目标，保持持续前进的动力。` });
-    } else if (trend < -5) {
-      actions.push({ level: "danger", title: `班级整体有所下滑（较上次下降 ${fmt(Math.abs(trend), 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，班级均分从 ${fmt(prevAvg, 1)} 下降到 ${fmt(classAvg, 1)}，退步 ${fmt(Math.abs(trend), 1)} 分，需要高度重视。一次退步可能是偶然，但如果连续退步就是信号。`, suggestion: `【退步诊断】① 学科拆解：分析是哪几科退步最严重？是普遍性退步还是个别学科拖后腿？定位"责任学科"和"责任老师"；② 人群分析：是头部学生掉下来了还是尾部学生更差了？还是中间层塌陷了？不同人群的退步原因和对策完全不同；③ 原因排查：近期班级有没有发生什么事情？（换老师、同学矛盾、家庭变故、活动过多影响学习等）
+      actions.push({ level: "info", title: `【班级进步】${classNo} 整体进步明显（较上次提升 ${fmt(trend, 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，${classNo} 均分从 ${fmt(prevAvg, 1)} 提升到 ${fmt(classAvg, 1)}，进步 ${fmt(trend, 1)} 分！这说明近期的班级管理措施有效，需要及时总结和固化。`, suggestion: `【班主任巩固成果行动】
 
-【应对措施】④ 紧急班会：召开"分析问题、重拾信心"主题班会，客观分析退步原因，不指责、不抱怨，让大家明白"退步是暂时的，找到原因就能反弹"；⑤ 分层谈话：班主任分层找学生谈话——头部学生"稳心态"、中层学生"找方法"、尾部学生"树信心"；⑥ 教师联动：召开班级教师协调会，各科老师分析本学科问题，协调作业量和辅导时间，形成"齐抓共管"的合力；⑦ 家校沟通：给全体家长发一封信，说明情况、给出建议，避免家长焦虑指责学生，争取家长的理解和支持；⑧ 跟踪监测：接下来的1-2周加强作业检查和课堂关注，及时发现问题及时纠正，用"紧一紧"的管理稳住状态，争取下次考试回升。` });
+① 归因分析：组织班科老师联席会议，分析是哪几科进步最大？是哪些学生群体带动的进步？找到"成功因子"；
+
+② 正向强化：在班级公开表扬进步，尤其表扬进步幅度大的学生和进步显著的小组，用"进步文化"替代"名次文化"；
+
+③ 经验分享：请进步最大的3-5名学生分享学习方法和心得，同伴的经验最有说服力；
+
+④ 防骄戒躁：提醒同学们"打江山易守江山难"，进步后容易出现松懈，保持清醒，乘势而上；
+
+⑤ 设新目标：和同学们一起制定下一次考试的"踮踮脚够得着"的目标，保持持续前进的动力。` });
+    } else if (trend < -5) {
+      actions.push({ level: "danger", title: `【班主任预警】${classNo} 整体有所下滑（较上次下降 ${fmt(Math.abs(trend), 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，${classNo} 均分从 ${fmt(prevAvg, 1)} 下降到 ${fmt(classAvg, 1)}，退步 ${fmt(Math.abs(trend), 1)} 分，需要您高度重视。一次退步可能是偶然，但如果连续退步就是信号。`, suggestion: `【班主任紧急应对措施】
+
+① 紧急班会：召开"分析问题、重拾信心"主题班会，客观分析退步原因，不指责、不抱怨；
+
+② 学科拆解：分析是哪几科退步最严重？定位"责任学科"，与任课老师共同分析原因；
+
+③ 人群分析：是头部学生掉下来了还是尾部学生更差了？不同人群的退步原因和对策完全不同；
+
+④ 分层谈话：班主任分层找学生谈话——头部学生"稳心态"、中层学生"找方法"、尾部学生"树信心"；
+
+⑤ 教师联动：召开班级教师协调会，协调作业量和辅导时间，形成"齐抓共管"的合力；
+
+⑥ 家校沟通：给全体家长发一封信，说明情况、给出建议，争取家长的理解和支持；
+
+⑦ 跟踪监测：接下来1-2周加强作业检查和课堂关注，及时发现问题及时纠正。` });
     }
   }
 
   const excellentStudents = classRecs.filter((r) => r.total / totalFullScore >= 0.9);
   if (excellentStudents.length > 0) {
     const excellentRate = fmt(excellentStudents.length / classRecs.length * 100, 1);
-    actions.push({ level: "info", title: `高分段学生 ${excellentStudents.length} 人（优秀率 ${excellentRate}%）`, desc: `总分优秀（得分率≥90%）共 ${excellentStudents.length} 人，优秀率 ${excellentRate}%。尖子生是班级的"领头羊"，他们的学习状态和方法对全班有示范效应。但高分不等于高素养，要警惕"高分低能"和"后劲不足"。`, suggestion: `【培优升级路径】① 从"学会"到"会学"：引导尖子生从"被动刷题"转向"主动建构"——比如自己画知识体系图、自己出题、自己总结解题模型，培养自主学习能力；② 从"单科"到"全科"：关注尖子生的均衡发展，哪怕总分很高，如果有明显偏科也要提醒补弱，避免"木桶效应"在更高层次显现；③ 从"分数"到"素养"：鼓励尖子生参加学科竞赛、科技创新、社会实践等活动，拓展视野、锻炼能力，为长远发展打基础；④ 设立"荣誉任务"：让尖子生担任"学科助教"，负责出每周一题、讲解难题、帮助同学，输出式学习让他们理解更深刻，同时培养责任感；⑤ 目标引领：帮助尖子生树立更高远的目标（如年级前十、考入理想学校），用"远方的灯塔"牵引持续努力，避免"小富即安"的自满心态；⑥ 抗挫训练：尖子生一路顺风顺水，抗挫折能力往往较弱，可以适当布置一些有挑战性的任务，让他们体验"通过努力攻克难题"的过程，培养坚韧品质。` });
+    actions.push({ level: "info", title: `【班级培优】高分段学生 ${excellentStudents.length} 人（优秀率 ${excellentRate}%）`, desc: `${classNo} 总分优秀（得分率≥90%）共 ${excellentStudents.length} 人，优秀率 ${excellentRate}%。尖子生是班级的"领头羊"，他们的学习状态和方法对全班有示范效应。`, suggestion: `【班主任培优工作】
+
+① 从"学会"到"会学"：引导尖子生从"被动刷题"转向"主动建构"，培养自主学习能力；
+
+② 设立"荣誉任务"：让尖子生担任"学科助教"，负责出每周一题、讲解难题，培养责任感；
+
+③ 目标引领：帮助尖子生树立更高远的目标（如年级前十），用"远方的灯塔"牵引持续努力；
+
+④ 抗挫训练：适当布置有挑战性的任务，让尖子生体验"通过努力攻克难题"的过程。` });
   }
 
   if (actions.length === 0) {
-    actions.push({ level: "info", title: "班级整体表现平稳", desc: "各项指标均在正常范围内，班级处于稳定发展状态。", suggestion: "【稳中求进】① 保持现有良好的班级学风和管理节奏，不折腾、不懈怠；② 关注学生的细微变化，在问题萌芽阶段及时干预；③ 寻找新的增长点——可以是某一门薄弱学科的突破，也可以是某个学生群体的进步；④ 持续建设班级文化，让班级成为每个学生成长的温暖港湾。" });
+    actions.push({ level: "info", title: `【班级状态】${classNo} 整体表现平稳`, desc: `各项指标均在正常范围内，${classNo} 处于稳定发展状态。作为班主任，您的职责是保持这个良好的势头。`, suggestion: `【班主任日常工作】
+
+① 保持现有良好的班级学风和管理节奏，不折腾、不懈怠；
+
+② 关注学生的细微变化，在问题萌芽阶段及时干预；
+
+③ 寻找新的增长点——可以是某一门薄弱学科的突破，也可以是某个学生群体的进步；
+
+④ 持续建设班级文化，让班级成为每个学生成长的温暖港湾。` });
   }
 
   const levelMap = { danger: { icon: "🔴", label: "紧急" }, warning: { icon: "🟠", label: "重要" }, success: { icon: "🟢", label: "优秀" }, info: { icon: "🔵", label: "关注" } };
@@ -5757,18 +6339,40 @@ function renderTeacherActions(myRecs, gradeRecs, myClassNos, subjectName, fullSc
   if (failStudents.length > 0) {
     const failRate = fmt(failStudents.length / myVals.length * 100, 1);
     const names = failStudents.slice(0, 5).map((r) => r.studentName).join("、");
-    actions.push({ level: "danger", title: `不及格学生 ${failStudents.length} 人（不及格率 ${failRate}%）`, desc: `${subjectName}未达及格线共 ${failStudents.length} 人：${names}${failStudents.length > 5 ? " 等" : ""}。从教育测量学角度看，不及格学生的存在反映了教学目标达成度不足，需要精准归因、分层施策。`, suggestion: `【精准归因——数据诊断三步骤】① 失分结构分析：将失分按"知识模块+题型+能力层次"三维度拆解，定位2-3个高频失分知识点（建议占总失分的60%以上，遵循帕累托法则）；② 错因分类：区分是"知识性错误"（概念不清）、"方法性错误"（解题思路错）、"计算性错误"（粗心）还是"规范性错误"（步骤扣分），不同错因对应不同干预策略；③ 能力画像：对不及格学生进行能力层级划分——临界生（55-60分，提分最快）、基础薄弱生（40-55分）、学习困难生（<40分）。
+    actions.push({ level: "danger", title: `【${subjectName}教师重点关注】不及格学生 ${failStudents.length} 人（不及格率 ${failRate}%）`, desc: `作为 ${subjectName} 任课教师请您关注：${names}${failStudents.length > 5 ? " 等" : ""} 共 ${failStudents.length} 人未达及格线。不及格学生的存在反映了教学目标达成度不足，需要从课堂教学和个别辅导两个层面精准施策。`, suggestion: `【作为 ${subjectName} 教师，您可以这样行动】
 
-【分层干预——因人施策】④ 临界生攻坚：聚焦"中档题+高频考点"，实施"四清"策略（堂堂清、日日清、周周清、月月清），目标是用最少的精力突破及格线，投入产出比最高；⑤ 基础薄弱生：回归课本，从基本概念、公式、定理入手，采用"低起点、小步子、快反馈、多鼓励"的教学策略，降低学习坡度；⑥ 学习困难生：先解决学习动机和学习习惯问题，从"能听懂一节课、能做对一道题"开始，建立微小的成功体验，逐步重建学习自信。
+① 失分结构分析：将失分按"知识模块+题型+能力层次"三维度拆解，定位2-3个高频失分知识点（遵循帕累托法则）；
 
-【教学改进——从课堂抓起】⑦ 课堂参与度提升：设计分层问题链，让学困生也能回答基础问题，用成功体验激发参与热情；⑧ 作业改革：实施"自助餐式"分层作业——A层基础题（必做）、B层提升题（选做）、C层挑战题（选做），让每个学生都有"跳一跳够得着"的题目；⑨ 错题闭环：建立"错题收集→原因分析→同类巩固→定期回顾"的错题管理闭环，确保"不二错"；⑩ 目标管理：为每位不及格学生设定"跳一跳够得着"的阶段性小目标（如下次考试提升5分），用目标牵引进步。` });
+② 错因分类：区分是"知识性错误"、"方法性错误"、"计算性错误"还是"规范性错误"，不同错因对应不同干预策略；
+
+③ 临界生攻坚（提分性价比最高）：聚焦"中档题+高频考点"，实施"堂堂清+日日清"，用最少精力突破及格线；
+
+④ 基础薄弱生策略：回归课本，从基本概念、公式、定理入手，采用"低起点、小步子、快反馈"降低学习坡度；
+
+⑤ 课堂分层设计：设计分层问题链，让学困生也能回答基础问题，用成功体验激发参与热情；
+
+⑥ 分层作业：实施"自助餐式"作业——A层基础题（必做）、B层提升题（选做），让每个学生都有"够得着"的题目；
+
+⑦ 错题闭环：建立"错题收集→原因分析→同类巩固→定期回顾"的错题管理闭环，确保"不二错"。` });
   }
 
   const gap = myAvg - gradeAvg;
   if (gap < -3) {
-    actions.push({ level: "danger", title: `${subjectName} 均分低于年级平均 ${fmt(Math.abs(gap), 1)} 分`, desc: `任教班级${subjectName}均分 ${fmt(myAvg, 1)}，年级均分 ${fmt(gradeAvg, 1)}，差距 ${fmt(Math.abs(gap), 1)} 分。整体水平落后于年级，需要从教学理念、教学方法、训练效率等多维度系统改进。`, suggestion: `【差距诊断——找准病根】① 三维对标分析：将任教班级与年级高水平班级从"均分、优秀率、及格率、低分率、标准差"五个指标对比，判断是整体落后还是某个维度特别差；② 知识点对比：找到任教班级失分率显著高于年级平均的知识点，这就是教学薄弱点；③ 题型对比：是客观题失分多还是主观题失分多？前者可能是基础不牢，后者可能是能力培养不足；④ 课堂诊断：请同组老师或教研员听课，从"教学目标达成度、学生参与度、思维训练深度"三个维度找课堂效率问题。
+    actions.push({ level: "danger", title: `【${subjectName}教师预警】均分低于年级平均 ${fmt(Math.abs(gap), 1)} 分`, desc: `作为 ${subjectName} 任课教师请您注意：任教班级均分 ${fmt(myAvg, 1)}，年级均分 ${fmt(gradeAvg, 1)}，差距 ${fmt(Math.abs(gap), 1)} 分。整体水平落后于年级，需要从教学理念、教学方法、训练效率等多维度系统改进。`, suggestion: `【${subjectName} 教学改进路径】
 
-【教学改进——系统提升】⑤ 向课堂要效率：推行"高效课堂"模式——精讲（教师讲得不超过20分钟）、多练（学生动笔不少于15分钟）、即时反馈（当堂检测掌握情况）；⑥ 向教研要质量：主动参加集体备课，多听优秀教师的课，借鉴成熟的教学设计和课件，"站在巨人的肩膀上"成长；⑦ 向训练要效果：精选习题，拒绝"题海战术"——每道题要有明确的训练目标（是巩固基础？还是训练方法？还是培养能力？），做到"做一题、会一类、通一片"；⑧ 向管理要分数：落实"三清"制度——课堂清、作业清、单元清，不把问题留到考试才发现；⑨ 预期目标：2次考试内均分差距缩小至2分以内，及格率提升10个百分点。` });
+① 三维对标分析：将任教班级与年级高水平班级从"均分、优秀率、及格率、低分率、标准差"五个指标对比，判断是整体落后还是某个维度特别差；
+
+② 知识点对比：找到任教班级失分率显著高于年级平均的知识点，这就是您的教学薄弱点；
+
+③ 课堂诊断：请同组老师或教研员听课，从"教学目标达成度、学生参与度、思维训练深度"三个维度找课堂效率问题；
+
+④ 高效课堂：推行"精讲（≤20分钟）+多练（≥15分钟）+即时反馈"模式，向课堂要效率；
+
+⑤ 精选习题：拒绝题海战术，每道题要有明确的训练目标，做到"做一题、会一类、通一片"；
+
+⑥ "三清"制度：落实课堂清、作业清、单元清，不把问题留到考试才发现；
+
+⑦ 预期目标：2次考试内均分差距缩小至2分以内，及格率提升10个百分点。` });
   }
 
   if (myClassNos.length > 1) {
@@ -5781,9 +6385,19 @@ function renderTeacherActions(myRecs, gradeRecs, myClassNos, subjectName, fullSc
     }).sort((a, b) => b.avg - a.avg);
     const classGap = classAvgs[0].avg - classAvgs[classAvgs.length - 1].avg;
     if (classGap > 8) {
-      actions.push({ level: "warning", title: `任教班级之间差距较大（${fmt(classGap, 1)} 分）`, desc: `${classAvgs[0].classNo} 均分最高（${fmt(classAvgs[0].avg, 1)}），${classAvgs[classAvgs.length - 1].classNo} 均分最低（${fmt(classAvgs[classAvgs.length - 1].avg, 1)}），差距达 ${fmt(classGap, 1)} 分。同一位老师任教的班级出现显著差距，往往不是能力问题，而是教学投入、课堂管理、学情把握的差异。`, suggestion: `【差距归因】① 起点差异分析：对比各班入学/期初成绩，判断差距是"先天"的还是"后天"造成的；② 课堂管理对比：反思自己在不同班级的课堂纪律要求、教学节奏、互动方式是否有差异；③ 作业与辅导对比：各班的作业批改、订正检查、课后辅导的投入度是否一致。
+      actions.push({ level: "warning", title: `【${subjectName}教师注意】任教班级差距较大（${fmt(classGap, 1)} 分）`, desc: `作为 ${subjectName} 任课教师请注意：${classAvgs[0].classNo} 均分最高（${fmt(classAvgs[0].avg, 1)}），${classAvgs[classAvgs.length - 1].classNo} 均分最低（${fmt(classAvgs[classAvgs.length - 1].avg, 1)}），差距达 ${fmt(classGap, 1)} 分。同一位老师任教的班级出现显著差距，需要反思和改进。`, suggestion: `【${subjectName} 班级均衡策略】
 
-【均衡策略】④ 教学资源均衡化：教案、课件、习题、试卷等教学资源在各班统一使用，不"偏心"；⑤ 精力分配均衡化：有意识地给薄弱班级多投入20%的精力（如多提前5分钟进班答疑、多面批几份作业）；⑥ 分层教学精准化：同样的教学内容，在不同班级采用不同的教学策略——基础好的班侧重思维深度，基础弱的班侧重夯实基础；⑦ 班级联动：组织跨班的"学科学习小组"，让优秀班级的学生与薄弱班级的学生结对互助，形成良性竞争；⑧ 动态监测：每次考试后跟踪各班差距变化，及时调整教学策略，避免差距越拉越大。` });
+① 起点分析：对比各班入学/期初成绩，判断差距是"先天"的还是"后天"造成的；
+
+② 课堂反思：反思自己在不同班级的课堂纪律要求、教学节奏、互动方式是否有差异；
+
+③ 资源统一：教案、课件、习题等教学资源在各班统一使用，避免"偏心"；
+
+④ 精力分配：有意识地给薄弱班级多投入20%的精力（如多提前5分钟进班答疑、多面批几份作业）；
+
+⑤ 分层策略：同样的教学内容，在不同班级采用不同策略——基础好的班侧重思维深度，基础弱的班侧重夯实基础；
+
+⑥ 动态监测：每次考试后跟踪各班差距变化，及时调整教学策略。` });
     }
   }
 
@@ -5793,9 +6407,17 @@ function renderTeacherActions(myRecs, gradeRecs, myClassNos, subjectName, fullSc
   });
   if (excellentStudents.length > 0) {
     const excellentRate = fmt(excellentStudents.length / myVals.length * 100, 1);
-    actions.push({ level: "success", title: `优秀学生 ${excellentStudents.length} 人（优秀率 ${excellentRate}%）`, desc: `${subjectName}优秀率 ${excellentRate}%，表现良好。但优秀只是起点，从"学会"到"会学"、从"分数高"到"能力强"，还有很长的路要走。教师的使命是让优秀学生变得更卓越。`, suggestion: `【培优三层次——从优秀到卓越】① 知识拓展层：突破教材边界，进行深度学习——可以引入竞赛入门内容、大学先修知识、学科前沿进展，拓宽学生的学科视野；② 能力提升层：从"解题"到"解决问题"——设计开放性问题、探究性课题、项目式学习（PBL），培养批判性思维、创造性思维和自主探究能力；③ 素养培育层：学科思想方法的领悟、科学精神的培养、学习毅力的锻造——这些是支撑学生长远发展的"底层能力"。
+    actions.push({ level: "success", title: `【${subjectName}教师成果】优秀学生 ${excellentStudents.length} 人（优秀率 ${excellentRate}%）`, desc: `恭喜！${subjectName} 优秀率 ${excellentRate}%，这是您教学能力的体现。但优秀只是起点，教师的使命是让优秀学生变得更卓越。`, suggestion: `【${subjectName} 培优路径】
 
-【实施路径】④ "荣誉课程"体系：为优秀学生开设选修课/专题讲座，内容可以是学科史话、思想方法、经典名题赏析等，用学科魅力吸引学生；⑤ "小先生制"：让优秀学生担任"学科小助教"，负责出思考题、讲解难题、帮助同学，输出式学习（费曼学习法）能让他们理解更深刻、掌握更牢固；⑥ 竞赛启蒙：选拔学有余力的学生参加学科兴趣小组/竞赛队，系统训练竞赛内容，冲击更高层次的荣誉；⑦ 个性化发展：为每位优秀学生建立"学科成长档案"，跟踪其优势与不足，制定个性化发展方案，避免"千人一面"的培养模式；⑧ 目标引领：帮助优秀学生树立更高远的目标（如竞赛获奖、考入名校、成为某领域专家），用大格局牵引大成长。` });
+① 知识拓展：引入竞赛入门内容、大学先修知识、学科前沿进展，拓宽学生的学科视野；
+
+② 能力提升：从"解题"到"解决问题"——设计开放性问题、探究性课题，培养批判性思维和自主探究能力；
+
+③ "小先生制"：让优秀学生担任"学科小助教"，讲解难题，输出式学习让他们理解更深刻；
+
+④ 竞赛启蒙：选拔学有余力的学生参加学科兴趣小组/竞赛队，冲击更高层次的荣誉；
+
+⑤ 目标引领：帮助优秀学生树立更高远的目标，用大格局牵引大成长。` });
   }
 
   const last2 = exams.slice(-2);
@@ -5806,22 +6428,50 @@ function renderTeacherActions(myRecs, gradeRecs, myClassNos, subjectName, fullSc
     const prevAvg = prevVals.length ? prevVals.reduce((a, b) => a + b, 0) / prevVals.length : 0;
     const trend = myAvg - prevAvg;
     if (trend > 3) {
-      actions.push({ level: "info", title: `${subjectName} 整体进步明显（较上次提升 ${fmt(trend, 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，任教班级${subjectName}均分从 ${fmt(prevAvg, 1)} 提升到 ${fmt(myAvg, 1)}，进步 ${fmt(trend, 1)} 分。进步是教学改进成效的直接体现，需要及时归因、固化经验、乘势而上。`, suggestion: `【进步归因——找到"成功因子"】① 纵向对比：对比两次考试的知识点得分率变化，哪些知识点进步最大？这就是你近期教学最成功的地方；② 横向对比：进步主要来自哪个学生群体？是学困生逆袭了还是中等生突破了还是尖子生更拔尖了？③ 自我反思：这段时间你在教学上做了哪些改变？（如新的教学方法、增加了辅导、调整了作业等）哪个改变最可能带来进步？
+      actions.push({ level: "info", title: `【${subjectName}教师成果】整体进步明显（较上次提升 ${fmt(trend, 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，${subjectName} 均分从 ${fmt(prevAvg, 1)} 提升到 ${fmt(myAvg, 1)}，进步 ${fmt(trend, 1)} 分！进步是您教学改进成效的直接体现。`, suggestion: `【${subjectName} 巩固成果行动】
 
-【巩固放大——让进步可持续】④ 正向激励：在课堂上公开表扬进步（表扬进步幅度大的学生、表扬进步显著的小组），用"进步文化"替代"名次文化"，让更多学生有成就感；⑤ 经验固化：把证明有效的教学方法总结提炼出来，形成你的"教学绝活"，在后续教学中坚持使用并不断优化；⑥ 经验分享：把你的成功经验分享给同组老师，在帮助他人的同时也倒逼自己更深入地思考；⑦ 设定新目标：和学生一起制定下一次考试的新目标（如再提升3分、及格率再提高5个百分点），保持持续改进的动力；⑧ 防骄戒躁：提醒学生"学如逆水行舟，不进则退"，进步后最容易出现松懈，要保持谦虚和专注。` });
+① 归因分析：对比两次考试的知识点得分率变化，哪些知识点进步最大？这就是您近期教学最成功的地方；
+
+② 正向强化：在课堂上公开表扬进步，用"进步文化"替代"名次文化"，让更多学生有成就感；
+
+③ 经验固化：把证明有效的教学方法总结提炼出来，形成您的"教学绝活"；
+
+④ 设定新目标：和学生一起制定下一次考试的新目标，保持持续改进的动力。` });
     } else if (trend < -3) {
-      actions.push({ level: "warning", title: `${subjectName} 整体有所下滑（较上次下降 ${fmt(Math.abs(trend), 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，任教班级${subjectName}均分从 ${fmt(prevAvg, 1)} 下降到 ${fmt(myAvg, 1)}，退步 ${fmt(Math.abs(trend), 1)} 分。一次退步可能有偶然因素（如试题难度、内容侧重），但连续退步就是警示信号。`, suggestion: `【退步诊断——找准原因】① 内容维度：分析是哪些知识点/题型退步最严重？是不是这段时间教的内容本来就难？② 人群维度：退步集中在哪个群体？是头部学生掉下来了？还是尾部学生更差了？还是中间层塌了？③ 教学反思：这段时间你的教学有什么变化？（如换了教学方法、讲得快了、作业批改松了等）有没有什么外部因素影响？（如活动多了、放假多了等）
+      actions.push({ level: "warning", title: `【${subjectName}教师预警】整体有所下滑（较上次下降 ${fmt(Math.abs(trend), 1)} 分）`, desc: `从 ${prevExam.name} 到 ${currExam.name}，${subjectName} 均分从 ${fmt(prevAvg, 1)} 下降到 ${fmt(myAvg, 1)}，退步 ${fmt(Math.abs(trend), 1)} 分。一次退步可能有偶然因素，但连续退步就是警示信号。`, suggestion: `【${subjectName} 止跌回升策略】
 
-【应对策略——快速止跌回升】④ 紧急复盘：拿出试卷，认认真真做一遍试卷分析——每道题的得分率、失分原因、改进措施，形成书面的"试卷分析报告"；⑤ 查漏补缺：对失分率高的知识点安排1-2节专项讲评课，确保学生真正弄懂，不把"夹生饭"留到后面；⑥ 课堂调整：如果是因为讲得太快学生跟不上，就适当放慢节奏、增加课堂练习和即时反馈；如果是因为课堂纪律松了，就加强课堂管理；⑦ 作业收紧：加强作业检查和订正落实，确保"做一道、会一道"，用作业质量的提升带动成绩回升；⑧ 信心重建：找退步明显的学生个别谈话，帮他们分析原因、找到改进方向，避免因一次退步而丧失信心；⑨ 跟踪验证：下次小测/单元考时重点关注退步知识点的掌握情况，验证改进措施是否有效。` });
+① 内容分析：分析是哪些知识点/题型退步最严重？是不是这段时间教的内容本来就难？
+
+② 人群分析：退步集中在哪个群体？是头部学生掉下来了还是尾部学生更差了？
+
+③ 教学复盘：这段时间您的教学有什么变化？（如换了教学方法、讲得快了等）
+
+④ 紧急补救：对失分率高的知识点安排专项讲评课，确保学生真正弄懂。` });
     }
   }
 
   if (gap >= 3) {
-    actions.push({ level: "success", title: `${subjectName} 表现优秀（高于年级均分 ${fmt(gap, 1)} 分）`, desc: `任教班级${subjectName}整体实力较强，均分高出年级 ${fmt(gap, 1)} 分。这是教学能力的体现，但优秀不只是"分数高"，更要追求"学生学得轻松、能力发展全面、长远后劲充足"。`, suggestion: `【从优秀走向卓越】① 教学特色化：总结提炼你的教学优势，形成独特的教学风格和教学特色（如"幽默风趣型""逻辑严密型""激情互动型"），让学生因为喜欢你而更喜欢这门学科；② 课程精品化：打磨几节"招牌课""示范课"，在年级、校级甚至更高层面展示，在专业成长上更进一步；③ 研究引领：从"教书匠"向"研究者"转变——开展小课题研究（如"如何提高课堂提问的有效性""分层作业的设计与实施"），用研究反哺教学；④ 经验辐射：主动分享你的教学经验（如做组内讲座、带新教师、开放课堂），在帮助他人的过程中实现自我提升；⑤ 学生发展：不仅关注学生的分数，更关注学生的学科兴趣、思维品质、学习能力的培养，为学生的终身发展奠基。` });
+    actions.push({ level: "success", title: `【${subjectName}教师佳绩】表现优秀（高于年级均分 ${fmt(gap, 1)} 分）`, desc: `恭喜！任教班级 ${subjectName} 均分高出年级 ${fmt(gap, 1)} 分，这是您学科教学能力的体现。但优秀不只是"分数高"，更要追求"学生学得轻松、能力发展全面"。`, suggestion: `【${subjectName} 从优秀走向卓越】
+
+① 教学特色化：总结提炼您的教学优势，形成独特的教学风格（如"逻辑严密型""激情互动型"），让学生因为喜欢您而更喜欢这门学科；
+
+② 课程精品化：打磨几节"招牌课""示范课"，在校级甚至更高层面展示；
+
+③ 研究引领：从"教书匠"向"研究者"转变——开展小课题研究，用研究反哺教学；
+
+④ 经验辐射：主动分享您的教学经验，在帮助他人的过程中实现自我提升。` });
   }
 
   if (actions.length === 0) {
-    actions.push({ level: "info", title: `${subjectName} 整体表现平稳`, desc: "各项指标均在正常范围内，教学处于稳定发展状态。", suggestion: `【稳中求进——在平凡中追求卓越】① 保持现有良好的教学节奏和训练体系，不折腾、不懈怠；② 关注学生的细微变化，在问题萌芽阶段及时干预；③ 寻找新的增长点——可以是某个薄弱知识点的突破、某个学生群体的提升、某种教学方法的创新；④ 持续学习和反思，每节课后花5分钟写「教学后记」，积累教学智慧；⑤ 关注学生的学习体验，让学生不仅「学得会」，更「学得乐」。` });
+    actions.push({ level: "info", title: `【${subjectName}教师状态】整体表现平稳`, desc: `各项指标均在正常范围内，${subjectName} 教学处于稳定发展状态。`, suggestion: `【${subjectName} 稳中求进】
+
+① 保持现有良好的教学节奏和训练体系，不折腾、不懈怠；
+
+② 关注学生的细微变化，在问题萌芽阶段及时干预；
+
+③ 寻找新的增长点——可以是某个薄弱知识点的突破、某种教学方法的创新；
+
+④ 每节课后花5分钟写「教学后记」，积累教学智慧。` });
   }
 
   const levelMap = { danger: { icon: "🔴", label: "紧急" }, warning: { icon: "🟠", label: "重要" }, success: { icon: "🟢", label: "优秀" }, info: { icon: "🔵", label: "关注" } };
@@ -6956,25 +7606,28 @@ function addCompareStyles() {
     .exam-chip .drag-handle { cursor: grab; opacity: 0.5; font-size: 12px; }
     .exam-chip:hover .drag-handle { opacity: 1; }
     .exam-chip[draggable="true"] { cursor: grab; }
-    .compare-tabs { display: flex; gap: 4px; background: var(--card-bg); padding: 6px; border-radius: 10px; }
-    .tab-btn { padding: 10px 20px; border: none; background: transparent; border-radius: 8px; font-size: 14px; cursor: pointer; color: var(--text-light); transition: all 0.2s; }
-    .tab-btn:hover { background: rgba(59,125,221,0.1); }
-    .tab-btn.active { background: var(--primary); color: #fff; font-weight: 600; }
+    .compare-tabs { display: flex; gap: 4px; background: var(--card-bg); padding: 6px; border-radius: var(--radius); border: 1px solid var(--border-light); }
+    .tab-btn { padding: 10px 20px; border: none; background: transparent; border-radius: var(--radius-sm); font-size: 14px; cursor: pointer; color: var(--text-secondary); transition: all 0.2s; font-weight: 500; }
+    .tab-btn:hover { background: var(--primary-light); color: var(--primary); }
+    .tab-btn.active { background: var(--primary); color: #fff; font-weight: 600; box-shadow: 0 2px 8px rgba(67, 56, 202, 0.25); }
     .compare-content { min-height: 400px; }
-    .cmp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px; color: var(--text-light); }
+    .cmp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 80px; color: var(--text-secondary); }
     .cmp-panel { display: flex; flex-direction: column; gap: 20px; }
-    .cmp-section-title { font-size: 15px; font-weight: 600; color: var(--text-dark); margin-bottom: 12px; }
-    .cmp-table-wrap { overflow-x: auto; border-radius: 10px; background: var(--card-bg); }
+    .cmp-section-title { font-size: 16px; font-weight: 600; color: var(--text); margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border-light); position: relative; }
+    .cmp-section-title::after { content: ""; position: absolute; bottom: -1px; left: 0; width: 36px; height: 2px; background: linear-gradient(90deg, var(--primary), var(--info)); border-radius: 1px; }
+    .cmp-table-wrap { overflow-x: auto; border-radius: var(--radius); background: var(--card-bg); border: 1px solid var(--border-light); }
     .cmp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .cmp-table th { background: #f8f9fc; padding: 12px 10px; text-align: center; font-weight: 600; color: var(--text-dark); border-bottom: 2px solid #e5e7eb; white-space: nowrap; }
-    .cmp-table td { padding: 10px; text-align: center; border-bottom: 1px solid #f0f0f0; }
-    .cmp-table tr:hover td { background: #f8f9fc; }
-    .cmp-table .class-name { background: #f0f7ff; }
-    .cmp-subject-card { background: var(--card-bg); padding: 16px; border-radius: 10px; }
+    .cmp-table th { background: linear-gradient(180deg, #f8fafc, #f1f5f9); padding: 12px 14px; text-align: center; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .cmp-table td { padding: 12px 14px; text-align: center; border-bottom: 1px solid var(--border-light); }
+    .cmp-table tr:last-child td { border-bottom: none; }
+    .cmp-table tr:hover td { background: var(--primary-light); }
+    .cmp-table .class-name { background: var(--primary-light); font-weight: 500; }
+    .cmp-subject-card { background: var(--card-bg); padding: 20px; border-radius: var(--radius); border: 1px solid var(--border-light); box-shadow: var(--shadow-sm); }
     .cmp-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .cmp-chart-card { background: var(--card-bg); padding: 16px; border-radius: 10px; }
-    .cmp-chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; color: var(--text-dark); }
-    .cmp-chart-box { height: 220px; position: relative; }
+    .cmp-chart-card { background: var(--card-bg); padding: 20px; border-radius: var(--radius); border: 1px solid var(--border-light); box-shadow: var(--shadow-sm); transition: box-shadow 0.2s; }
+    .cmp-chart-card:hover { box-shadow: var(--shadow-md); }
+    .cmp-chart-title { font-size: 14px; font-weight: 600; margin-bottom: 14px; color: var(--text); padding-bottom: 10px; border-bottom: 1px solid var(--border-light); }
+    .cmp-chart-box { height: 240px; position: relative; }
     @media (max-width: 900px) { .cmp-chart-grid { grid-template-columns: 1fr; } .compare-toolbar { flex-direction: column; } }
   `;
   document.head.appendChild(style);
@@ -9026,7 +9679,7 @@ caStyle.textContent = `
   .custom-analysis { padding: 16px 0; }
   .ca-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; }
   .ca-field { display: flex; align-items: center; gap: 8px; }
-  .ca-field label { font-weight: 600; color: var(--text-dark); white-space: nowrap; }
+  .ca-field label { font-weight: 600; color: var(--text); white-space: nowrap; }
   .ca-field .form-control { width: 160px; }
   .ca-actions { display: flex; gap: 12px; }
   .ca-stats-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-top: 16px; }
@@ -9037,4 +9690,1156 @@ caStyle.textContent = `
   @media (max-width: 900px) { .ca-stats-grid { grid-template-columns: repeat(3, 1fr); } }
 `;
 document.head.appendChild(caStyle);
+
+// ========== 智能教务助手 ==========
+let _eaMessages = [];
+
+function toggleEduAssistant() {
+  const panel = $("eduAssistant");
+  const btn = $("eduAssistantBtn");
+  if (panel.classList.contains("hidden")) {
+    panel.classList.remove("hidden");
+    btn.style.display = "none";
+  } else {
+    panel.classList.add("hidden");
+    btn.style.display = "flex";
+  }
+}
+
+function handleAssistantInput(e) {
+  if (e.key === "Enter") {
+    sendAssistantMessage();
+  }
+}
+
+function askAssistant(question) {
+  $("eaInput").value = question;
+  sendAssistantMessage();
+}
+
+function sendAssistantMessage() {
+  const input = $("eaInput");
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = "";
+
+  // 添加用户消息
+  addEaMessage("user", msg);
+
+  // 显示正在输入
+  showEaTyping();
+
+  // 模拟延迟后回复
+  setTimeout(() => {
+    removeEaTyping();
+    const answer = generateEaAnswer(msg);
+    addEaMessage("assistant", answer);
+  }, 800 + Math.random() * 500);
+}
+
+function addEaMessage(role, content) {
+  const body = $("eaBody");
+  const welcome = body.querySelector(".ea-welcome");
+  if (welcome) welcome.remove();
+
+  _eaMessages.push({ role, content });
+
+  const userSvg = `<svg viewBox="0 0 64 64" width="18" height="18">
+    <circle cx="32" cy="26" r="12" fill="#6366f1"/>
+    <path d="M12 56 Q32 38 52 56 L52 60 L12 60 Z" fill="#6366f1"/>
+  </svg>`;
+  const assSvg = `<svg viewBox="0 0 64 64" width="18" height="18">
+    <circle cx="32" cy="26" r="12" fill="#6366f1"/>
+    <path d="M12 56 Q32 38 52 56 L52 60 L12 60 Z" fill="#6366f1"/>
+  </svg>`;
+
+  const div = document.createElement("div");
+  div.className = `ea-message ${role}`;
+  div.innerHTML = `
+    <div class="ea-msg-avatar">${role === "user" ? userSvg : assSvg}</div>
+    <div class="ea-msg-content">${formatEaContent(content)}</div>
+  `;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+
+function showEaTyping() {
+  const body = $("eaBody");
+  const div = document.createElement("div");
+  div.className = "ea-typing";
+  div.id = "ea_typing";
+  div.innerHTML = `
+    <div class="ea-msg-avatar">
+      <svg viewBox="0 0 64 64" width="18" height="18">
+        <circle cx="32" cy="26" r="12" fill="#6366f1"/>
+        <path d="M12 56 Q32 38 52 56 L52 60 L12 60 Z" fill="#6366f1"/>
+      </svg>
+    </div>
+    <div class="ea-typing-indicator">
+      <span></span><span></span><span></span>
+    </div>
+  `;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+}
+
+function removeEaTyping() {
+  const typing = $("ea_typing");
+  if (typing) typing.remove();
+}
+
+function formatEaContent(content) {
+  // 支持简单的HTML格式化
+  return content
+    .replace(/\n/g, "<br>")
+    .replace(/\*\*(.*?)\*\*/g, "<b>$1</b>");
+}
+
+let _eaContext = {
+  lastSubject: null,
+  lastClass: null,
+  lastTopic: null,
+  lastStudent: null
+};
+
+function generateEaAnswer(question) {
+  const rawQ = question.trim();
+  const qLow = rawQ.toLowerCase();
+
+  const grade = currentUser?.grade;
+  if (!grade) {
+    return eaResp("系统提示", "请先登录系统后再使用智能助手。");
+  }
+
+  const exams = getSortedExams(grade);
+  if (exams.length === 0) {
+    return eaResp("系统提示", "目前暂无考试数据，请先上传成绩后再进行咨询。");
+  }
+
+  const selectedExam = exams[exams.length - 1];
+  const subjects = DB.subjects[grade] || [];
+  const allRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade);
+
+  if (allRecs.length === 0) {
+    return eaResp("系统提示", `当前选择的「${selectedExam.name}」暂无成绩数据。`);
+  }
+
+  const stats = aggregateStats(allRecs, subjects);
+  const totalFullScore = subjects.reduce((s, x) => s + x.fullScore, 0);
+  const totalStats = stats["总分"];
+
+  // 标准化问题 + 提取实体
+  const q = normalizeQuestion(qLow);
+  const qSubject = extractSubject(q, subjects);
+  const qClass = extractClass(q, allRecs);
+  const qStudent = extractStudent(q, allRecs);
+
+  if (qSubject) _eaContext.lastSubject = qSubject;
+  if (qClass) _eaContext.lastClass = qClass;
+  if (qStudent) _eaContext.lastStudent = qStudent;
+
+  // 计算意图得分
+  const scores = computeIntentScores(q, rawQ, subjects, allRecs, exams.length);
+
+  let maxScore = 0, maxIntent = "overview";
+  for (const [intent, score] of Object.entries(scores)) {
+    if (score > maxScore) { maxScore = score; maxIntent = intent; }
+  }
+
+  // 宽松兜底：如果最高分很低，尝试模糊匹配
+  if (maxScore < 0.3) {
+    const fallbackIntent = fuzzyMatchFallback(q, qLow, subjects);
+    if (fallbackIntent) { maxIntent = fallbackIntent; maxScore = 0.4; }
+  }
+
+  _eaContext.lastTopic = maxIntent;
+
+  const ctx = { q, qLow: q, rawQ, subjects, stats, allRecs, totalFullScore, totalStats,
+                exams, selectedExam, grade, qSubject, qClass, qStudent };
+
+  switch (maxIntent) {
+    case "rate":        return generateRateAnswer(ctx);
+    case "classRank":   return generateClassRankingAnswer(ctx);
+    case "student":     return generateStudentAnswer(ctx);
+    case "subject":     return generateSubjectAnswer(ctx);
+    case "avg":         return generateAvgScoreAnswer(ctx);
+    case "distribution":return generateDistributionAnswer(ctx);
+    case "overview":    return generateOverviewAnswer(ctx);
+    case "trend":       return generateTrendAnswer(ctx);
+    case "stddev":      return generateStdDevAnswer(ctx);
+    case "topBottom":   return generateTopBottomAnswer(ctx);
+    case "suggestion":  return generateSuggestionAnswer(ctx);
+    case "compare":     return generateCompareAnswer(ctx);
+    case "query":       return generateQueryAnswer(ctx);
+    case "fallback":    return generateFallbackAnswer(ctx);
+    default:            return generateDefaultAnswer(ctx);
+  }
+}
+
+// ========== 辅助工具 ==========
+function eaResp(title, html) {
+  return `<div class="emc-title">${title}</div>${html}`;
+}
+
+function extractSubject(q, subjects) {
+  for (const s of subjects) {
+    if (q.includes(s.name)) return s.name;
+  }
+  return null;
+}
+
+function extractClass(q, allRecs) {
+  const classList = [...new Set(allRecs.map(r => r.classNo))];
+  const m = q.match(/(?:\d+)[班班级]/);
+  if (m) {
+    const c = m[0].replace(/[班班级]/g, "");
+    if (classList.includes(c)) return c;
+  }
+  for (const c of classList) {
+    if (q.includes(c + "班") || q.includes(c + "班级")) return c;
+  }
+  return null;
+}
+
+function extractStudent(q, allRecs) {
+  const nameList = allRecs.map(r => r.studentName);
+  for (const n of nameList) {
+    if (q.includes(n)) return n;
+  }
+  return null;
+}
+
+// ========== 口语化问题标准化 ==========
+function normalizeQuestion(qLow) {
+  let q = qLow
+    .replace(/[？?。，！!,.!]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const patterns = [
+    [/各科|每个科目/, "各科目"], [/哪科|哪门课|哪一科/, "哪门科目"],
+    [/成绩单|得分/, "成绩"], [/这次|本次|这回/, "本次考试"],
+    [/班级均分|班均分/, "班级均分"], [/年级总|年级分/, "年级总分"],
+    [/进步了|进步吗|进步情况|进步如何/, "进步"], [/退步了|退步吗|退步情况|退步如何/, "退步"],
+    [/怎么|怎么样|如何|咋样|咋的/, "如何"], [/有哪些|有什么|有没有/, "哪些"],
+    [/告诉|说下|说说|给我看/, "告诉"], [/班级之间|各班级/, "班级对比"],
+    [/分化情况|分化程度/, "分化"], [/不稳定|不均衡/, "不均衡"],
+  ];
+
+  patterns.forEach(([from, to]) => { q = q.replace(from, to); });
+  return q;
+}
+
+// ========== 宽松兜底匹配 ==========
+function fuzzyMatchFallback(q, qLow, subjects) {
+  for (const s of subjects) {
+    if (qLow.includes(s.name)) return "subject";
+  }
+  if (qLow.match(/\d+班/)) return "classRank";
+  if (qLow.match(/^[一-龥]{2,4}$/)) return "query";
+  if (qLow.includes("怎么样") || qLow.includes("如何") || qLow.includes("好吗")) return "overview";
+  return null;
+}
+
+// ========== 辅助工具 ==========
+function eaResp(title, html) {
+  return `<div class="emc-title">${title}</div>${html}`;
+}
+
+function extractSubject(q, subjects) {
+  for (const s of subjects) {
+    if (q.includes(s.name)) return s.name;
+  }
+  const shortNames = subjects.map(s => s.name.substring(0, 2));
+  for (const s of shortNames) {
+    if (q.includes(s)) {
+      const full = subjects.find(sub => sub.name.includes(s));
+      if (full) return full.name;
+    }
+  }
+  return null;
+}
+
+function extractClass(q, allRecs) {
+  const classList = [...new Set(allRecs.map(r => r.classNo))].sort();
+  const m = q.match(/(\d+)班/);
+  if (m && classList.includes(m[1])) return m[1];
+  for (const c of classList) {
+    if (q.includes(c + "班") || q.includes(c + "班级")) return c;
+  }
+  return null;
+}
+
+function extractStudent(q, allRecs) {
+  const nameList = [...new Set(allRecs.map(r => r.studentName))].sort((a, b) => b.length - a.length);
+  for (const n of nameList) {
+    if (q.includes(n)) return n;
+  }
+  return null;
+}
+
+function computeIntentScores(q, rawQ, subjects, allRecs, examCount) {
+  const s = {};
+  const intents = ["overview","rate","classRank","student","subject","avg","distribution","trend","stddev","topBottom","suggestion","compare","query"];
+  intents.forEach(k => s[k] = 0);
+
+  // 成绩率类（高分权重）
+  const rateKw = [
+    ["优秀率", 0.9], ["良好率", 0.9], ["及格率", 0.9], ["不及格率", 0.9],
+    ["达标率", 0.8], ["通过率", 0.7], ["低分率", 0.7],
+    ["优秀多少", 0.85], ["及格多少", 0.85], ["有多少人优秀", 0.9], ["有多少人及格", 0.9],
+    ["优秀学生有多少", 0.9], ["不及格学生有多少", 0.9],
+  ];
+  rateKw.forEach(([kw, w]) => { if (q.includes(kw)) s.rate += w; });
+
+  // 班级排名类
+  const classRankKw = [
+    ["班级排名", 0.95], ["班排名", 0.95], ["各班排名", 0.95], ["班级总分排名", 0.95],
+    ["哪个班最好", 0.95], ["哪个班最差", 0.95], ["哪个班最强", 0.95], ["哪个班最弱", 0.95],
+    ["班级均分", 0.9], ["班均分", 0.9], ["班级比较", 0.85], ["班级对比", 0.85],
+    ["班级成绩排名", 0.95], ["各班级成绩", 0.85],
+    ["哪个班高", 0.85], ["哪个班低", 0.85], ["哪班最强", 0.9],
+  ];
+  classRankKw.forEach(([kw, w]) => { if (q.includes(kw)) s.classRank += w; });
+  if (q.includes("班级") && (q.includes("最高") || q.includes("最低") || q.includes("最好") || q.includes("最差") || q.includes("第一") || q.includes("倒数"))) s.classRank += 0.85;
+  if (q.match(/\d班成绩/) || q.match(/\d班级成绩/)) s.classRank += 0.8;
+
+  // 学生关注类
+  const studentKw = [
+    ["学生", 0.6], ["同学", 0.5], ["哪些人", 0.75], ["哪些学生", 0.8],
+    ["需要关注", 0.9], ["重点关注", 0.9], ["关注学生", 0.85],
+    ["偏科", 0.95], ["瘸腿", 0.95], ["两极分化", 0.9],
+    ["不及格学生", 0.9], ["不及格的同学", 0.9],
+    ["差生", 0.75], ["后进生", 0.8], ["学困生", 0.85],
+    ["优秀生", 0.65], ["优等生", 0.65],
+    ["潜力生", 0.7], ["临界生", 0.75],
+  ];
+  studentKw.forEach(([kw, w]) => { if (q.includes(kw)) s.student += w; });
+  if (q.includes("进步") || q.includes("退步")) { s.student += 0.4; s.trend += 0.6; }
+
+  // 科目分析类
+  const subjectKw = [
+    ["科目分析", 0.95], ["学科分析", 0.95], ["科目诊断", 0.95],
+    ["优势学科", 0.95], ["薄弱学科", 0.95], ["最强科目", 0.95], ["最弱科目", 0.95],
+    ["科目排名", 0.9], ["学科排名", 0.9], ["科目对比", 0.85], ["学科对比", 0.85],
+    ["哪门课", 0.85], ["哪科", 0.85], ["哪门科目", 0.9],
+    ["科目成绩", 0.8], ["学科成绩", 0.8],
+    ["考得最好", 0.9], ["考得最差", 0.9], ["科目情况", 0.8],
+  ];
+  subjectKw.forEach(([kw, w]) => { if (q.includes(kw)) s.subject += w; });
+  if (extractSubject(rawQ, subjects) && s.rate < 0.5 && s.avg < 0.5) s.subject += 0.7;
+
+  // 均分/分数类
+  const avgKw = [
+    ["平均分", 0.85], ["均分", 0.85], ["平均成绩", 0.85],
+    ["总分均分", 0.9], ["各科均分", 0.9], ["科目均分", 0.9],
+    ["最高分", 0.85], ["最低分", 0.85], ["最高成绩", 0.85], ["最低成绩", 0.85],
+    ["总分多少", 0.8], ["总分几分", 0.8],
+  ];
+  avgKw.forEach(([kw, w]) => { if (q.includes(kw)) s.avg += w; });
+  if (q.includes("多少分") && !extractStudent(rawQ, subjects)) s.avg += 0.5;
+  if (extractStudent(rawQ, allRecs) && (q.includes("多少分") || q.includes("几分"))) { s.query += 0.95; s.avg = 0; }
+
+  // 分布分析类
+  const distKw = [
+    ["分布", 0.9], ["分段", 0.85], ["分数段", 0.9], ["分段人数", 0.9],
+    ["分布情况", 0.9], ["直方图", 0.85],
+    ["多少人", 0.5],
+  ];
+  distKw.forEach(([kw, w]) => { if (q.includes(kw)) s.distribution += w; });
+
+  // 趋势/进退步类
+  if (examCount >= 2) {
+    const trendKw = [
+      ["进步", 0.9], ["退步", 0.9], ["进退步", 0.95],
+      ["变化", 0.8], ["对比", 0.75], ["相比", 0.8],
+      ["和上次", 0.95], ["上次比", 0.9], ["同比", 0.85],
+      ["提高", 0.75], ["下降", 0.75], ["提升", 0.75],
+    ];
+    trendKw.forEach(([kw, w]) => { if (q.includes(kw)) s.trend += w; });
+  }
+
+  // 标准差/离散度
+  const stdKw = [
+    ["标准差", 0.95], ["方差", 0.9], ["离散", 0.9],
+    ["差距", 0.75], ["悬殊", 0.9], ["两极分化", 0.9],
+    ["分化程度", 0.9], ["分化情况", 0.85], ["不均衡", 0.8],
+  ];
+  stdKw.forEach(([kw, w]) => { if (q.includes(kw)) s.stddev += w; });
+
+  // 前后排名类
+  const tbKw = [
+    ["前10", 0.95], ["前20", 0.95], ["前30", 0.95], ["前50", 0.95],
+    ["后10", 0.95], ["后20", 0.95], ["后30", 0.95], ["后50", 0.95],
+    ["倒数", 0.95], ["倒数第", 0.95],
+    ["排名前", 0.9], ["排名后", 0.9],
+    ["前十", 0.95], ["后十", 0.95],
+    ["前几名", 0.9], ["后几名", 0.9],
+    ["第1名", 0.95], ["第一名", 0.95], ["最后一名", 0.95],
+    ["榜首", 0.95], ["垫底", 0.95],
+  ];
+  tbKw.forEach(([kw, w]) => { if (q.includes(kw)) s.topBottom += w; });
+
+  // 教学建议类
+  const sugKw = [
+    ["建议", 0.85], ["怎么提升", 0.95], ["怎么改善", 0.95],
+    ["怎么办", 0.8], ["措施", 0.9], ["策略", 0.9], ["对策", 0.9],
+    ["教学建议", 0.95], ["改进", 0.85], ["提升方法", 0.95],
+    ["如何提高", 0.95], ["怎样提升", 0.95], ["如何改善", 0.95],
+    ["帮扶", 0.85], ["补救", 0.85],
+  ];
+  sugKw.forEach(([kw, w]) => { if (q.includes(kw)) s.suggestion += w; });
+
+  // 对比类
+  const twoSubjects = subjects.filter((sub, i) => {
+    const others = subjects.slice(i + 1);
+    return others.some(o => q.includes(sub.name) && q.includes(o.name));
+  });
+  if (twoSubjects.length >= 2) s.compare += 0.95;
+  if (q.match(/\d班.*\d班/)) s.compare += 0.8;
+
+  // 查询类
+  if (extractStudent(rawQ, allRecs)) s.query += 0.9;
+  if (extractClass(rawQ, allRecs) && q.includes("班")) s.query += 0.7;
+
+  // 整体概况兜底
+  const ovKw = [
+    ["总体", 0.6], ["整体", 0.6], ["概况", 0.65], ["总览", 0.7],
+    ["总结", 0.6], ["分析报告", 0.7], ["整体情况", 0.7],
+    ["年级情况", 0.7], ["考试情况", 0.7], ["年级概况", 0.75],
+    ["怎么样", 0.5], ["如何", 0.45], ["好吗", 0.5],
+    ["讲讲", 0.6], ["介绍", 0.6], ["说说", 0.5],
+  ];
+  ovKw.forEach(([kw, w]) => { if (q.includes(kw)) s.overview += w; });
+
+  return s;
+}
+
+function generateRateAnswer(ctx) {
+  const { q, subjects, stats, allRecs, qSubject } = ctx;
+  const target = qSubject
+    ? subjects.find(s => s.name === qSubject)
+    : null;
+
+  let html = '';
+  if (target) {
+    const st = stats[target.name];
+    html += `<p>「${target.name}」成绩率表现：</p>`;
+    html += `<div class="emc-highlight">`;
+    html += `• 参考人数：${st.total} 人<br>`;
+    html += `• 优秀率：<b>${fmt(st.excellentPct * 100, 1)}%</b>（${st.excellent}人，得分率≥90%）<br>`;
+    html += `• 良好率：${fmt(st.goodPct * 100, 1)}%（${st.good}人，80%-90%）<br>`;
+    html += `• 及格率：${fmt(st.passPct * 100, 1)}%（${st.passCount}人，≥60%）<br>`;
+    html += `• 不及格率：${fmt(st.lowPct * 100, 1)}%（${st.total - st.passCount}人）`;
+    html += `</div>`;
+    const rateLevel = st.excellentPct > 0.3 ? "优秀率偏高，整体水平较好" :
+                      st.lowPct > 0.2 ? "不及格率偏高，基础薄弱学生多" :
+                      "分布相对均衡";
+    html += `<div class="emc-tip">💡 ${rateLevel}。建议关注中等生向良好生转化。</div>`;
+  } else {
+    html += `<p>全年级各科目成绩率对比：</p>`;
+    html += `<table><tr><th>科目</th><th>优秀率</th><th>良好率</th><th>及格率</th><th>不及格率</th></tr>`;
+    subjects.forEach((s) => {
+      const st = stats[s.name];
+      html += `<tr><td>${s.name}</td><td>${fmt(st.excellentPct * 100, 1)}%</td><td>${fmt(st.goodPct * 100, 1)}%</td><td>${fmt(st.passPct * 100, 1)}%</td><td>${fmt(st.lowPct * 100, 1)}%</td></tr>`;
+    });
+    html += `</table>`;
+    const sortedByExc = subjects.map(s => ({name:s.name, exc:stats[s.name].excellentPct})).sort((a,b)=>b.exc-a.exc);
+    const sortedByLow = subjects.map(s => ({name:s.name, low:stats[s.name].lowPct})).sort((a,b)=>b.low-a.low);
+    html += `<div class="emc-highlight">`;
+    html += `🏆 优秀率最高：${sortedByExc[0].name}（${fmt(sortedByExc[0].exc*100,1)}%）<br>`;
+    html += `⚠️ 不及格率最高：${sortedByLow[0].name}（${fmt(sortedByLow[0].low*100,1)}%）`;
+    html += `</div>`;
+  }
+  return eaResp("📊 成绩率分析", html);
+}
+
+function computeClassStats(allRecs, subjects, totalFullScore) {
+  const classList = [...new Set(allRecs.map(r => r.classNo))].sort();
+  const result = {};
+  classList.forEach(c => {
+    const recs = allRecs.filter(r => r.classNo === c);
+    const totals = recs.map(r => r.total).filter(v => typeof v === "number");
+    const avg = totals.length ? totals.reduce((a,b)=>a+b,0) / totals.length : 0;
+    const passLine = totalFullScore * 0.6;
+    const passCount = totals.filter(t => t >= passLine).length;
+    const excLine = totalFullScore * 0.9;
+    const excCount = totals.filter(t => t >= excLine).length;
+    const variance = totals.length ? totals.reduce((s,t) => s + Math.pow(t-avg,2), 0) / totals.length : 0;
+    const stdDev = Math.sqrt(variance);
+    result[c] = { avg, passPct: totals.length ? passCount/totals.length : 0,
+                  excPct: totals.length ? excCount/totals.length : 0,
+                  total: totals.length, stdDev };
+  });
+  return result;
+}
+
+function generateClassRankingAnswer(ctx) {
+  const { allRecs, subjects, totalFullScore } = ctx;
+  const classStats = computeClassStats(allRecs, subjects, totalFullScore);
+  const sorted = Object.entries(classStats).sort((a,b) => b[1].avg - a[1].avg);
+
+  let html = `<p>全年级 ${sorted.length} 个班级总分排名：</p>`;
+  html += `<table><tr><th>排名</th><th>班级</th><th>均分</th><th>得分率</th><th>及格率</th><th>优秀率</th><th>标准差</th></tr>`;
+  sorted.forEach(([c, s], i) => {
+    const rate = totalFullScore > 0 ? fmt(s.avg / totalFullScore * 100, 1) : "0";
+    html += `<tr><td>${i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : i + 1}</td><td><b>${c}</b></td><td>${fmt(s.avg, 1)}</td><td>${rate}%</td><td>${fmt(s.passPct * 100, 1)}%</td><td>${fmt(s.excPct * 100, 1)}%</td><td>${fmt(s.stdDev, 1)}</td></tr>`;
+  });
+  html += `</table>`;
+
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  const gap = best[1].avg - worst[1].avg;
+  html += `<div class="emc-highlight">`;
+  html += `✅ 领先班级：${best[0]}，均分 ${fmt(best[1].avg, 1)}（得分率 ${fmt(best[1].avg/totalFullScore*100, 1)}%）<br>`;
+  html += `⚠️ 待提升：${worst[0]}，均分 ${fmt(worst[1].avg, 1)}，与第1名差距 <b>${fmt(gap, 1)}</b> 分<br>`;
+  html += `📊 班级差异：${gap/totalFullScore > 0.1 ? "班级间差距较大，需关注薄弱班级" : "班级整体均衡"}`;
+  html += `</div>`;
+  html += `<div class="emc-tip">💡 标准差反映班级内部分化程度，值越大说明两极分化越严重。</div>`;
+
+  return eaResp("🏆 班级总分排名", html);
+}
+
+function generateStudentAnswer(ctx) {
+  const { q, allRecs, subjects, exams, selectedExam, grade, qSubject, qStudent } = ctx;
+  const totalFullScore = subjects.reduce((s, x) => s + x.fullScore, 0);
+
+  // 偏科生识别
+  const partialStudents = allRecs.map(r => {
+    const excellentSubjects = subjects.filter(s => (r.scores[s.name] ?? 0) >= s.excellent);
+    const failSubjects = subjects.filter(s => (r.scores[s.name] ?? 0) < s.pass);
+    const score = excellentSubjects.length * 10 + failSubjects.length * 10;
+    return { ...r, excellentSubjects, failSubjects, partialScore: score };
+  }).filter(r => r.excellentSubjects.length > 0 && r.failSubjects.length > 0)
+    .sort((a, b) => b.partialScore - a.partialScore).slice(0, 15);
+
+  // 不及格学生
+  const failStudents = allRecs.filter(r => r.total / totalFullScore < 0.6)
+    .sort((a, b) => a.total - b.total).slice(0, 15);
+
+  // 高分学生
+  const topStudents = allRecs.filter(r => r.total / totalFullScore >= 0.9)
+    .sort((a, b) => b.total - a.total).slice(0, 10);
+
+  let html = '';
+
+  // 如果问到了特定学生
+  if (qStudent) {
+    const rec = allRecs.find(r => r.studentName === qStudent);
+    if (rec) {
+      html += `<p><b>${qStudent}</b> 的成绩详情：</p>`;
+      html += `<div class="emc-highlight">`;
+      html += `• 班级：${rec.classNo} 班<br>`;
+      html += `• 总分：${rec.total} / ${totalFullScore}（得分率 ${fmt(rec.total/totalFullScore*100, 1)}%）<br>`;
+      const rank = [...allRecs].sort((a,b) => b.total - a.total).findIndex(r => r.studentId === rec.studentId) + 1;
+      html += `• 年级排名：第 ${rank} 名 / ${allRecs.length} 人（前 ${fmt(rank/allRecs.length*100,1)}%）`;
+      html += `</div>`;
+      html += `<p>各科成绩：</p>`;
+      html += `<table><tr><th>科目</th><th>得分</th><th>满分</th><th>得分率</th></tr>`;
+      subjects.forEach(s => {
+        const score = rec.scores[s.name] ?? 0;
+        html += `<tr><td>${s.name}</td><td>${score}</td><td>${s.fullScore}</td><td>${fmt(score/s.fullScore*100,1)}%</td></tr>`;
+      });
+      html += `</table>`;
+      return eaResp(`👤 ${qStudent} 成绩查询`, html);
+    }
+  }
+
+  if (q.includes("偏科")) {
+    if (partialStudents.length > 0) {
+      html += `<p>偏科学生共 ${partialStudents.length} 人（优势学科优秀+薄弱学科不及格）：</p>`;
+      html += `<div class="emc-highlight">`;
+      partialStudents.slice(0, 8).forEach(s => {
+        html += `• ${s.studentName}（${s.classNo}班）：优势${s.excellentSubjects.map(x=>x.name).join("、")}，薄弱${s.failSubjects.map(x=>x.name).join("、")}<br>`;
+      });
+      html += `</div>`;
+      html += `<div class="emc-tip">💡 偏科生是总分提升的"金矿"——薄弱学科每提升10分，对总分排名拉动效果显著高于优势学科再提升。</div>`;
+    } else {
+      html += `<p>本次考试未检测到明显的偏科学生。</p>`;
+    }
+  } else if (q.includes("不及格")) {
+    if (failStudents.length > 0) {
+      html += `<p>总分不及格（得分率<60%）学生共 ${failStudents.length} 人：</p>`;
+      html += `<div class="emc-highlight">`;
+      failStudents.slice(0, 8).forEach(s => {
+        html += `• ${s.studentName}（${s.classNo}班）：${s.total}分（得分率${fmt(s.total/totalFullScore*100,1)}%）<br>`;
+      });
+      html += `</div>`;
+      html += `<div class="emc-tip">💡 不及格学生通常存在基础知识薄弱或学习态度问题，建议家校协同+个性化辅导。</div>`;
+    } else {
+      html += `<p>🎉 本次考试没有不及格学生，整体表现优秀！</p>`;
+    }
+  } else if (q.includes("进步") || q.includes("退步")) {
+    // 交给趋势分析
+    return generateTrendAnswer(ctx);
+  } else {
+    // 综合关注
+    const toWatch = [...failStudents.slice(0, 5), ...partialStudents.slice(0, 5)]
+      .filter((v, i, a) => a.findIndex(t => t.studentId === v.studentId) === i);
+    html += `<p>综合关注学生（共 ${toWatch.length} 人）：</p>`;
+    html += `<div class="emc-highlight">`;
+    toWatch.slice(0, 8).forEach(s => {
+      const tags = [];
+      if (s.total / totalFullScore < 0.6) tags.push("总分不及格");
+      if (s.excellentSubjects?.length > 0 && s.failSubjects?.length > 0) tags.push("偏科");
+      html += `• ${s.studentName}（${s.classNo}班）：${s.total}分 ${tags.length ? `【${tags.join("、")}】` : ""}<br>`;
+    });
+    html += `</div>`;
+    html += `<p>高分学生示例：</p>`;
+    html += `<div class="emc-highlight">`;
+    topStudents.slice(0, 3).forEach(s => {
+      html += `• ${s.studentName}（${s.classNo}班）：${s.total}分（${fmt(s.total/totalFullScore*100,1)}%）<br>`;
+    });
+    html += `</div>`;
+  }
+
+  return eaResp("👨‍🎓 重点关注学生", html);
+}
+
+function generateSubjectAnswer(ctx) {
+  const { subjects, stats, allRecs, qSubject, totalFullScore } = ctx;
+
+  const sortedByRate = subjects.map(s => ({
+    name: s.name, rate: stats[s.name].avg / s.fullScore * 100,
+    avg: stats[s.name].avg, fullScore: s.fullScore,
+    excPct: stats[s.name].excellentPct, lowPct: stats[s.name].lowPct
+  })).sort((a, b) => b.rate - a.rate);
+
+  let html = '';
+
+  if (qSubject) {
+    const s = subjects.find(x => x.name === qSubject);
+    const st = stats[qSubject];
+    if (s) {
+      html += `<p>「${qSubject}」学科深度分析：</p>`;
+      html += `<div class="emc-highlight">`;
+      html += `• 均分：${fmt(st.avg, 1)} / ${s.fullScore}（得分率 <b>${fmt(st.avg/s.fullScore*100,1)}%</b>）<br>`;
+      html += `• 最高分：${fmt(st.max, 1)}（${st.maxCount}人并列）<br>`;
+      html += `• 最低分：${fmt(st.min, 1)}（${st.minCount}人并列）<br>`;
+      html += `• 极差：${fmt(st.max - st.min, 1)} 分<br>`;
+      html += `• 优秀率：${fmt(st.excellentPct*100,1)}%（${st.excellent}人）<br>`;
+      html += `• 良好率：${fmt(st.goodPct*100,1)}%（${st.good}人）<br>`;
+      html += `• 及格率：${fmt(st.passPct*100,1)}%（${st.passCount}人）<br>`;
+      html += `• 不及格率：${fmt(st.lowPct*100,1)}%（${st.total - st.passCount}人）`;
+      html += `</div>`;
+
+      // 班级间对比
+      const classList = [...new Set(allRecs.map(r => r.classNo))].sort();
+      const classData = classList.map(c => {
+        const recs = allRecs.filter(r => r.classNo === c);
+        const scores = recs.map(r => r.scores[qSubject] ?? 0).filter(v => typeof v === "number");
+        const avg = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
+        return { classNo: c, avg, count: scores.length };
+      }).sort((a,b) => b.avg - a.avg);
+
+      html += `<p>各班${qSubject}均分排名：</p>`;
+      html += `<table><tr><th>排名</th><th>班级</th><th>均分</th><th>得分率</th></tr>`;
+      classData.forEach((c, i) => {
+        html += `<tr><td>${i+1}</td><td>${c.classNo}</td><td>${fmt(c.avg,1)}</td><td>${fmt(c.avg/s.fullScore*100,1)}%</td></tr>`;
+      });
+      html += `</table>`;
+      return eaResp(`📚 ${qSubject} 学科分析`, html);
+    }
+  }
+
+  html += `<p>各科目得分率排名：</p>`;
+  html += `<table><tr><th>排名</th><th>科目</th><th>均分</th><th>满分</th><th>得分率</th><th>优秀率</th><th>不及格率</th></tr>`;
+  sortedByRate.forEach((s, i) => {
+    html += `<tr><td>${i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</td><td><b>${s.name}</b></td><td>${fmt(s.avg,1)}</td><td>${s.fullScore}</td><td>${fmt(s.rate,1)}%</td><td>${fmt(s.excPct*100,1)}%</td><td>${fmt(s.lowPct*100,1)}%</td></tr>`;
+  });
+  html += `</table>`;
+
+  const best = sortedByRate[0];
+  const worst = sortedByRate[sortedByRate.length - 1];
+  html += `<div class="emc-highlight">`;
+  html += `✅ 优势学科：${best.name}，得分率 ${fmt(best.rate, 1)}%<br>`;
+  html += `⚠️ 薄弱学科：${worst.name}，得分率 ${fmt(worst.rate, 1)}%，低于优势学科 <b>${fmt(best.rate - worst.rate, 1)}</b> 个百分点`;
+  html += `</div>`;
+  html += `<div class="emc-tip">💡 学科间差异过大可能反映教学投入不均衡，建议关注薄弱学科的教研提升。</div>`;
+
+  return eaResp("📚 学科成绩分析", html);
+}
+
+function generateAvgScoreAnswer(ctx) {
+  const { subjects, stats, qSubject, totalStats, totalFullScore } = ctx;
+
+  let html = '';
+  if (qSubject) {
+    const s = subjects.find(x => x.name === qSubject);
+    const st = stats[qSubject];
+    if (s) {
+      html += `<p>「${qSubject}」均分概况：</p>`;
+      html += `<div class="emc-highlight">`;
+      html += `• 参考人数：${st.total} 人<br>`;
+      html += `• 平均分：<b>${fmt(st.avg, 1)}</b> / ${s.fullScore}（得分率 ${fmt(st.avg/s.fullScore*100,1)}%）<br>`;
+      html += `• 最高分：${fmt(st.max, 1)} 分（${st.maxCount}人）<br>`;
+      html += `• 最低分：${fmt(st.min, 1)} 分（${st.minCount}人）<br>`;
+      html += `• 极差：${fmt(st.max - st.min, 1)} 分`;
+      html += `</div>`;
+      return eaResp(`📊 ${qSubject} 均分统计`, html);
+    }
+  }
+
+  html += `<p>全年级各科目均分一览：</p>`;
+  html += `<table><tr><th>科目</th><th>均分</th><th>满分</th><th>得分率</th><th>最高分</th><th>最低分</th></tr>`;
+  subjects.forEach(s => {
+    const st = stats[s.name];
+    html += `<tr><td><b>${s.name}</b></td><td>${fmt(st.avg,1)}</td><td>${s.fullScore}</td><td>${fmt(st.avg/s.fullScore*100,1)}%</td><td>${fmt(st.max,1)}</td><td>${fmt(st.min,1)}</td></tr>`;
+  });
+  html += `</table>`;
+  html += `<div class="emc-highlight">`;
+  html += `📈 总分均分：<b>${fmt(totalStats.avg, 1)}</b> / ${totalFullScore}（得分率 ${fmt(totalStats.avg/totalFullScore*100,1)}%）`;
+  html += `</div>`;
+
+  return eaResp("📊 均分统计", html);
+}
+
+function generateDistributionAnswer(ctx) {
+  const { allRecs, totalFullScore, totalStats } = ctx;
+  const totals = allRecs.map(r => r.total).filter(v => typeof v === "number").sort((a,b) => a - b);
+  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+  const median = totals.length % 2 === 0
+    ? (totals[totals.length / 2 - 1] + totals[totals.length / 2]) / 2
+    : totals[Math.floor(totals.length / 2)];
+  const variance = totals.reduce((s, t) => s + Math.pow(t - avg, 2), 0) / totals.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = avg > 0 ? stdDev / avg * 100 : 0;
+
+  const segs = [
+    { name: "优秀(≥90%)", min: totalFullScore * 0.9, max: totalFullScore + 1, color: "success" },
+    { name: "良好(80%-90%)", min: totalFullScore * 0.8, max: totalFullScore * 0.9, color: "info" },
+    { name: "中等(70%-80%)", min: totalFullScore * 0.7, max: totalFullScore * 0.8, color: "primary" },
+    { name: "及格(60%-70%)", min: totalFullScore * 0.6, max: totalFullScore * 0.7, color: "warning" },
+    { name: "不及格(<60%)", min: 0, max: totalFullScore * 0.6, color: "danger" }
+  ];
+
+  let html = `<p>全年级 ${allRecs.length} 名学生总分分布：</p>`;
+  html += `<table><tr><th>分数段</th><th>人数</th><th>占比</th></tr>`;
+  segs.forEach(seg => {
+    const cnt = totals.filter(t => t >= seg.min && t < seg.max).length;
+    html += `<tr><td>${seg.name}</td><td><b>${cnt}</b></td><td>${fmt(cnt / totals.length * 100, 1)}%</td></tr>`;
+  });
+  html += `</table>`;
+
+  html += `<div class="emc-highlight">`;
+  html += `📊 平均分：${fmt(avg, 1)} 分（得分率 ${fmt(avg / totalFullScore * 100, 1)}%）<br>`;
+  html += `📊 中位数：${fmt(median, 1)} 分<br>`;
+  html += `📊 标准差：${fmt(stdDev, 1)} 分（变异系数 ${fmt(cv,1)}%）<br>`;
+  html += `📊 极差：${fmt(totalStats.max - totalStats.min, 1)} 分`;
+  html += `</div>`;
+
+  const lowerHalf = totals.filter(t => t < avg).length;
+  const upperHalf = totals.filter(t => t > avg).length;
+  let shape = "正态分布（橄榄型）";
+  if (lowerHalf > upperHalf * 1.2) shape = "负偏态（低分人数偏多，左偏分布）";
+  else if (upperHalf > lowerHalf * 1.2) shape = "正偏态（高分人数偏多，右偏分布）";
+
+  let diffLevel = cv < 10 ? "整体均衡" : cv < 15 ? "轻度分化" : cv < 20 ? "中度分化" : "严重两极分化";
+
+  html += `<div class="emc-tip">💡 分布形态：${shape}。<br>💡 分化程度：${diffLevel}（变异系数 ${fmt(cv,1)}%）。</div>`;
+
+  return eaResp("📈 成绩分布分析", html);
+}
+
+function generateOverviewAnswer(ctx) {
+  const { allRecs, subjects, stats, totalFullScore, totalStats, selectedExam } = ctx;
+  const classList = [...new Set(allRecs.map(r => r.classNo))].sort();
+
+  const passAllCount = allRecs.filter(r => subjects.every(s => (r.scores[s.name] ?? 0) >= s.pass)).length;
+  const excAllCount = allRecs.filter(r => subjects.every(s => (r.scores[s.name] ?? 0) >= s.excellent)).length;
+
+  let html = `<p>「${selectedExam.name}」年级整体概况：</p>`;
+  html += `<div class="emc-highlight">`;
+  html += `📊 参考人数：<b>${allRecs.length}</b> 人（${classList.length} 个班级）<br>`;
+  html += `📚 考试科目：${subjects.length} 科，满分 ${totalFullScore} 分<br>`;
+  html += `📈 总分均分：<b>${fmt(totalStats.avg, 1)}</b> 分（得分率 ${fmt(totalStats.avg/totalFullScore*100,1)}%）<br>`;
+  html += `🏆 最高分：${fmt(totalStats.max, 1)} 分（${totalStats.maxCount}人并列）<br>`;
+  html += `📉 最低分：${fmt(totalStats.min, 1)} 分（${totalStats.minCount}人并列）<br>`;
+  html += `✅ 全科目及格：${passAllCount} 人（${fmt(passAllCount/allRecs.length*100,1)}%）<br>`;
+  html += `🌟 全科目优秀：${excAllCount} 人（${fmt(excAllCount/allRecs.length*100,1)}%）`;
+  html += `</div>`;
+
+  const sortedByRate = subjects.map(s => ({
+    name: s.name, rate: stats[s.name].avg / s.fullScore * 100
+  })).sort((a, b) => b.rate - a.rate);
+
+  html += `<p>各科得分率：</p>`;
+  html += `<div class="emc-highlight">`;
+  sortedByRate.forEach(s => {
+    const barW = Math.round(s.rate);
+    html += `<div style="margin:4px 0;font-size:12px">${s.name}：${fmt(s.rate,1)}% <div style="display:inline-block;width:100px;height:6px;background:#eee;border-radius:3px;vertical-align:middle;margin-left:6px"><div style="width:${barW}%;height:100%;background:#6366f1;border-radius:3px"></div></div></div>`;
+  });
+  html += `</div>`;
+
+  return eaResp("📊 年级整体概况", html);
+}
+
+function generateTrendAnswer(ctx) {
+  const { allRecs, exams, selectedExam, grade, subjects, totalFullScore } = ctx;
+  if (exams.length < 2) {
+    return eaResp("🔄 进退步分析", `<p>目前只有 <b>${exams.length}</b> 次考试数据，无法进行进退步对比。<br>需要至少两次考试才能分析变化趋势。</p>`);
+  }
+
+  const examIdx = exams.findIndex(e => e.id === selectedExam.id);
+  const prevExam = examIdx > 0 ? exams[examIdx - 1] : exams[exams.length - 2];
+
+  if (!prevExam) {
+    return eaResp("🔄 进退步分析", `<p>无法找到上一次考试进行对比。</p>`);
+  }
+
+  const prevRecs = DB.records.filter(r => r.examId === prevExam.id && r.grade === grade);
+  const prevMap = {};
+  prevRecs.forEach(r => { prevMap[r.studentId] = r; });
+
+  const changes = allRecs.filter(r => prevMap[r.studentId])
+    .map(r => ({
+      studentId: r.studentId, studentName: r.studentName, classNo: r.classNo,
+      prev: prevMap[r.studentId].total, curr: r.total,
+      diff: r.total - prevMap[r.studentId].total
+    }));
+
+  if (changes.length === 0) {
+    return eaResp("🔄 进退步分析", `<p>两次考试的学生名单没有重叠，无法进行对比。</p>`);
+  }
+
+  const progressCount = changes.filter(c => c.diff > 5).length;
+  const regressCount = changes.filter(c => c.diff < -5).length;
+  const stableCount = changes.length - progressCount - regressCount;
+  const avgDiff = changes.reduce((s, c) => s + c.diff, 0) / changes.length;
+
+  let html = `<p>对比「${prevExam.name}」→「${selectedExam.name}」：</p>`;
+  html += `<div class="emc-highlight">`;
+  html += `📊 有效对比：${changes.length} 人<br>`;
+  html += `📈 整体变化：${avgDiff >= 0 ? "进步" : "退步"} <b>${avgDiff >= 0 ? "+" : ""}${fmt(avgDiff, 1)}</b> 分<br>`;
+  html += `✅ 进步明显(>5分)：${progressCount} 人（${fmt(progressCount/changes.length*100,1)}%）<br>`;
+  html += `➖ 基本稳定(±5分)：${stableCount} 人（${fmt(stableCount/changes.length*100,1)}%）<br>`;
+  html += `⚠️ 退步明显(>5分)：${regressCount} 人（${fmt(regressCount/changes.length*100,1)}%）`;
+  html += `</div>`;
+
+  const sorted = [...changes].sort((a, b) => b.diff - a.diff);
+  const topProgress = sorted.filter(c => c.diff > 0).slice(0, 5);
+  const topRegress = [...sorted].filter(c => c.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 5);
+
+  if (topProgress.length > 0) {
+    html += `<p>🏆 进步最大的学生：</p><div class="emc-highlight">`;
+    topProgress.forEach(c => {
+      html += `• ${c.studentName}（${c.classNo}班）：<b>+${c.diff}</b> 分（${c.prev} → ${c.curr}）<br>`;
+    });
+    html += `</div>`;
+  }
+
+  if (topRegress.length > 0) {
+    html += `<p>⚠️ 退步最大的学生：</p><div class="emc-highlight">`;
+    topRegress.forEach(c => {
+      html += `• ${c.studentName}（${c.classNo}班）：<b>${c.diff}</b> 分（${c.prev} → ${c.curr}）<br>`;
+    });
+    html += `</div>`;
+  }
+
+  html += `<div class="emc-tip">💡 进退步分析帮助识别教学效果变化和学生学习状态波动。</div>`;
+
+  return eaResp("🔄 进退步对比", html);
+}
+
+// === 新增：标准差/离散度分析 ===
+function generateStdDevAnswer(ctx) {
+  const { allRecs, subjects, stats, totalStats, totalFullScore } = ctx;
+
+  const totals = allRecs.map(r => r.total).filter(v => typeof v === "number");
+  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+  const variance = totals.reduce((s, t) => s + Math.pow(t - avg, 2), 0) / totals.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = avg > 0 ? stdDev / avg * 100 : 0;
+
+  let html = `<p>全年级总分离散程度分析：</p>`;
+  html += `<div class="emc-highlight">`;
+  html += `📊 标准差：<b>${fmt(stdDev, 1)}</b> 分<br>`;
+  html += `📊 变异系数：<b>${fmt(cv, 1)}%</b><br>`;
+  html += `📊 极差：${fmt(totalStats.max - totalStats.min, 1)} 分<br>`;
+  html += `📊 平均分：${fmt(avg, 1)} 分`;
+  html += `</div>`;
+
+  let level, advice;
+  if (cv < 10) { level = "整体均衡"; advice = "学生整体水平接近，教学可统一进度，注意优秀生培优。"; }
+  else if (cv < 15) { level = "轻度分化"; advice = "存在一定差异，建议分层教学+个别辅导。"; }
+  else if (cv < 20) { level = "中度分化"; advice = "两极分化明显，需重点关注后进生，防止差距扩大。"; }
+  else { level = "严重两极分化"; advice = "分化严重，建议分班教学或大幅调整教学策略。"; }
+
+  html += `<div class="emc-highlight">`;
+  html += `⚠️ 分化等级：<b>${level}</b><br>`;
+  html += `💡 建议：${advice}`;
+  html += `</div>`;
+
+  html += `<p>各科目标准差对比：</p>`;
+  html += `<table><tr><th>科目</th><th>均分</th><th>标准差</th><th>变异系数</th><th>分化程度</th></tr>`;
+  subjects.forEach(s => {
+    const st = stats[s.name];
+    const subCV = st.avg > 0 ? st.stdDev / st.avg * 100 : 0;
+    const level2 = subCV < 10 ? "均衡" : subCV < 15 ? "轻度" : subCV < 20 ? "中度" : "严重";
+    html += `<tr><td>${s.name}</td><td>${fmt(st.avg,1)}</td><td>${fmt(st.stdDev,1)}</td><td>${fmt(subCV,1)}%</td><td>${level2}</td></tr>`;
+  });
+  html += `</table>`;
+
+  return eaResp("📐 离散度分析", html);
+}
+
+// === 新增：前后排名 ===
+function generateTopBottomAnswer(ctx) {
+  const { q, allRecs, totalFullScore, qSubject, subjects, stats } = ctx;
+
+  let n = 10;
+  const m = q.match(/(\d+)/);
+  if (m) n = Math.min(Math.max(parseInt(m[1]), 3), 50);
+
+  let html = '';
+
+  if (qSubject) {
+    const s = subjects.find(x => x.name === qSubject);
+    const sorted = [...allRecs]
+      .map(r => ({ name: r.studentName, classNo: r.classNo, score: r.scores[qSubject] ?? 0 }))
+      .sort((a, b) => b.score - a.score);
+
+    const topN = sorted.slice(0, n);
+    const bottomN = sorted.slice(-n).reverse();
+
+    html += `<p>${qSubject} 成绩前 ${n} 名：</p>`;
+    html += `<div class="emc-highlight">`;
+    topN.forEach((t, i) => {
+      html += `${i + 1}. ${t.name}（${t.classNo}班）：${t.score}分<br>`;
+    });
+    html += `</div>`;
+
+    html += `<p>${qSubject} 成绩后 ${n} 名：</p>`;
+    html += `<div class="emc-highlight">`;
+    bottomN.forEach((t, i) => {
+      html += `${sorted.length - n + i + 1}. ${t.name}（${t.classNo}班）：${t.score}分<br>`;
+    });
+    html += `</div>`;
+    return eaResp(`📊 ${qSubject} 排名`, html);
+  }
+
+  const sorted = [...allRecs].sort((a, b) => b.total - a.total);
+  const topN = sorted.slice(0, n);
+  const bottomN = sorted.slice(-n).reverse();
+
+  html += `<p>总分前 ${n} 名：</p>`;
+  html += `<div class="emc-highlight">`;
+  topN.forEach((t, i) => {
+    html += `${i + 1}. ${t.studentName}（${t.classNo}班）：${t.total}分（${fmt(t.total/totalFullScore*100,1)}%）<br>`;
+  });
+  html += `</div>`;
+
+  html += `<p>总分后 ${n} 名：</p>`;
+  html += `<div class="emc-highlight">`;
+  bottomN.forEach((t, i) => {
+    html += `${sorted.length - n + i + 1}. ${t.studentName}（${t.classNo}班）：${t.total}分（${fmt(t.total/totalFullScore*100,1)}%）<br>`;
+  });
+  html += `</div>`;
+
+  return eaResp(`🏆 排名查询`, html);
+}
+
+// === 新增：教学建议 ===
+function generateSuggestionAnswer(ctx) {
+  const { allRecs, subjects, stats, totalFullScore, totalStats, qSubject, qClass } = ctx;
+
+  const totals = allRecs.map(r => r.total).filter(v => typeof v === "number");
+  const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+  const cv = avg > 0 ? Math.sqrt(totals.reduce((s,t)=>s+Math.pow(t-avg,2),0)/totals.length) / avg * 100 : 0;
+
+  let html = '';
+
+  if (qSubject) {
+    const st = stats[qSubject];
+    const s = subjects.find(x => x.name === qSubject);
+    html += `<p>「${qSubject}」教学改进建议：</p>`;
+    html += `<div class="emc-highlight">`;
+    if (st.excellentPct < 0.1) {
+      html += `🔴 优秀率偏低（${fmt(st.excellentPct*100,1)}%）：建议加强难题训练，拓展拔高内容。<br>`;
+    }
+    if (st.lowPct > 0.2) {
+      html += `🔴 不及格率偏高（${fmt(st.lowPct*100,1)}%）：建议回归基础，降低起点，分层辅导后进生。<br>`;
+    }
+    if (st.avg / s.fullScore < 0.6) {
+      html += `🔴 整体得分率不足60%：可能是试卷过难或基础薄弱，需重新评估教学进度。<br>`;
+    }
+    if (st.stdDev / st.avg > 0.15) {
+      html += `🟡 内部分化较大：建议分层作业、小组合作学习。<br>`;
+    }
+    html += `✅ 当前得分率 ${fmt(st.avg/s.fullScore*100,1)}%，处于${st.avg/s.fullScore>=0.8?"优秀":st.avg/s.fullScore>=0.7?"良好":"中等"}水平。`;
+    html += `</div>`;
+    return eaResp(`💡 ${qSubject} 教学建议`, html);
+  }
+
+  html += `<p>基于本次考试数据的教学建议：</p>`;
+
+  const sortedByLow = subjects.map(s => ({name:s.name, low:stats[s.name].lowPct, avg:stats[s.name].avg/s.fullScore*100}))
+    .sort((a,b) => b.low - a.low);
+
+  html += `<div class="emc-highlight">`;
+  html += `<b>一、学科层面</b><br>`;
+  html += `• 重点关注：${sortedByLow[0].name}（不及格率 ${fmt(sortedByLow[0].low*100,1)}%），建议开展教研会诊<br>`;
+  html += `• 优势学科：${sortedByLow[sortedByLow.length-1].name} 可总结经验，在年级推广`;
+  html += `</div>`;
+
+  html += `<div class="emc-highlight">`;
+  html += `<b>二、学生层面</b><br>`;
+  html += `• 培优：优秀生群体 ${stats["总分"].excellent} 人，可开展竞赛辅导/拓展课程<br>`;
+  html += `• 扶困：不及格群体 ${stats["总分"].total - stats["总分"].passCount} 人，需建立"一生一策"帮扶档案<br>`;
+  html += `• 中间层：中等生占比最大，是提分关键，建议强化中等生向良好生转化`;
+  html += `</div>`;
+
+  html += `<div class="emc-highlight">`;
+  html += `<b>三、管理层面</b><br>`;
+  html += `• 整体均分 ${fmt(totalStats.avg,1)}（${fmt(avg/totalFullScore*100,1)}%），${cv<15?"班级整体均衡，继续保持":"班级差异较大，需关注薄弱班级"}<br>`;
+  html += `• 建议下周召开质量分析会，各科老师交流诊断结果<br>`;
+  html += `• 可考虑引入学习科学方法（如间隔重复、刻意练习）提升教学效率`;
+  html += `</div>`;
+
+  html += `<div class="emc-tip">💡 以上建议基于数据自动生成，实际决策请结合教学经验综合判断。</div>`;
+
+  return eaResp("💡 教学建议", html);
+}
+
+// === 新增：特定班级查询 ===
+function generateQueryAnswer(ctx) {
+  const { allRecs, subjects, totalFullScore, qClass, qStudent, qSubject, stats } = ctx;
+
+  if (qStudent) {
+    return generateStudentAnswer(ctx);
+  }
+
+  if (qClass) {
+    const classRecs = allRecs.filter(r => r.classNo === qClass);
+    if (classRecs.length === 0) {
+      return eaResp("🔍 班级查询", `<p>未找到 ${qClass} 班的数据。</p>`);
+    }
+
+    const classStats = aggregateStats(classRecs, subjects);
+    const totalStats = classStats["总分"];
+
+    // 年级排名
+    const allSorted = [...allRecs].sort((a, b) => b.total - a.total);
+    const classRanks = classRecs.map(r => ({
+      name: r.studentName,
+      total: r.total,
+      rank: allSorted.findIndex(x => x.studentId === r.studentId) + 1
+    })).sort((a, b) => a.rank - b.rank);
+
+    let html = `<p><b>${qClass} 班</b> 成绩概况：</p>`;
+    html += `<div class="emc-highlight">`;
+    html += `• 参考人数：${classRecs.length} 人<br>`;
+    html += `• 总分均分：<b>${fmt(totalStats.avg, 1)}</b> / ${totalFullScore}（${fmt(totalStats.avg/totalFullScore*100,1)}%）<br>`;
+    html += `• 最高分：${fmt(totalStats.max, 1)} 分<br>`;
+    html += `• 最低分：${fmt(totalStats.min, 1)} 分<br>`;
+    html += `• 及格率：${fmt(totalStats.passPct*100,1)}%<br>`;
+    html += `• 优秀率：${fmt(totalStats.excellentPct*100,1)}%`;
+    html += `</div>`;
+
+    html += `<p>班级前5名：</p>`;
+    html += `<div class="emc-highlight">`;
+    classRanks.slice(0, 5).forEach((s, i) => {
+      html += `${i+1}. ${s.name}：${s.total}分（年级第${s.rank}名）<br>`;
+    });
+    html += `</div>`;
+
+    return eaResp(`🏫 ${qClass}班 成绩分析`, html);
+  }
+
+  return generateOverviewAnswer(ctx);
+}
+
+// === 新增：科目对比 ===
+function generateCompareAnswer(ctx) {
+  const { q, subjects, stats, allRecs, qSubject, totalFullScore } = ctx;
+
+  // 找出问题中提到的两个科目
+  const found = subjects.filter(s => q.includes(s.name));
+  if (found.length >= 2) {
+    const s1 = found[0], s2 = found[1];
+    const st1 = stats[s1.name], st2 = stats[s2.name];
+    const rate1 = st1.avg / s1.fullScore * 100;
+    const rate2 = st2.avg / s2.fullScore * 100;
+
+    let html = `<p>${s1.name} vs ${s2.name} 对比：</p>`;
+    html += `<table><tr><th>指标</th><th>${s1.name}</th><th>${s2.name}</th><th>差异</th></tr>`;
+    html += `<tr><td>均分</td><td>${fmt(st1.avg,1)}</td><td>${fmt(st2.avg,1)}</td><td>${fmt(st1.avg-st2.avg,1)}</td></tr>`;
+    html += `<tr><td>得分率</td><td>${fmt(rate1,1)}%</td><td>${fmt(rate2,1)}%</td><td>${fmt(rate1-rate2,1)}%</td></tr>`;
+    html += `<tr><td>优秀率</td><td>${fmt(st1.excellentPct*100,1)}%</td><td>${fmt(st2.excellentPct*100,1)}%</td><td>${fmt((st1.excellentPct-st2.excellentPct)*100,1)}%</td></tr>`;
+    html += `<tr><td>及格率</td><td>${fmt(st1.passPct*100,1)}%</td><td>${fmt(st2.passPct*100,1)}%</td><td>${fmt((st1.passPct-st2.passPct)*100,1)}%</td></tr>`;
+    html += `<tr><td>标准差</td><td>${fmt(st1.stdDev,1)}</td><td>${fmt(st2.stdDev,1)}</td><td>${fmt(st1.stdDev-st2.stdDev,1)}</td></tr>`;
+    html += `</table>`;
+
+    const winner = rate1 > rate2 ? s1.name : s2.name;
+    const diff = Math.abs(rate1 - rate2);
+    html += `<div class="emc-highlight">`;
+    html += `✅ ${winner} 得分率领先 <b>${fmt(diff,1)}</b> 个百分点<br>`;
+    html += diff > 10 ? "⚠️ 两科差距较大，需关注薄弱学科均衡发展" : "📊 两科水平接近，整体均衡";
+    html += `</div>`;
+    return eaResp("⚖️ 科目对比", html);
+  }
+
+  // 默认返回班级对比
+  return generateClassRankingAnswer(ctx);
+}
+
+// 真正无法识别时的兜底回复
+function generateFallbackAnswer(ctx) {
+  const { allRecs, subjects, stats, totalFullScore, totalStats, selectedExam, rawQ } = ctx;
+
+  let html = `<p>抱歉，我没有理解您的问题。</p>`;
+  html += `<p>您问的是：「<b>${esc(rawQ)}</b>」对吗？</p>`;
+  html += `<p>我可以帮您分析这些问题：</p>`;
+  html += `<ul class="emc-list">`;
+  html += `<li>📊 <b>成绩统计</b>："各科目优秀率"、"年级均分是多少"、"这次考试怎么样"</li>`;
+  html += `<li>🏆 <b>班级排名</b>："哪个班总分最高"、"班级排名情况"</li>`;
+  html += `<li>👨‍🎓 <b>学生关注</b>："有哪些偏科学生"、"不及格学生有哪些"</li>`;
+  html += `<li>📚 <b>科目分析</b>："各科目得分率排名"、"哪科最弱"、"数学分析"</li>`;
+  html += `<li>📈 <b>分布情况</b>："成绩分布如何"、"分段人数统计"</li>`;
+  html += `<li>🔄 <b>进退步</b>："这次比上次进步了多少"、"哪些学生进步明显"</li>`;
+  html += `<li>💡 <b>教学建议</b>："有什么建议"、"怎么提升成绩"</li>`;
+  html += `<li>🏫 <b>班级查询</b>："3班成绩怎么样"</li>`;
+  html += `<li>👤 <b>学生查询</b>："张三考了多少分"</li>`;
+  html += `<li>📐 <b>离散度</b>："标准差是多少"、"分化程度如何"</li>`;
+  html += `</ul>`;
+
+  return eaResp("🤖 未能理解您的问题", html);
+}
+
+function generateDefaultAnswer(ctx) {
+  const { allRecs, subjects, stats, totalFullScore, totalStats, selectedExam } = ctx;
+  const classList = [...new Set(allRecs.map(r => r.classNo))].sort();
+  const sortedByRate = subjects.map(s => ({name:s.name, rate:stats[s.name].avg/s.fullScore*100}))
+    .sort((a,b) => b.rate - a.rate);
+
+  let html = `<p>这是「${selectedExam.name}」的智能分析报告：</p>`;
+  html += `<div class="emc-highlight">`;
+  html += `📊 参考人数：${allRecs.length} 人（${classList.length}个班）<br>`;
+  html += `📈 总分均分：${fmt(totalStats.avg, 1)} / ${totalFullScore}（${fmt(totalStats.avg/totalFullScore*100,1)}%）<br>`;
+  html += `🏆 最高分：${fmt(totalStats.max, 1)} 分<br>`;
+  html += `📚 优势学科：${sortedByRate[0].name}（${fmt(sortedByRate[0].rate,1)}%）<br>`;
+  html += `⚠️ 薄弱学科：${sortedByRate[sortedByRate.length-1].name}（${fmt(sortedByRate[sortedByRate.length-1].rate,1)}%）`;
+  html += `</div>`;
+
+  html += `<p>您可以这样问我：</p><ul class="emc-list">`;
+  html += `<li>"各科目的优秀率是多少？"</li>`;
+  html += `<li>"哪个班总分最高？"</li>`;
+  html += `<li>"有哪些偏科学生？"</li>`;
+  html += `<li>"成绩分布怎么样？"</li>`;
+  html += `<li>"XXX同学这次考了多少分？"</li>`;
+  html += `<li>"标准差是多少？分化严重吗？"</li>`;
+  html += `<li>"有什么教学建议？"</li>`;
+  html += `<li>"前20名有哪些人？"</li>`;
+  html += `</ul>`;
+
+  return eaResp("🤖 智能分析报告", html);
+}
+
+// 页面加载完成后初始化助手（默认隐藏，登录后显示）
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = $("eduAssistantBtn");
+  const panel = $("eduAssistant");
+  if (btn) btn.style.display = "none";
+  if (panel) panel.classList.add("hidden");
+});
 
