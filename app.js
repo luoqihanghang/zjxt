@@ -653,10 +653,20 @@ async function navigate(pageId) {
   const menu = allItems.find((m) => m.id === pageId);
   $("pageTitle").textContent = menu ? menu.text : "页面";
 
-  // 切换页面时自动刷新最新数据
-  const savedDB = localStorage.getItem(DB_KEY);
-  if (savedDB) {
-    try { DB = JSON.parse(savedDB); } catch (e) { /* 保持现有 DB */ }
+  // 切换页面时自动刷新最新数据（优先从 GitHub 拉取，保证多端数据同步）
+  if (GitHubService.isConfigured()) {
+    // 有 GitHub Sync 时，异步拉取远程最新数据
+    const remoteDB = await GitHubService.loadRemoteDB().catch(() => null);
+    if (remoteDB) {
+      DB = remoteDB;
+      saveDB(DB);
+    }
+  } else {
+    // 无 GitHub Sync 时，从本地 localStorage 读取
+    const savedDB = localStorage.getItem(DB_KEY);
+    if (savedDB) {
+      try { DB = JSON.parse(savedDB); } catch (e) { /* 保持现有 DB */ }
+    }
   }
 
   const render = PAGE_RENDERERS[pageId];
