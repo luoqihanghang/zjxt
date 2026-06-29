@@ -1,5 +1,7 @@
 // ========== 网络智慧教务平台 - 主应用 ==========
 // 所有数据存储在 localStorage 中，便于本地演示和持久化
+// 版本: 20250629 - 修复教务端上传成绩分数解析 + Gist 同步增强
+console.log("[智慧教务平台] v20250629 已加载");
 
 // ========== 工具函数 ==========
 const $ = (id) => document.getElementById(id);
@@ -3010,10 +3012,12 @@ function handleAcademicExcelFile(fileList) {
               if (bracketMatch) { colToSubject[col] = bracketMatch; return; }
             }
           });
-          console.log("[教务上传] 列名映射", colToSubject);
+          console.log("[教务上传] 列名映射:", colToSubject);
+          console.log("[教务上传] targetSubjects:", targetSubjects);
 
-          // 智能识别学号、姓名、班级列
+          // 智能识别学号、姓名、班级列（带回退）
           const allKeys = Object.keys(firstRow);
+          console.log("[教务上传] Excel第一行列名:", allKeys);
           let studentIdCol = null, studentNameCol = null, classCol = null;
           const idPatterns = ["学号", "编号", "号码", "id", "ID", "student_id", "StudentID"];
           const namePatterns = ["姓名", "名字", "name", "Name", "student_name", "StudentName", "学生"];
@@ -3023,6 +3027,11 @@ function handleAcademicExcelFile(fileList) {
             if (!studentNameCol && namePatterns.some((p) => k.includes(p))) studentNameCol = k;
             if (!classCol && classPatterns.some((p) => k.includes(p))) classCol = k;
           }
+          // 回退：如果智能识别不到，用原来的硬编码列名
+          if (!studentIdCol && allKeys.includes("学号")) studentIdCol = "学号";
+          if (!studentIdCol && allKeys.includes("学号（可留空）")) studentIdCol = "学号（可留空）";
+          if (!studentNameCol && allKeys.includes("姓名")) studentNameCol = "姓名";
+          if (!classCol && allKeys.includes("班级")) classCol = "班级";
 
           for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
             const row = rows[rowIdx];
@@ -3068,16 +3077,37 @@ function handleAcademicExcelFile(fileList) {
             }
 
             const scores = {};
+            // 调试：打印第一行的分数读取过程
+            if (rowIdx === 1) {
+              console.log("[教务上传] 第一行原始数据:", row);
+              console.log("[教务上传] colToSubject:", colToSubject);
+            }
             targetSubjects.forEach((sn) => {
+              // 先通过列名映射找
               const colName = Object.keys(colToSubject).find((c) => colToSubject[c] === sn);
+              let rawValue = null;
               if (colName) {
-                const v = row[colName];
-                if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
-                else scores[sn] = 0;
+                rawValue = row[colName];
+                if (rowIdx === 1) console.log(`[教务上传] 科目[${sn}] <- 列[${colName}] = ${JSON.stringify(rawValue)}`);
+                if (rawValue !== "" && rawValue != null && !isNaN(Number(rawValue))) {
+                  scores[sn] = Number(rawValue);
+                } else {
+                  scores[sn] = 0;
+                }
+              } else if (row[sn] !== undefined) {
+                // 回退：直接用科目名作为列名（原逻辑）
+                rawValue = row[sn];
+                if (rowIdx === 1) console.log(`[教务上传] 科目[${sn}] <- 回退列[${sn}] = ${JSON.stringify(rawValue)}`);
+                if (rawValue !== "" && rawValue != null && !isNaN(Number(rawValue))) {
+                  scores[sn] = Number(rawValue);
+                } else {
+                  scores[sn] = 0;
+                }
               } else {
                 scores[sn] = 0;
               }
             });
+            if (rowIdx === 1) console.log("[教务上传] 第一行解析结果:", scores);
 
             allParsed.push({
               classNo, studentId, studentName, scores,
