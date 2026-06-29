@@ -166,23 +166,27 @@ async function loadDB() {
 
 function saveDB(db) {
   localStorage.setItem(DB_KEY, JSON.stringify(db));
-  // 异步同步到双 Gist：主 Gist 存配置，业务 Gist 存成绩
+  // 同步到 Gist（等待完成，确保数据真正写入后再提示用户）
   if (GitHubService.isConfigured() && !_skipGitHubSync) {
-    GitHubService.saveRemoteDB(db).then((result) => {
+    return GitHubService.saveRemoteDB(db).then((result) => {
       if (result === true) {
         updateSyncStatus("synced");
+        return true;
       } else if (result === 'partial') {
         updateSyncStatus("partial");
-        showToast("数据已同步（学生名单已存至独立文件）", "info", 3000);
+        return 'partial';
       } else {
         updateSyncStatus("error");
+        return false;
       }
     }).catch(err => {
       console.log("Gist sync error:", err.message);
       updateSyncStatus("error");
+      return false;
     });
   } else {
     updateSyncStatus("offline");
+    return Promise.resolve(false);
   }
 }
 
@@ -551,12 +555,41 @@ function updateSyncStatus(status) {
     badge.innerHTML = "❌ 同步失败";
     badge.style.background = "#fee";
     badge.style.color = "#c00";
-  } else {
-    badge.innerHTML = "🔗 未同步";
-    badge.style.background = "#f0f4ff";
-    badge.style.color = "#3b7ddd";
+    showSyncErrorBanner(); // 显示持久警告横幅
+  } else if (status === "synced") {
+    // 同步成功后，隐藏警告横幅
+    hideSyncErrorBanner();
   }
 }
+
+function showSyncErrorBanner() {
+  if (document.getElementById("sync-error-banner")) return; // 已显示
+  const banner = document.createElement("div");
+  banner.id = "sync-error-banner";
+  banner.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#fee;border-bottom:2px solid #c00;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;font-size:14px;color:#c00;box-shadow:0 2px 8px rgba(200,0,0,0.2)";
+  banner.innerHTML = `<span>⚠️ <b>云端同步失败！</b>当前数据只保存在本地，换设备后将无法使用。请检查网络和 Gist 配置后重试。</span><button onclick="manualRetrySync()" style="background:#c00;color:#fff;border:none;padding:6px 14px;border-radius:4px;cursor:pointer;font-size:13px">🔄 重试同步</button>`;
+  document.body.insertBefore(banner, document.body.firstChild);
+  // 调整顶部导航位置
+  document.body.style.paddingTop = "50px";
+}
+
+function hideSyncErrorBanner() {
+  const banner = document.getElementById("sync-error-banner");
+  if (banner) { banner.remove(); document.body.style.paddingTop = "0"; }
+}
+
+window.manualRetrySync = async function () {
+  if (!DB) return;
+  hideSyncErrorBanner();
+  const result = await saveDB(DB);
+  if (result) {
+    hideSyncErrorBanner();
+    showToast("✅ 同步成功！", "success");
+  } else {
+    showSyncErrorBanner();
+    showToast("❌ 同步仍然失败，请检查 Gist 配置", "error", 5000);
+  }
+};
 
 window.openGithubSetup = function () {
   GitHubService.showLoginSetup();
@@ -1533,12 +1566,12 @@ window.showBatchUploadModal = function () {
       <label>选择 Excel 文件</label>
       <input type="file" id="batch_teacher_file" accept=".xlsx,.xls,.csv" style="padding:8px" />
     </div>
-  `, "开始上传", () => {
+  `, "开始上传", async () => {
     const fileInput = $("batch_teacher_file");
     if (!fileInput.files[0]) { showToast("请选择文件", "error"); return false; }
     const file = fileInput.files[0];
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
         const data = new Uint8Array(e.target.result);
         const workbook = XLSX.read(data, { type: "array" });
@@ -1571,8 +1604,19 @@ window.showBatchUploadModal = function () {
           DB.users.push({ id: uid(), username, password: "123456", name, role, grade: grade || null, classNo: classNo || null, subjects, createdAt: Date.now() });
           added++;
         }
-        saveDB(DB);
-        showToast(`成功添加 ${added} 人${skipped > 0 ? `，跳过 ${skipped} 行` : ""}`, added > 0 ? "success" : "warning");
+        if (added === 0) {
+          showToast("没有可添加的用户", "warning");
+          return;
+        }
+        // 等待同步完成后再提示
+        const syncResult = await saveDB(DB);
+        if (syncResult === true) {
+          showToast(`✅ 成功添加 ${added} 人${skipped > 0 ? `，跳过 ${skipped} 行` : ""}，已同步到云端`, "success");
+        } else if (syncResult === 'partial') {
+          showToast(`⚠️ 成功添加 ${added} 人，已部分同步（学生名单已存至独立文件）`, "info");
+        } else {
+          showToast(`⚠️ 成功添加 ${added} 人，但云端同步失败，其他设备可能无法使用新账号`, "warning", 5000);
+        }
         if (errors.length > 0) { showToast(errors.slice(0, 3).join("；"), "warning", 4000); }
         renderUsers();
       } catch (err) {
@@ -1630,7 +1674,7 @@ window.editUser = function (id) {
       </div>
     </div>
   `;
-  showModal(u ? "编辑教师信息" : "添加新教师", html, "保存", () => {
+  showModal(u ? "编辑教师信息" : "添加新教师", html, "保存", async () => {
     const username = $("m_username").value.trim();
     const name = $("m_name").value.trim();
     const password = $("m_password").value.trim();
@@ -1650,28 +1694,46 @@ window.editUser = function (id) {
     } else {
       DB.users.push({ id: uid(), username, password: password || "123456", name, role, grade, classNo, subjects, createdAt: Date.now() });
     }
-    saveDB(DB);
-    showToast("保存成功", "success");
+    const syncResult = await saveDB(DB);
+    if (syncResult === true) {
+      showToast(u ? "✅ 保存成功" : `✅ 添加成功，账号 ${username} / 密码 ${password || "123456"}，已同步到云端`, u ? "success" : "success");
+    } else if (syncResult === 'partial') {
+      showToast(u ? "✅ 保存成功（已部分同步）" : `✅ 添加成功，已部分同步`, "info");
+    } else {
+      showToast(u ? "✅ 保存成功（云端同步失败）" : `⚠️ 添加成功但云端同步失败，新账号在其他设备可能无法登录`, "warning", 5000);
+    }
     renderUsers();
   });
 };
 
-window.resetPwd = function (id) {
+window.resetPwd = async function (id) {
   const u = DB.users.find((x) => x.id === id);
   if (!u) return;
   const isAcademic = currentUser.role === "academic";
   if (isAcademic && u.grade !== currentUser.grade) { showToast("无权限操作此教师", "error"); return; }
   if (!confirm(`确认将 ${u.name} 的密码重置为 123456？`)) return;
-  u.password = "123456"; saveDB(DB); showToast("密码已重置为 123456", "success");
+  u.password = "123456";
+  const syncResult = await saveDB(DB);
+  if (syncResult) {
+    showToast(`✅ ${u.name} 的密码已重置为 123456`，"success");
+  } else {
+    showToast(`⚠️ 密码已重置（云端同步失败）`, "warning", 4000);
+  }
 };
 
-window.delUser = function (id) {
+window.delUser = async function (id) {
   const u = DB.users.find((x) => x.id === id);
   if (!u) return;
   const isAcademic = currentUser.role === "academic";
   if (isAcademic && (u.grade !== currentUser.grade || u.role === "academic")) { showToast("无权限删除此教师", "error"); return; }
   if (!confirm(`确认删除教师「${u.name}」？此操作不可恢复。`)) return;
-  DB.users = DB.users.filter((x) => x.id !== id); saveDB(DB); showToast("已删除", "success");
+  DB.users = DB.users.filter((x) => x.id !== id);
+  const syncResult = await saveDB(DB);
+  if (syncResult) {
+    showToast(`✅ 已删除「${u.name}」`, "success");
+  } else {
+    showToast(`⚠️ 已删除（云端同步失败）`, "warning", 4000);
+  }
   renderUsers();
 };
 
