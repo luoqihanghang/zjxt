@@ -2204,6 +2204,13 @@ function handleExcelFile(file) {
       const wb = XLSX.read(data, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      console.log("[上传成绩] Excel解析结果", {
+        sheetNames: wb.SheetNames,
+        firstSheetName: wb.SheetNames[0],
+        rowCount: rows.length,
+        firstRow: rows[0],
+        allSubjects: DB.subjects[currentUser.grade]
+      });
       if (rows.length === 0) { showToast("Excel 为空", "error"); return; }
 
       const grade = currentUser.grade;
@@ -2219,6 +2226,26 @@ function handleExcelFile(file) {
         return;
       }
 
+      // 建立列名到科目的映射（支持模糊匹配）
+      const firstRow = rows[0] || {};
+      const colToSubject = {};
+      Object.keys(firstRow).forEach((col) => {
+        const colTrim = col.trim();
+        // 直接匹配
+        const direct = subjects.find((s) => s.name === colTrim);
+        if (direct) { colToSubject[col] = direct.name; return; }
+        // 模糊匹配：列名包含科目名，或科目名在列名开头
+        const fuzzy = subjects.find((s) => colTrim.includes(s.name) || s.name.includes(colTrim));
+        if (fuzzy) { colToSubject[col] = fuzzy.name; return; }
+        // 去掉括号内容后匹配，如"语文(150)" -> "语文"
+        const withoutBracket = colTrim.replace(/\([^)]*\)/g, "").trim();
+        if (withoutBracket !== colTrim) {
+          const bracketMatch = subjects.find((s) => s.name === withoutBracket);
+          if (bracketMatch) { colToSubject[col] = bracketMatch.name; return; }
+        }
+      });
+      console.log("[上传成绩] 列名映射", colToSubject);
+
       const isSingleMode = mode === "single" && selectedSubject;
       const targetSubjects = isSingleMode ? [selectedSubject] : subjects.map((s) => s.name);
 
@@ -2231,6 +2258,30 @@ function handleExcelFile(file) {
         if (!existingNameToId[r.studentName]) existingNameToId[r.studentName] = r.studentId;
       });
 
+      // 辅助函数：从行数据中提取学生ID和姓名（支持多种列名格式）
+      const extractStudent = (row) => {
+        const allKeys = Object.keys(row);
+        // 找学号列
+        let studentId = "";
+        const idPatterns = ["学号", "编号", "号码", "id", "ID", "student_id", "StudentID"];
+        for (const k of allKeys) {
+          if (idPatterns.some((p) => k.includes(p))) {
+            studentId = String(row[k] || "").trim();
+            if (studentId) break;
+          }
+        }
+        // 找姓名列
+        let studentName = "";
+        const namePatterns = ["姓名", "名字", "name", "Name", "student_name", "StudentName", "学生"];
+        for (const k of allKeys) {
+          if (namePatterns.some((p) => k.includes(p))) {
+            studentName = String(row[k] || "").trim();
+            if (studentName) break;
+          }
+        }
+        return { studentId, studentName };
+      };
+
       const parsedRowIds = new Set();
       const parsed = [];
       const autoGenNotes = [];
@@ -2238,8 +2289,9 @@ function handleExcelFile(file) {
 
       for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
         const row = rows[rowIdx];
-        let studentId = String(row["学号"] || row["学号（可留空）"] || row["id"] || "").trim();
-        const studentName = String(row["姓名"] || row["name"] || "").trim();
+        const { studentId: rawStudentId, studentName: rawStudentName } = extractStudent(row);
+        let studentId = String(rawStudentId || "").trim();
+        let studentName = String(rawStudentName || "").trim();
         if (!studentName) continue;
 
         const existingRecord = existingRecords[studentName];
@@ -2268,9 +2320,15 @@ function handleExcelFile(file) {
 
         const scores = {};
         targetSubjects.forEach((sn) => {
-          const v = row[sn];
-          if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
-          else scores[sn] = 0; // 空分数视为0分
+          // 使用列名映射找到对应的列
+          const colName = Object.keys(colToSubject).find((c) => colToSubject[c] === sn);
+          if (colName) {
+            const v = row[colName];
+            if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
+            else scores[sn] = 0; // 空分数视为0分
+          } else {
+            scores[sn] = 0; // 没有找到对应列，视为0分
+          }
         });
 
         const oldScores = existingRecord ? { ...existingRecord.scores } : {};
