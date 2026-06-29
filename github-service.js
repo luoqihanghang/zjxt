@@ -495,7 +495,8 @@ const GitHubService = {
       const activeId = await this.ensureCapacity();
       if (!activeId) {
         this.isSyncing = false;
-        return ok1;
+        // 业务 Gist 不可用，主 Gist 状态决定返回值
+        return ok1; // true | 'partial' | false
       }
 
       // 3. 业务 Gist：索引文件
@@ -503,19 +504,17 @@ const GitHubService = {
       await this.saveDataMeta(meta);
 
       // 4. 业务 Gist：按 examId 分组写每个考试的成绩文件
-      //    只写当前活跃 Gist 中的考试（即 records 中出现的 examId）
       const byExam = {};
       (db.records || []).forEach(r => {
         const k = r.examId;
         if (!byExam[k]) byExam[k] = [];
         byExam[k].push(r);
       });
-
-      // 对每个 exam 写一个文件
       for (const examId of Object.keys(byExam)) {
         await this.saveExamRecords(examId, byExam[examId]);
       }
 
+      // 主 Gist 和业务 Gist 都成功了
       return true;
     } catch (e) {
       this.log(`❌ saveRemoteDB 异常: ${e.message}`, "error");

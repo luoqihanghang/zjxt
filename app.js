@@ -168,7 +168,21 @@ function saveDB(db) {
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   // 异步同步到双 Gist：主 Gist 存配置，业务 Gist 存成绩
   if (GitHubService.isConfigured() && !_skipGitHubSync) {
-    GitHubService.saveRemoteDB(db).catch(err => console.log("Gist sync error:", err));
+    GitHubService.saveRemoteDB(db).then((result) => {
+      if (result === true) {
+        updateSyncStatus("synced");
+      } else if (result === 'partial') {
+        updateSyncStatus("partial");
+        showToast("数据已同步（学生名单已存至独立文件）", "info", 3000);
+      } else {
+        updateSyncStatus("error");
+      }
+    }).catch(err => {
+      console.log("Gist sync error:", err.message);
+      updateSyncStatus("error");
+    });
+  } else {
+    updateSyncStatus("offline");
   }
 }
 
@@ -490,15 +504,57 @@ function updateSyncBadge() {
   if (!badge) return;
   const gs = window.GitHubService;
   if (!gs) return;
-  const cfg = gs.config;
-  if (gs.isConfigured()) {
-    badge.innerHTML = `🔗 已连接（主 Gist：${(cfg.configGistId || "").substring(0, 8)}…）`;
-    badge.style.background = "#e8f7ec";
-    badge.style.color = "#2b8a3e";
-  } else {
+  if (!gs.isConfigured()) {
     badge.innerHTML = "🔗 未配置";
     badge.style.background = "#fff4e6";
     badge.style.color = "#d9480f";
+    return;
+  }
+  // Gist 已配置，尝试加载并检查同步状态
+  badge.innerHTML = "🔗 已连接，正在检查…";
+  badge.style.background = "#f0f4ff";
+  badge.style.color = "#3b7ddd";
+  GitHubService.loadRemoteDB().then((remote) => {
+    if (!remote || !remote.users || remote.users.length === 0) {
+      badge.innerHTML = "🔗 已连接（空数据）";
+      badge.style.background = "#fff4e6";
+      badge.style.color = "#d97706";
+    } else {
+      badge.innerHTML = `✅ 已同步（${remote.users.length}用户）`;
+      badge.style.background = "#e8f7ec";
+      badge.style.color = "#2b8a3e";
+    }
+  }).catch(() => {
+    badge.innerHTML = "🔗 已连接（离线）";
+    badge.style.background = "#f0f4ff";
+    badge.style.color = "#3b7ddd";
+  });
+}
+
+// 实时同步状态：synced | error | partial
+let _syncStatusTimer = null;
+function updateSyncStatus(status) {
+  const badge = $("sync-badge");
+  if (!badge) return;
+  badge.className = "";
+  if (status === "synced") {
+    badge.innerHTML = "✅ 已同步";
+    badge.style.background = "#e8f7ec";
+    badge.style.color = "#2b8a3e";
+    _syncStatusTimer && clearTimeout(_syncStatusTimer);
+    _syncStatusTimer = setTimeout(() => updateSyncBadge(), 6000);
+  } else if (status === "partial") {
+    badge.innerHTML = "⚠️ 部分同步";
+    badge.style.background = "#fff8e1";
+    badge.style.color = "#d97706";
+  } else if (status === "error") {
+    badge.innerHTML = "❌ 同步失败";
+    badge.style.background = "#fee";
+    badge.style.color = "#c00";
+  } else {
+    badge.innerHTML = "🔗 未同步";
+    badge.style.background = "#f0f4ff";
+    badge.style.color = "#3b7ddd";
   }
 }
 
@@ -539,12 +595,14 @@ function renderGithubData() {
     </div>
 
     <div class="card">
-      <div class="card-title">📊 同步状态</div>
+      <div class="card-title">📊 同步状态与诊断</div>
       <div id="gd_sync_info" style="padding:12px;background:#f8f9fc;border-radius:8px;font-size:13px;color:var(--text-light)">
         <p>• 当前状态：${gs.isConfigured() ? `<b style="color:#2b8a3e">✅ 已配置</b>` : `<b style="color:#d9480f">⚠️ 未配置</b>`}</p>
         <p>• Token：${cfg.token ? "✅ 已设置" : "❌ 未设置"}</p>
         <p>• 主 Gist ID：<code>${cfg.configGistId || "未设置"}</code></p>
         <p>• 业务 Gist：<code>${cfg.dataGistIds.length ? cfg.dataGistIds.join("、") : "未设置（首次上传时自动创建）"}</code></p>
+        <p>• 本地缓存：<code>${DB ? `${DB.users?.length || 0}用户、${DB.exams?.length || 0}考试、${DB.records?.length || 0}成绩` : "无"}</code></p>
+        <p style="margin-top:8px;color:#d97706">💡 提示：首次使用请按顺序操作：①保存配置 → ②立即同步到 Gist → ③在其他设备登录时点击"从 Gist 拉取数据"</p>
       </div>
     </div>
 
@@ -579,20 +637,50 @@ function renderGithubData() {
 
   $("gd_sync_now").onclick = async () => {
     if (!DB) { showToast("请先登录", "error"); return; }
-    const ok = await gs.saveRemoteDB(DB);
-    if (ok) showToast("同步成功", "success");
-    renderGithubData();
+    $("gd_sync_now").disabled = true;
+    $("gd_sync_now").textContent = "同步中…";
+    try {
+      const result = await gs.saveRemoteDB(DB);
+      if (result === true) {
+        showToast("✅ 同步成功！所有数据已保存到 Gist", "success");
+        updateSyncBadge();
+      } else if (result === 'partial') {
+        showToast("⚠️ 部分同步（学生名单已存至独立文件）", "info");
+        updateSyncBadge();
+      } else {
+        showToast("❌ 同步失败，请检查 Gist 配置和网络", "error");
+        updateSyncBadge();
+      }
+    } catch (e) {
+      showToast("同步异常：" + e.message, "error");
+    } finally {
+      $("gd_sync_now").disabled = false;
+      $("gd_sync_now").textContent = "🔄 立即同步到 Gist";
+      renderGithubData();
+    }
   };
 
   $("gd_load").onclick = async () => {
-    const remote = await gs.loadRemoteDB();
-    if (remote) {
-      DB = remote;
-      localStorage.setItem(DB_KEY, JSON.stringify(remote));
-      showToast("拉取成功，数据已更新", "success");
-      navigate("dashboard");
+    $("gd_load").disabled = true;
+    $("gd_load").textContent = "拉取中…";
+    try {
+      const remote = await gs.loadRemoteDB();
+      if (remote && remote.users && remote.users.length > 0) {
+        DB = remote;
+        localStorage.setItem(DB_KEY, JSON.stringify(remote));
+        showToast(`✅ 拉取成功！已加载 ${remote.users.length} 个用户账号`, "success");
+        updateSyncBadge();
+        navigate("dashboard");
+      } else {
+        showToast("⚠️ Gist 中没有数据（请先在其他端同步数据，或检查 Token/Gist ID 是否正确）", "warning", 4000);
+      }
+    } catch (e) {
+      showToast("拉取失败：" + e.message, "error");
+    } finally {
+      $("gd_load").disabled = false;
+      $("gd_load").textContent = "📥 从 Gist 拉取数据";
+      renderGithubData();
     }
-    renderGithubData();
   };
 
   $("gd_test").onclick = async () => {
