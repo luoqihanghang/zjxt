@@ -1715,7 +1715,7 @@ window.resetPwd = async function (id) {
   u.password = "123456";
   const syncResult = await saveDB(DB);
   if (syncResult) {
-    showToast(`✅ ${u.name} 的密码已重置为 123456`，"success");
+    showToast(`✅ ${u.name} 的密码已重置为 123456`, "success");
   } else {
     showToast(`⚠️ 密码已重置（云端同步失败）`, "warning", 4000);
   }
