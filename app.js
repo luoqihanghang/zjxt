@@ -2817,15 +2817,46 @@ function handleAcademicExcelFile(fileList) {
           const ws = wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
+          if (rows.length === 0) { resolve(true); return; }
+
+          // 建立列名到科目的映射（支持模糊匹配，与班主任端一致）
+          const firstRow = rows[0] || {};
+          const colToSubject = {};
+          Object.keys(firstRow).forEach((col) => {
+            const colTrim = col.trim();
+            const direct = targetSubjects.find((s) => s === colTrim);
+            if (direct) { colToSubject[col] = direct; return; }
+            const fuzzy = targetSubjects.find((s) => colTrim.includes(s) || s.includes(colTrim));
+            if (fuzzy) { colToSubject[col] = fuzzy; return; }
+            const withoutBracket = colTrim.replace(/\（[^）]*\）/g, "").replace(/\([^)]*\)/g, "").trim();
+            if (withoutBracket !== colTrim) {
+              const bracketMatch = targetSubjects.find((s) => s === withoutBracket);
+              if (bracketMatch) { colToSubject[col] = bracketMatch; return; }
+            }
+          });
+          console.log("[教务上传] 列名映射", colToSubject);
+
+          // 智能识别学号、姓名、班级列
+          const allKeys = Object.keys(firstRow);
+          let studentIdCol = null, studentNameCol = null, classCol = null;
+          const idPatterns = ["学号", "编号", "号码", "id", "ID", "student_id", "StudentID"];
+          const namePatterns = ["姓名", "名字", "name", "Name", "student_name", "StudentName", "学生"];
+          const classPatterns = ["班级", "班别", "class", "Class", "classNo", "class_name"];
+          for (const k of allKeys) {
+            if (!studentIdCol && idPatterns.some((p) => k.includes(p))) studentIdCol = k;
+            if (!studentNameCol && namePatterns.some((p) => k.includes(p))) studentNameCol = k;
+            if (!classCol && classPatterns.some((p) => k.includes(p))) classCol = k;
+          }
+
           for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
             const row = rows[rowIdx];
-            let studentId = String(row["学号"] || row["学号（可留空）"] || row["id"] || "").trim();
-            const studentName = String(row["姓名"] || row["name"] || "").trim();
-            let classNoRaw = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
+            let studentId = String((studentIdCol ? row[studentIdCol] : "") || "").trim();
+            const studentName = String((studentNameCol ? row[studentNameCol] : "") || "").trim();
+            let classNoRaw = String((classCol ? row[classCol] : "") || "").trim();
             const classNo = displayClassNo(classNoRaw) || classNoRaw;
             if (!studentName) continue;
             if (!classNo || classNo === "") {
-              conflictWarnings.push(`文件「${file.name}」学生「${studentName}」缺少班级信息`);
+              conflictWarnings.push(`文件「${file.name}」第${rowIdx + 2}行学生「${studentName}」缺少班级信息`);
               continue;
             }
 
@@ -2862,9 +2893,14 @@ function handleAcademicExcelFile(fileList) {
 
             const scores = {};
             targetSubjects.forEach((sn) => {
-              const v = row[sn];
-              if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
-              else scores[sn] = 0; // 空分数视为0分
+              const colName = Object.keys(colToSubject).find((c) => colToSubject[c] === sn);
+              if (colName) {
+                const v = row[colName];
+                if (v !== "" && v != null && !isNaN(Number(v))) scores[sn] = Number(v);
+                else scores[sn] = 0;
+              } else {
+                scores[sn] = 0;
+              }
             });
 
             allParsed.push({
