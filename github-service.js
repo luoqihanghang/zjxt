@@ -218,9 +218,22 @@ const GitHubService = {
       const info = await this.getGistInfo(this.config.configGistId);
       // 检查配置文件是否存在
       if (!info.files || !info.files[this.CONFIG_FILE]) {
-        this.log(`ℹ️ 主 Gist 尚无 ${this.CONFIG_FILE}（首次使用，将自动创建）`, "warn");
+        // 智能诊断：这个 Gist 里有什么？
+        const fileNames = Object.keys(info.files || {});
+        const hasExamFile = fileNames.some(n => n.startsWith("exam-"));
+        const hasRosterFile = fileNames.some(n => n === "roster.json");
+        const hasMetaFile = fileNames.some(n => n === this.DATA_META_FILE);
+        if (hasExamFile || hasMetaFile) {
+          this.log(`❌ 主 Gist ID 配置错误！这个 Gist 是业务 Gist（包含 ${fileNames.slice(0, 3).join(", ")}），不是主配置 Gist。`, "error");
+          this.log(`👉 请重新创建一个新 Gist 用于存储系统配置（应该只包含 ${this.CONFIG_FILE}）`, "error");
+        } else if (fileNames.length > 0) {
+          this.log(`ℹ️ 主 Gist 已有 ${fileNames.length} 个文件，但没有 ${this.CONFIG_FILE}（首次使用，将自动创建）`, "warn");
+        } else {
+          this.log(`ℹ️ 主 Gist 是空的（首次使用，将自动创建 ${this.CONFIG_FILE}）`, "warn");
+        }
         return null;
       }
+      // 只读取配置文件（避免下载其他大文件）
       const cfg = await this.readGistFile(this.config.configGistId, this.CONFIG_FILE);
       if (cfg) {
         this.log(`✅ 配置已加载（${cfg.users?.length || 0} 账号、${Object.keys(cfg.subjects || {}).length} 个年级）`);
