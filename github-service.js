@@ -214,35 +214,100 @@ const GitHubService = {
   async loadConfigDB() {
     if (!this.isConfigured()) return null;
     this.log("正在从主 Gist 加载系统配置...");
-    const cfg = await this.readGistFile(this.config.configGistId, this.CONFIG_FILE);
-    if (cfg) {
-      this.log(`✅ 配置已加载（${cfg.users?.length || 0} 账号、${Object.keys(cfg.subjects || {}).length} 个年级）`);
-      // 同步业务 Gist 索引到本地
-      if (Array.isArray(cfg.dataGistIds) && cfg.dataGistIds.length) {
-        this.config.dataGistIds = cfg.dataGistIds;
-        localStorage.setItem("gh_data_gist_ids", JSON.stringify(cfg.dataGistIds));
+    try {
+      const info = await this.getGistInfo(this.config.configGistId);
+      // 检查配置文件是否存在
+      if (!info.files || !info.files[this.CONFIG_FILE]) {
+        this.log(`ℹ️ 主 Gist 尚无 ${this.CONFIG_FILE}（首次使用，将自动创建）`, "warn");
+        return null;
       }
+      const cfg = await this.readGistFile(this.config.configGistId, this.CONFIG_FILE);
+      if (cfg) {
+        this.log(`✅ 配置已加载（${cfg.users?.length || 0} 账号、${Object.keys(cfg.subjects || {}).length} 个年级）`);
+        // 同步业务 Gist 索引到本地
+        if (Array.isArray(cfg.dataGistIds) && cfg.dataGistIds.length) {
+          this.config.dataGistIds = cfg.dataGistIds;
+          localStorage.setItem("gh_data_gist_ids", JSON.stringify(cfg.dataGistIds));
+        }
+      }
+      return cfg;
+    } catch (e) {
+      this.log(`主 Gist 读取异常: ${e.message}`, "error");
+      return null;
     }
-    return cfg;
   },
 
   // 写入主 Gist（配置变更时调用）
+  // 返回值：true 成功；'partial' 部分成功（大字段被剥离）；false 失败
   async saveConfigDB(configPart) {
     if (!this.isConfigured()) return false;
     // 确保 dataGistIds 与最新配置同步
     configPart.dataGistIds = this.config.dataGistIds;
     try {
-      const files = {
-        [this.CONFIG_FILE]: { content: JSON.stringify(configPart, null, 2) }
-      };
+      // 第一次尝试：使用压缩 JSON（无缩进，节省 30-50% 体积）
+      const content = JSON.stringify(configPart);
+      const files = { [this.CONFIG_FILE]: { content } };
       await this.updateGistFiles(this.config.configGistId, files,
         `网络智慧教务平台 · 系统配置 · ${new Date().toLocaleString()}`);
       this.log("✅ 主 Gist 配置已保存");
       return true;
     } catch (e) {
+      const is413 = (e.message || "").includes("413") || (e.message || "").includes("Request Entity Too Large");
+      if (is413) {
+        this.log("⚠️ 主 Gist 写入触发 413（请求体过大），自动剥离大字段后重试...", "warn");
+        // 剥离大字段：studentRoster 是最容易超大的
+        const slim = { ...configPart };
+        delete slim.studentRoster;
+        try {
+          const content = JSON.stringify(slim);
+          const files = { [this.CONFIG_FILE]: { content } };
+          await this.updateGistFiles(this.config.configGistId, files,
+            `网络智慧教务平台 · 系统配置(精简) · ${new Date().toLocaleString()}`);
+          this.log("✅ 主 Gist 配置已保存（已剥离 studentRoster）");
+          // 把学生名单保存到独立的业务文件
+          if (configPart.studentRoster && Object.keys(configPart.studentRoster).length > 0) {
+            await this.saveRosterToDataGist(configPart.studentRoster);
+          }
+          return 'partial';
+        } catch (e2) {
+          this.log(`❌ 精简后仍保存失败: ${e2.message}`, "error");
+          return false;
+        }
+      }
       this.log(`❌ 保存配置失败: ${e.message}`, "error");
       return false;
     }
+  },
+
+  // 把学生名单保存到业务 Gist 的独立文件
+  async saveRosterToDataGist(roster) {
+    try {
+      const activeId = await this.ensureCapacity();
+      if (!activeId) return false;
+      const files = {
+        "roster.json": { content: JSON.stringify(roster) }
+      };
+      await this.updateGistFiles(activeId, files,
+        `学生名单 · ${new Date().toLocaleString()}`);
+      this.log("✅ 学生名单已保存到业务 Gist");
+      return true;
+    } catch (e) {
+      this.log(`❌ 学生名单保存失败: ${e.message}`, "error");
+      return false;
+    }
+  },
+
+  // 从业务 Gist 读取学生名单
+  async loadRosterFromDataGist() {
+    for (const gid of this.config.dataGistIds) {
+      try {
+        const roster = await this.readGistFile(gid, "roster.json");
+        if (roster) return roster;
+      } catch (e) {
+        // 继续尝试下一个 Gist
+      }
+    }
+    return {};
   },
 
   // ========= 业务 Gist 读写 =========
@@ -369,7 +434,7 @@ const GitHubService = {
           rankSends: meta.rankSends || [],
           updatedAt: Date.now(),
           version: "v2"
-        }, null, 2) }
+        }) }
       };
       await this.updateGistFiles(currentId, files,
         `业务数据归档 · 索引更新 · ${new Date().toLocaleString()}`);
@@ -392,7 +457,7 @@ const GitHubService = {
     try {
       const filename = `exam-${examId}.json`;
       const files = {
-        [filename]: { content: JSON.stringify(records, null, 2) }
+        [filename]: { content: JSON.stringify(records) }
       };
       await this.updateGistFiles(activeGistId, files,
         `考试成绩更新：${examId.slice(0,10)}... · ${new Date().toLocaleString()}`);
@@ -478,6 +543,14 @@ const GitHubService = {
       // 如果主 Gist 里指定了业务 Gist，也读回来
       const meta = await this.loadAllDataMeta();
       const records = await this.loadAllRecords();
+      // 学生名单可能在业务 Gist 中（被自动剥离）
+      let studentRoster = cfg.studentRoster || {};
+      if (!studentRoster || Object.keys(studentRoster).length === 0) {
+        const rosterFromData = await this.loadRosterFromDataGist();
+        if (rosterFromData && Object.keys(rosterFromData).length > 0) {
+          studentRoster = rosterFromData;
+        }
+      }
 
       // 合并成一个 DB 对象（与原有 initDefaultDB 结构一致）
       return {
@@ -485,7 +558,7 @@ const GitHubService = {
         subjects: cfg.subjects || {},
         announcements: cfg.announcements || [],
         groups: cfg.groups || {},
-        studentRoster: cfg.studentRoster || {},
+        studentRoster: studentRoster,
         studentIdFormat: cfg.studentIdFormat || {},
         scoreReviews: cfg.scoreReviews || [],
         gradeNotifications: cfg.gradeNotifications || [],

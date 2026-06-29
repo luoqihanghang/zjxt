@@ -119,26 +119,47 @@ let _skipGitHubSync = false; // 防止循环
 async function loadDB() {
   // 1. 优先从双 Gist 加载（主 Gist 配置 + 业务 Gist 成绩）
   if (GitHubService.isConfigured()) {
-    const remote = await GitHubService.loadRemoteDB();
-    if (remote) {
-      localStorage.setItem(DB_KEY, JSON.stringify(remote));
-      return remote;
+    try {
+      const remote = await GitHubService.loadRemoteDB();
+      if (remote && remote.users && remote.users.length > 0) {
+        // 成功从 Gist 拉到了真实数据（至少有用户账号）
+        localStorage.setItem(DB_KEY, JSON.stringify(remote));
+        return remote;
+      }
+    } catch (e) {
+      console.log("[loadDB] Gist 加载失败，使用本地缓存:", e.message);
     }
   }
   // 2. 回退到本地浏览器缓存
   let db = localStorage.getItem(DB_KEY);
   if (!db) {
+    // 本地也没有缓存，创建默认数据
     db = initDefaultDB();
-    // 若 Gist 已配置，则同步默认数据上去
+    // 若 Gist 已配置，则同步默认数据上去（标记 skip 避免触发 saveDB 二次同步）
     if (GitHubService.isConfigured()) {
       _skipGitHubSync = true;
-      await GitHubService.saveRemoteDB(db);
-      _skipGitHubSync = false;
+      GitHubService.saveRemoteDB(db).catch((e) => {
+        console.log("[loadDB] 初始同步到 Gist 失败:", e.message);
+      }).finally(() => {
+        _skipGitHubSync = false;
+      });
     }
-    saveDB(db);
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
   } else {
-    try { db = JSON.parse(db); }
-    catch (e) { db = initDefaultDB(); saveDB(db); }
+    try {
+      const parsed = JSON.parse(db);
+      // 检查本地缓存是否包含真实数据（至少有用户账号）
+      if (parsed.users && parsed.users.length > 0) {
+        db = parsed;
+      } else {
+        // 本地缓存是空的初始化数据
+        db = initDefaultDB();
+        localStorage.setItem(DB_KEY, JSON.stringify(db));
+      }
+    } catch (e) {
+      db = initDefaultDB();
+      localStorage.setItem(DB_KEY, JSON.stringify(db));
+    }
   }
   return db;
 }
@@ -662,16 +683,21 @@ async function navigate(pageId) {
   // 切换页面时自动刷新最新数据（优先从 GitHub 拉取，保证多端数据同步）
   if (GitHubService.isConfigured()) {
     // 有 GitHub Sync 时，异步拉取远程最新数据
-    const remoteDB = await GitHubService.loadRemoteDB().catch(() => null);
-    if (remoteDB) {
-      DB = remoteDB;
-      saveDB(DB);
+    try {
+      const remoteDB = await GitHubService.loadRemoteDB();
+      // 只有当远程包含真实数据时才覆盖本地（避免用空数据冲掉本地）
+      if (remoteDB && remoteDB.users && remoteDB.users.length > 0) {
+        DB = remoteDB;
+        saveDB(DB);
+      }
+    } catch (e) {
+      console.log("[navigate] Gist 拉取失败，使用本地 DB:", e.message);
     }
   } else {
     // 无 GitHub Sync 时，从本地 localStorage 读取最新数据
     const savedDB = localStorage.getItem(DB_KEY);
     if (savedDB) {
-      try { 
+      try {
         DB = JSON.parse(savedDB);
         // 保持当前用户登录状态
         if (currentUser) {
