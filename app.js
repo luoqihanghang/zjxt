@@ -10,10 +10,14 @@ const fmtPct = (n) => (isFinite(n) ? (n * 100).toFixed(2) + "%" : "-");
 // HTML 转义，防止特殊字符破坏页面结构
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-// 根据用户角色过滤记录：学术用户可见所有记录，教师/班主任仅可见已确认记录
+// 根据用户角色过滤记录：学术用户可见所有记录，班主任可见本班所有记录，任课教师仅可见已确认记录
 const getVisibleRecords = (records) => {
   if (!currentUser || currentUser.role === "academic") return records;
-  // 非学术用户（班主任、任课教师）只能看到已确认的记录
+  // 班主任：可以看到自己班级的所有记录（包括待审核和已确认）
+  if (currentUser.role === "headteacher") {
+    return records.filter((r) => classNoEquals(r.classNo, currentUser.classNo));
+  }
+  // 任课教师：只能看到已确认的记录
   return records.filter((r) => r.status === "confirmed");
 };
 
@@ -662,10 +666,17 @@ async function navigate(pageId) {
       saveDB(DB);
     }
   } else {
-    // 无 GitHub Sync 时，从本地 localStorage 读取
+    // 无 GitHub Sync 时，从本地 localStorage 读取最新数据
     const savedDB = localStorage.getItem(DB_KEY);
     if (savedDB) {
-      try { DB = JSON.parse(savedDB); } catch (e) { /* 保持现有 DB */ }
+      try { 
+        DB = JSON.parse(savedDB);
+        // 保持当前用户登录状态
+        if (currentUser) {
+          const user = DB.users.find((u) => u.id === currentUser.id);
+          if (user) currentUser = user;
+        }
+      } catch (e) { /* 保持现有 DB */ }
     }
   }
 
@@ -1072,7 +1083,7 @@ function renderDashboard() {
 
     // 班级数据统计
     const classExams = DB.exams.filter(e => e.grade === grade);
-    const classRecords = DB.records.filter(r => r.grade === grade && r.classNo === classNo);
+    const classRecords = DB.records.filter(r => r.grade === grade && classNoEquals(r.classNo, classNo));
     const confirmedRecs = classRecords.filter(r => r.status === "confirmed").length;
 
     // 最近考试数据
@@ -1904,7 +1915,7 @@ function renderUploadScores() {
 
   // 各考试的审核状态（只看本班级）
   const examStatus = exams.map((e) => {
-    const recs = DB.records.filter((r) => r.examId === e.id && r.classNo === classNo);
+    const recs = DB.records.filter((r) => r.examId === e.id && classNoEquals(r.classNo, classNo));
     const total = recs.length;
     const confirmed = recs.filter((r) => r.status === "confirmed").length;
     // 统计各科目上传情况
@@ -3144,7 +3155,7 @@ function drawRanking(examId, grade, classFilter = "") {
   const isAcademic = currentUser.role === "academic";
   let allRecords = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   let records = allRecords;
-  if (classFilter) records = records.filter((r) => r.classNo === classFilter);
+  if (classFilter) records = records.filter((r) => classNoEquals(r.classNo, classFilter));
   if (records.length === 0) {
     $("rank_result").innerHTML = `<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">暂无成绩数据</div></div>`;
     return;
@@ -3345,7 +3356,7 @@ window.downloadRankingExcel = function (examId, grade, classFilter) {
   const subjects = DB.subjects[grade] || [];
   let allRecords = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   let records = allRecords;
-  if (classFilter) records = records.filter((r) => r.classNo === classFilter);
+  if (classFilter) records = records.filter((r) => classNoEquals(r.classNo, classFilter));
   if (records.length === 0) { showToast("无数据", "error"); return; }
 
   // 计算全校排名
@@ -3392,7 +3403,7 @@ window.downloadRankingExcel = function (examId, grade, classFilter) {
 function renderMyClassScores() {
   if (currentUser.role !== "headteacher") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
   const grade = currentUser.grade;
-  const classNo = currentUser.classNo;
+  const classNo = displayClassNo(currentUser.classNo) || currentUser.classNo;
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
 
   if (exams.length === 0) {
@@ -3420,7 +3431,7 @@ function renderMyClassScores() {
 function drawClassScores(examId, grade, classNo) {
   const subjects = DB.subjects[grade] || [];
   let allRecords = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
-  let records = allRecords.filter((r) => r.classNo === classNo);
+  let records = allRecords.filter((r) => classNoEquals(r.classNo, classNo));
   if (records.length === 0) {
     $("mc_result").innerHTML = `<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">本考试暂无数据</div><div class="es-tip">请等待教务端审核通过后再查看</div></div>`;
     return;
@@ -3489,7 +3500,7 @@ function renderDownloadScores() {
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>考试名称</th><th>日期</th><th>学生数</th><th>操作</th></tr></thead>
         <tbody>${exams.map((e) => {
-          const cnt = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === classNo)).length;
+          const cnt = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && classNoEquals(r.classNo, classNo))).length;
           return `<tr><td>${e.name}</td><td>${e.date}</td><td>${cnt}</td>
             <td><button class="btn btn-sm btn-primary" onclick="downloadRankingExcel('${e.id}','${grade}','${classNo}')" ${cnt === 0 ? "disabled" : ""}>⬇ 下载</button></td></tr>`;
         }).join("") || `<tr><td colspan="4"><div class="empty-state"><div class="es-tip">暂无考试</div></div></td></tr>`}</tbody>
@@ -5363,7 +5374,7 @@ function refreshHeadteacherAnalysis() {
   const selectedExam = exams.find((e) => e.id === examId) || exams[exams.length - 1];
   const subjects = DB.subjects[grade] || [];
 
-  const classRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.classNo === classNo));
+  const classRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && classNoEquals(r.classNo, classNo)));
   const gradeRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade));
   const totalFullScore = subjects.reduce((a, s) => a + (s.fullScore || 100), 0);
 
@@ -5548,7 +5559,7 @@ function renderHeadteacherActions(classRecs, gradeRecs, classStats, gradeStats, 
   const last2 = exams.slice(-2);
   if (last2.length >= 2) {
     const [prevExam, currExam] = last2;
-    const prevRecs = getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && r.classNo === classNo));
+    const prevRecs = getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && classNoEquals(r.classNo, classNo)));
     const prevAvg = prevRecs.length ? prevRecs.reduce((a, b) => a + b.total, 0) / prevRecs.length : 0;
     const trend = classAvg - prevAvg;
     if (trend > 5) {
@@ -5756,8 +5767,8 @@ function renderHeadteacherProgress(exams, selectedExam, grade, classNo, currentR
   }
 
   const [prevExam, currExam] = last2;
-  const prevRecs = getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && r.classNo === classNo));
-  const currRecs = getVisibleRecords(DB.records.filter((r) => r.examId === currExam.id && r.classNo === classNo));
+  const prevRecs = getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && classNoEquals(r.classNo, classNo)));
+  const currRecs = getVisibleRecords(DB.records.filter((r) => r.examId === currExam.id && classNoEquals(r.classNo, classNo)));
   const prevMap = {};
   prevRecs.forEach((r) => { prevMap[r.studentId] = r; });
 
@@ -5875,8 +5886,8 @@ function renderHeadteacherStudents(classRecs, exams, selectedExam, grade, classN
 
   if (last2.length >= 2) {
     const [prevExam, currExam] = last2;
-    const prevRecs = getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && r.classNo === classNo));
-    const currRecs = getVisibleRecords(DB.records.filter((r) => r.examId === currExam.id && r.classNo === classNo));
+    const prevRecs = getVisibleRecords(DB.records.filter((r) => r.examId === prevExam.id && classNoEquals(r.classNo, classNo)));
+    const currRecs = getVisibleRecords(DB.records.filter((r) => r.examId === currExam.id && classNoEquals(r.classNo, classNo)));
     const prevMap = {};
     prevRecs.forEach((r) => { prevMap[r.studentId] = r; });
     currRecs.forEach((r) => {
@@ -5974,7 +5985,7 @@ window.downloadHeadteacherAnalysis = function () {
   const selectedExam = exams.find((e) => e.id === selectedExamId) || exams[exams.length - 1];
   const totalFullScore = subjects.reduce((a, s) => a + (s.fullScore || 100), 0);
 
-  const classRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.classNo === classNo));
+  const classRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && classNoEquals(r.classNo, classNo)));
   const gradeRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade));
   const classStats = aggregateStats(classRecs, subjects);
   const gradeStats = aggregateStats(gradeRecs, subjects);
@@ -6073,7 +6084,7 @@ function renderMyScores() {
     const chartData = myClassesForSubject.map((c) => ({
       label: c + " " + subjectName,
       data: exams.map((e) => {
-        const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === c));
+        const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && classNoEquals(r.classNo, c)));
         const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
         if (!vals.length) return null;
         return +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
@@ -6106,7 +6117,7 @@ function renderMyScores() {
       const ds = myClassesForSubject.map((c) => ({
         label: c,
         data: exams.map((e) => {
-          const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === c));
+          const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && classNoEquals(r.classNo, c)));
           const vals = recs.map((r) => r.scores[sn]).filter((v) => v != null);
           if (!vals.length) return null;
           return +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2);
@@ -6122,7 +6133,7 @@ window._downloadMySubject = function (subjectName, grade, teacherId) {
   const subjectNames = [subjectName];
   const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))]
     .filter((c) => teacherTeaches(teacher, grade, c, subjectName));
-  const filtered = getVisibleRecords(DB.records.filter((r) => r.grade === grade && myClasses.indexOf(r.classNo) >= 0 && r.scores[subjectName] != null));
+  const filtered = getVisibleRecords(DB.records.filter((r) => r.grade === grade && myClasses.some((c) => classNoEquals(c, r.classNo)) && r.scores[subjectName] != null));
   const showStudentId = hasRoster(grade);
   const thId = showStudentId ? ["学号"] : [];
   const rows = [["考试", "班级", ...thId, "姓名", subjectName]];
@@ -6387,7 +6398,7 @@ function renderTeacherActions(myRecs, gradeRecs, myClassNos, subjectName, fullSc
 
   if (myClassNos.length > 1) {
     const classAvgs = myClassNos.map((c) => {
-      const recs = myRecs.filter((r) => r.classNo === c);
+      const recs = myRecs.filter((r) => classNoEquals(r.classNo, c));
       const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
       const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
       const stdDev = vals.length ? Math.sqrt(vals.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / vals.length) : 0;
@@ -6542,7 +6553,7 @@ function renderTeacherScoreSegments(myRecs, myClassNos, subjectName, fullScore, 
   ];
 
   function countByClass(recs, classNo) {
-    const cRecs = recs.filter((r) => r.classNo === classNo);
+    const cRecs = recs.filter((r) => classNoEquals(r.classNo, classNo));
     const vals = cRecs.map((r) => r.scores[subjectName]).filter((v) => v != null);
     return segments.map((seg) => vals.filter((v) => { const rate = v / fullScore; return rate >= seg.min && rate < seg.max; }).length);
   }
@@ -6602,7 +6613,7 @@ function renderTeacherScoreSegments(myRecs, myClassNos, subjectName, fullScore, 
 
 function renderTeacherHeatmap(myRecs, myClassNos, subjectName, gradeAvg) {
   const classData = myClassNos.map((c) => {
-    const recs = myRecs.filter((r) => r.classNo === c);
+    const recs = myRecs.filter((r) => classNoEquals(r.classNo, c));
     const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
     const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     const diff = +fmt(avg - gradeAvg, 1);
@@ -6702,7 +6713,7 @@ function renderTeacherProgress(exams, selectedExam, grade, myClassNos, subjectNa
 
 function renderTeacherSubjectPerf(myRecs, myClassNos, subjectName, fullScore, gradeAvg) {
   const rows = myClassNos.map((c) => {
-    const recs = myRecs.filter((r) => r.classNo === c);
+    const recs = myRecs.filter((r) => classNoEquals(r.classNo, c));
     const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
     const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     const excellent = vals.filter((v) => v / fullScore >= 0.9).length;
@@ -6879,7 +6890,7 @@ window.downloadTeacherAnalysis = function () {
   // Sheet 2: 各班表现
   const perfHeader = ["班级", "均分", "人数", "优秀人数", "优秀率", "良好人数", "良好率", "及格人数", "及格率", "不及格人数", "不及格率", "年级均分", "与年级差值"];
   const perfData = myClasses.map((c) => {
-    const recs = myRecs.filter((r) => r.classNo === c);
+    const recs = myRecs.filter((r) => classNoEquals(r.classNo, c));
     const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
     const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
     const excellent = vals.filter((v) => v / fullScore >= 0.9).length;
@@ -6905,7 +6916,7 @@ window.downloadTeacherAnalysis = function () {
   ];
   const segHeader = ["班级", ...segments.map((s) => s.name + " 人数"), ...segments.map((s) => s.name + " 占比")];
   const segData = myClasses.map((c) => {
-    const recs = myRecs.filter((r) => r.classNo === c);
+    const recs = myRecs.filter((r) => classNoEquals(r.classNo, c));
     const vals = recs.map((r) => r.scores[subjectName]).filter((v) => v != null);
     const total = Math.max(vals.length, 1);
     const row = [c];
@@ -7207,7 +7218,7 @@ function cmpRenderStudentTab(grade, subjects, selectedExams, examLabels, role) {
   const firstMap = {};
   getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
 
-  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo)));
+  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || classNoEquals(r.classNo, classNo))));
   const students = lastRecs.map((r) => {
     const first = firstMap[r.studentId];
     const firstTotal = first && typeof first.total === 'number' ? first.total : null;
@@ -7355,7 +7366,7 @@ function cmpRenderSubjectTab(grade, subjects, selectedExams, examLabels, role) {
 
   subjects.forEach((s) => {
     const examAverages = selectedExams.map((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
       const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
       return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
     });
@@ -7383,7 +7394,7 @@ function cmpRenderSubjectTab(grade, subjects, selectedExams, examLabels, role) {
         <tbody>`;
 
     selectedExams.forEach((e) => {
-      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+      const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
       if (recs.length) {
         const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
         const avg = vals.length ? +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-";
@@ -7442,7 +7453,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     const totalDatasets = [{
       label: classNo || "全年级",
       data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
         if (!recs.length) return null;
         return +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
       })
@@ -7453,7 +7464,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     const passDatasets = [{
       label: classNo || "全年级",
       data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
         if (!recs.length) return null;
         const passLine = subjects[0]?.pass || 60;
         const passCount = recs.filter((r) => r.total >= passLine).length;
@@ -7466,7 +7477,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     const excDatasets = [{
       label: classNo || "全年级",
       data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
         if (!recs.length) return null;
         const excLine = subjects[0]?.excellent || 90;
         const excCount = recs.filter((r) => r.total >= excLine).length;
@@ -7479,7 +7490,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     const stdDatasets = [{
       label: classNo || "全年级",
       data: selectedExams.map((e) => {
-        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+        const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
         if (!recs.length) return null;
         return +fmt(mathStdDev(recs.map((r) => r.total)), 2);
       })
@@ -7491,7 +7502,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
       const subjDatasets = subjects.map((s) => ({
         label: s.name,
         data: selectedExams.map((e) => {
-          const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo));
+          const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
           if (!recs.length) return null;
           const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
           return vals.length ? +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : null;
@@ -7509,7 +7520,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     const classAvgDatasets = classes.map((c) => ({
       label: c,
       data: selectedExams.map((e) => {
-        const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.classNo === c));
+        const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && classNoEquals(r.classNo, c)));
         if (!recs.length) return null;
         const totals = recs.map((r) => r.total);
         return +fmt(totals.reduce((a, b) => a + b, 0) / totals.length, 2);
@@ -7530,7 +7541,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     const firstMap = {};
     getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
 
-    const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo)));
+    const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || classNoEquals(r.classNo, classNo))));
     const students = lastRecs.map((r) => {
       const first = firstMap[r.studentId];
       const firstTotal = first && typeof first.total === 'number' ? first.total : null;
@@ -7580,7 +7591,7 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
       const subjDatasets = subjects.map((s) => ({
         label: s.name,
         data: selectedExams.map((e) => {
-          const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)));
+          const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo))));
           if (!recs.length) return null;
           const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
           return vals.length ? +fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : null;
@@ -7686,7 +7697,7 @@ window.downloadExamCompare = function () {
   const lastExam = selectedExams[selectedExams.length - 1];
   const firstMap = {};
   getVisibleRecords(DB.records.filter((r) => r.examId === firstExam.id && r.grade === grade)).forEach((r) => { firstMap[r.studentId] = r; });
-  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || r.classNo === classNo)));
+  const lastRecs = getVisibleRecords(DB.records.filter((r) => r.examId === lastExam.id && (!classNo || classNoEquals(r.classNo, classNo))));
   const studentHeader = ["学号", "姓名", `${firstExam.name}总分`, `${lastExam.name}总分`, "涨幅", "首次排名", "最近排名", "排名变化"];
   const allFirst = getVisibleRecords(DB.records.filter((x) => x.examId === firstExam.id && x.grade === grade)).sort((a, b) => b.total - a.total);
   const allLast = getVisibleRecords(DB.records.filter((x) => x.examId === lastExam.id && x.grade === grade)).sort((a, b) => b.total - a.total);
@@ -7707,7 +7718,7 @@ window.downloadExamCompare = function () {
   const subjData = subjects.map((s) => {
     const row = [s.name];
     selectedExams.forEach((e) => {
-      const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo)));
+      const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo))));
       if (recs.length) {
         const st = aggregateStats(recs, [s])[s.name];
         row.push(fmt(st.avg, 2), fmtPct(st.passPct), fmtPct(st.excellentPct), fmtPct(st.goodPct), fmtPct(st.lowPct), st.total);
@@ -7722,9 +7733,9 @@ window.downloadExamCompare = function () {
   // Sheet 4: 趋势数据
   const trendHeader = ["指标", ...examLabels];
   const trendData = [
-    ["总分均分", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo))); return recs.length ? fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2) : "-"; })],
-    ["总分标准差", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo))); return recs.length ? fmt(mathStdDev(recs.map((r) => r.total)), 2) : "-"; })],
-    ...subjects.map((s) => [s.name + "均分", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || r.classNo === classNo))); const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number"); return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-"; })])
+    ["总分均分", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)))); return recs.length ? fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2) : "-"; })],
+    ["总分标准差", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)))); return recs.length ? fmt(mathStdDev(recs.map((r) => r.total)), 2) : "-"; })],
+    ...subjects.map((s) => [s.name + "均分", ...selectedExams.map((e) => { const recs = getVisibleRecords(DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)))); const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number"); return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-"; })])
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([trendHeader, ...trendData]), "趋势数据");
 
@@ -7882,7 +7893,7 @@ function renderGroupManage() {
     groupNames.forEach((gn) => {
       const members = groupMap[gn];
       const memberIds = members.map((m) => m.studentId);
-      const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+      const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
       if (recs.length > 0) {
         const totals = recs.map((r) => r.total);
         const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
@@ -7911,7 +7922,7 @@ function renderGroupManage() {
     html += `</tr></thead><tbody>`;
 
     groups.forEach((g) => {
-      const rec = DB.records.find((r) => r.examId === examId && r.classNo === classNo && r.studentId === g.studentId);
+      const rec = DB.records.find((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && r.studentId === g.studentId);
       const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
       html += `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td><td><b>${rec?.total || "-"}</b></td>`;
       subjects.forEach((s) => {
@@ -7931,7 +7942,7 @@ function renderGroupManage() {
         data: groupNames.map((gn) => {
           const members = groupMap[gn];
           const memberIds = members.map((m) => m.studentId);
-          const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+          const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
           if (recs.length > 0) return +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
           return null;
         })
@@ -7958,7 +7969,7 @@ function renderGroupManage() {
     groupNames.forEach((gn) => {
       const members = groupMap[gn];
       const memberIds = members.map((m) => m.studentId);
-      const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+      const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
       if (recs.length > 0) {
         const totals = recs.map((r) => r.total);
         const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
@@ -7980,7 +7991,7 @@ function renderGroupManage() {
     // Sheet 2: 成员明细
     const memberHeader = ["学号", "姓名", "小组", "总分", ...subjects.map((s) => s.name)];
     const memberData = groups.map((g) => {
-      const rec = DB.records.find((r) => r.examId === examId && r.classNo === classNo && r.studentId === g.studentId);
+      const rec = DB.records.find((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && r.studentId === g.studentId);
       const scores = subjects.map((s) => rec?.scores[s.name] != null ? rec.scores[s.name] : "-");
       return [g.studentId, g.studentName, g.groupName, rec?.total || "-", ...scores];
     });
@@ -8099,7 +8110,7 @@ function refreshGroupScores() {
       groupNames.forEach((gn) => {
         const members = groupMap[gn];
         const memberIds = members.map((m) => m.studentId);
-        const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+        const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
         if (recs.length > 0) {
           const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
           if (scores.length > 0) {
@@ -8144,7 +8155,7 @@ function refreshGroupScores() {
           data: groupNames.map((gn) => {
             const members = groupMap[gn];
             const memberIds = members.map((m) => m.studentId);
-            const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+            const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
             const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
             if (scores.length > 0) return +fmt(scores.reduce((a, b) => a + b, 0) / scores.length, 2);
             return null;
@@ -8187,7 +8198,7 @@ window.downloadGroupAnalysis = function () {
       groupNames.forEach((gn) => {
         const members = groupMap[gn];
         const memberIds = members.map((m) => m.studentId);
-        const recs = DB.records.filter((r) => r.examId === examId && r.classNo === classNo && memberIds.includes(r.studentId));
+        const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
         if (recs.length > 0) {
           const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
           if (scores.length > 0) {
@@ -9500,19 +9511,6 @@ window.confirmOneScore = function (recordId) {
   saveDB(DB);
   showToast("已确认", "success");
   if (typeof refreshScoreReview === "function") refreshScoreReview();
-  if (typeof drawClassScores === "function") {
-    const grade = currentUser.grade;
-    const classNo = currentUser.classNo;
-    const examId = $("mc_exam")?.value;
-    if (examId) drawClassScores(examId, grade, classNo);
-  }
-  if (typeof drawRanking === "function") {
-    const grade = currentUser.grade;
-    const examId = $("r_exam")?.value;
-    const classSel = $("r_class");
-    const classFilter = classSel ? classSel.value : "";
-    if (examId) drawRanking(examId, grade, classFilter);
-  }
 };
 
 // 退回单个学生成绩（删除记录）
@@ -9528,19 +9526,6 @@ window.rejectOneScore = function (recordId) {
     saveDB(DB);
     showToast(`已退回 ${record.studentName} 的成绩`, "success");
     if (typeof refreshScoreReview === "function") refreshScoreReview();
-    if (typeof drawClassScores === "function") {
-      const grade = currentUser.grade;
-      const classNo = currentUser.classNo;
-      const examId = $("mc_exam")?.value;
-      if (examId) drawClassScores(examId, grade, classNo);
-    }
-    if (typeof drawRanking === "function") {
-      const grade = currentUser.grade;
-      const examId = $("r_exam")?.value;
-      const classSel = $("r_class");
-      const classFilter = classSel ? classSel.value : "";
-      if (examId) drawRanking(examId, grade, classFilter);
-    }
   });
 };
 
@@ -9548,14 +9533,14 @@ window.rejectOneScore = function (recordId) {
 window.rejectClassScores = function (examId, classNo) {
   const exam = DB.exams.find((e) => e.id === examId);
   const grade = currentUser.grade;
-  const target = DB.records.filter((r) => r.examId === examId && r.grade === grade && r.classNo === classNo);
+  const target = DB.records.filter((r) => r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo));
   if (target.length === 0) { showToast("没有可退回的记录", "info"); return; }
 
   showModal("确认退回班级", `<div>
     <p>将<b style="color:#c0392b">删除</b> <b>${esc(exam.name)}</b> 中 <b>${esc(classNo)}</b> 的 <b>${target.length}</b> 条成绩记录。</p>
     <p style="color:#c0392b;margin-top:8px">⚠️ 该班级班主任需要重新上传。</p>
   </div>`, "🗑️ 确认退回", () => {
-    DB.records = DB.records.filter((r) => !(r.examId === examId && r.grade === grade && r.classNo === classNo));
+    DB.records = DB.records.filter((r) => !(r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo)));
     saveDB(DB);
     showToast(`已退回 ${target.length} 条记录`, "success");
     renderScoreReview();
@@ -9571,7 +9556,7 @@ window.toggleAllReview = function (checkbox, classNo) {
 window.confirmClassScores = function (examId, classNo) {
   const grade = currentUser.grade;
   const targets = DB.records.filter((r) =>
-    r.examId === examId && r.grade === grade && r.classNo === classNo && r.status === "pending");
+    r.examId === examId && r.grade === grade && classNoEquals(r.classNo, classNo) && r.status === "pending");
   if (targets.length === 0) { showToast("没有待审核的成绩", "info"); return; }
 
   showModal("确认批量通过", `<div>
@@ -10852,4 +10837,47 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btn) btn.style.display = "none";
   if (panel) panel.classList.add("hidden");
 });
+
+// 监听 localStorage 变化，自动同步数据（多标签页数据同步）
+window.addEventListener("storage", (e) => {
+  if (e.key === DB_KEY && e.newValue && currentUser) {
+    try {
+      DB = JSON.parse(e.newValue);
+      // 保持当前用户登录状态
+      const user = DB.users.find((u) => u.id === currentUser.id);
+      if (user) currentUser = user;
+      // 重新渲染当前页面
+      if (currentPage) {
+        const render = PAGE_RENDERERS[currentPage];
+        if (render) render();
+      }
+    } catch (err) {
+      console.log("数据同步失败:", err);
+    }
+  }
+});
+
+// 定时刷新数据（每30秒自动从 localStorage 刷新一次，确保数据最新）
+setInterval(() => {
+  if (!currentUser) return;
+  const savedDB = localStorage.getItem(DB_KEY);
+  if (!savedDB) return;
+  try {
+    const newDB = JSON.parse(savedDB);
+    // 比较记录数量或已确认记录数量，有变化才更新
+    const oldConfirmed = (DB.records || []).filter(r => r.status === "confirmed").length;
+    const newConfirmed = (newDB.records || []).filter(r => r.status === "confirmed").length;
+    if (newDB.records && (newDB.records.length !== (DB.records || []).length || newConfirmed !== oldConfirmed)) {
+      DB = newDB;
+      const user = DB.users.find((u) => u.id === currentUser.id);
+      if (user) currentUser = user;
+      if (currentPage) {
+        const render = PAGE_RENDERERS[currentPage];
+        if (render) render();
+      }
+    }
+  } catch (err) {
+    // 忽略解析错误
+  }
+}, 30000);
 
