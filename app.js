@@ -15,7 +15,9 @@ const getVisibleRecords = (records) => {
   if (!currentUser || currentUser.role === "academic") return records;
   // 班主任：可以看到自己班级的所有记录（包括待审核和已确认）
   if (currentUser.role === "headteacher") {
-    return records.filter((r) => classNoEquals(r.classNo, currentUser.classNo));
+    const filtered = records.filter((r) => classNoEquals(r.classNo, currentUser.classNo));
+    console.log("[getVisibleRecords] 班主任过滤", { role: currentUser.role, classNo: currentUser.classNo, inputRecords: records.length, outputRecords: filtered.length });
+    return filtered;
   }
   // 任课教师：只能看到已确认的记录
   return records.filter((r) => r.status === "confirmed");
@@ -3429,9 +3431,12 @@ function renderMyClassScores() {
 }
 
 function drawClassScores(examId, grade, classNo) {
+  console.log("[drawClassScores] 开始渲染成绩", { examId, grade, classNo, currentUser: currentUser?.classNo, recordsCount: DB.records.length });
   const subjects = DB.subjects[grade] || [];
   let allRecords = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
+  console.log("[drawClassScores] 过滤后记录数", allRecords.length, "班级过滤:", classNo);
   let records = allRecords.filter((r) => classNoEquals(r.classNo, classNo));
+  console.log("[drawClassScores] 最终记录数", records.length);
   if (records.length === 0) {
     $("mc_result").innerHTML = `<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">本考试暂无数据</div><div class="es-tip">请等待教务端审核通过后再查看</div></div>`;
     return;
