@@ -3305,14 +3305,30 @@ function aggregateStats(records, subjects) {
   });
   const totals = records.map((r) => r.total).filter((v) => typeof v === "number" && !isNaN(v));
   const n = totals.length;
+  const totalFullScore = subjects.reduce((s, x) => s + x.fullScore, 0);
+  const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
+  const totalGoodLine = subjects.reduce((s, x) => s + x.good, 0);
+  const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
+  const totalLowLine = subjects.reduce((s, x) => s + x.low, 0);
+  const excellent = totals.filter((v) => v >= totalExcellentLine).length;
+  const good = totals.filter((v) => v >= totalGoodLine && v < totalExcellentLine).length;
+  const passCount = totals.filter((v) => v >= totalPassLine).length;
+  const low = totals.filter((v) => v <= totalLowLine).length;
+  const max = n > 0 ? Math.max(...totals) : 0;
+  const min = n > 0 ? Math.min(...totals) : 0;
   stats["总分"] = {
     total: n,
     sum: totals.reduce((a, b) => a + b, 0),
     avg: n > 0 ? totals.reduce((a, b) => a + b, 0) / n : 0,
-    max: n > 0 ? Math.max(...totals) : 0,
-    min: n > 0 ? Math.min(...totals) : 0,
-    maxCount: n > 0 ? totals.filter((v) => v === Math.max(...totals)).length : 0,
-    minCount: n > 0 ? totals.filter((v) => v === Math.min(...totals)).length : 0
+    max, min,
+    excellent, good, low, passCount,
+    excellentPct: n > 0 ? excellent / n : 0,
+    goodPct: n > 0 ? good / n : 0,
+    passPct: n > 0 ? passCount / n : 0,
+    lowPct: n > 0 ? low / n : 0,
+    maxCount: n > 0 ? totals.filter((v) => v === max).length : 0,
+    minCount: n > 0 ? totals.filter((v) => v === min).length : 0,
+    fullScore: totalFullScore
   };
   return stats;
 }
@@ -4669,7 +4685,19 @@ function renderAcademicAnalysis() {
 
     <!-- ⑧ 需要关注的学生 -->
     <div class="card analysis-section" id="aa_section8">
-      <div class="section-title"><span class="st-icon">👨‍🎓</span>八、需要关注的学生（前50人）</div>
+      <div class="section-title">
+        <span class="st-icon">👨‍🎓</span>八、需要关注的学生
+        <span class="st-actions">
+          <select id="aa_stu_class_filter" style="padding:4px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-right:8px">
+            <option value="all">全部班级</option>
+          </select>
+          <span style="font-size:13px;color:var(--text-light);margin-right:4px">显示</span>
+          <input type="number" id="aa_stu_limit" value="50" min="1" max="500" style="width:60px;padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:13px;margin-right:4px">
+          <span style="font-size:13px;color:var(--text-light);margin-right:10px">人</span>
+          <button class="btn btn-sm btn-primary" onclick="downloadWatchStudents('grade')">📥 年级下载</button>
+          <button class="btn btn-sm btn-success" onclick="downloadWatchStudents('class')">📥 班级下载</button>
+        </span>
+      </div>
       <div class="student-tabs" id="aa_student_tabs"></div>
       <div id="aa_students_grid"></div>
     </div>
@@ -4729,6 +4757,23 @@ function refreshAcademicAnalysis() {
   renderSubjectPerformance(stats, subjects);
 
   // ===== ⑧ 需要关注的学生 =====
+  // 初始化班级筛选下拉框
+  const classList = [...new Set(allRecs.map((r) => r.classNo))].sort();
+  const classFilterSel = $("aa_stu_class_filter");
+  if (classFilterSel) {
+    const currentVal = classFilterSel.value;
+    classFilterSel.innerHTML = `<option value="all">全部班级</option>` + classList.map((c) => `<option value="${c}">${c}</option>`).join("");
+    classFilterSel.value = currentVal || "all";
+    if (!classFilterSel._bound) {
+      classFilterSel.addEventListener("change", () => renderStudentsToWatch(allRecs, exams, selectedExam, grade, subjects));
+      classFilterSel._bound = true;
+    }
+  }
+  const limitInput = $("aa_stu_limit");
+  if (limitInput && !limitInput._bound) {
+    limitInput.addEventListener("change", () => renderStudentsToWatch(allRecs, exams, selectedExam, grade, subjects));
+    limitInput._bound = true;
+  }
   renderStudentsToWatch(allRecs, exams, selectedExam, grade, subjects);
 }
 
@@ -5030,11 +5075,11 @@ function renderScoreSegments(records, subjects, totalFullScore) {
     return;
   }
   const segments = [
-    { name: "优秀（≥90%）", min: 0.9, color: "#28a745" },
-    { name: "良好（80%~90%）", min: 0.8, max: 0.9, color: "#17a2b8" },
-    { name: "中等（70%~80%）", min: 0.7, max: 0.8, color: "#3b7ddd" },
-    { name: "及格（60%~70%）", min: 0.6, max: 0.7, color: "#ffc107" },
-    { name: "不及格（<60%）", max: 0.6, color: "#dc3545" }
+    { name: "高分段（≥90%）", min: 0.9, color: "#28a745" },
+    { name: "中高段（80%~90%）", min: 0.8, max: 0.9, color: "#17a2b8" },
+    { name: "中等段（70%~80%）", min: 0.7, max: 0.8, color: "#3b7ddd" },
+    { name: "中低段（60%~70%）", min: 0.6, max: 0.7, color: "#ffc107" },
+    { name: "低分段（<60%）", max: 0.6, color: "#dc3545" }
   ];
 
   const classList = [...new Set(records.map((r) => r.classNo))].sort();
@@ -5110,10 +5155,10 @@ function renderScoreSegments(records, subjects, totalFullScore) {
   $("aa_segments").innerHTML = html;
 
   $("aa_segments_anno").innerHTML = `
-    <h5>📝 分数段注解</h5>
-    <p>• <b>高分段对比</b>：${highList[0]?.class} 优秀率最高（${highList[0] ? (highList[0].count / (highList[0].total || 1) * 100).toFixed(1) : 0}%，${highList[0]?.count || 0}人）；${highList[highList.length - 1]?.class} 优秀率最低（${highList[highList.length - 1] ? (highList[highList.length - 1].count / (highList[highList.length - 1].total || 1) * 100).toFixed(1) : 0}%，${highList[highList.length - 1]?.count || 0}人）</p>
-    <p>• <b>不及格对比</b>：${lowList[lowList.length - 1]?.class} 不及格率最低（${lowList[lowList.length - 1] ? (lowList[lowList.length - 1].count / (lowList[lowList.length - 1].total || 1) * 100).toFixed(1) : 0}%，${lowList[lowList.length - 1]?.count || 0}人）；${lowList[0]?.class} 不及格率最高（${lowList[0] ? (lowList[0].count / (lowList[0].total || 1) * 100).toFixed(1) : 0}%，${lowList[0]?.count || 0}人）</p>
-    <p>• <b>整体判断</b>：${highSeg.count + segData[1].count} 人达到良好以上（${((highSeg.count + segData[1].count) / records.length * 100).toFixed(1)}%），${lowSeg.count} 人不及格（${(lowSeg.count / records.length * 100).toFixed(1)}%），呈${segData[2].count > records.length * 0.3 ? "橄榄型（中间大两头小）" : "偏态分布"}。</p>
+    <h5>📝 分数段注解（按得分率划分）</h5>
+    <p>• <b>高分段对比</b>：${highList[0]?.class} 高分段占比最高（${highList[0] ? (highList[0].count / (highList[0].total || 1) * 100).toFixed(1) : 0}%，${highList[0]?.count || 0}人）；${highList[highList.length - 1]?.class} 高分段占比最低（${highList[highList.length - 1] ? (highList[highList.length - 1].count / (highList[highList.length - 1].total || 1) * 100).toFixed(1) : 0}%，${highList[highList.length - 1]?.count || 0}人）</p>
+    <p>• <b>低分段对比</b>：${lowList[lowList.length - 1]?.class} 低分段占比最低（${lowList[lowList.length - 1] ? (lowList[lowList.length - 1].count / (lowList[lowList.length - 1].total || 1) * 100).toFixed(1) : 0}%，${lowList[lowList.length - 1]?.count || 0}人）；${lowList[0]?.class} 低分段占比最高（${lowList[0] ? (lowList[0].count / (lowList[0].total || 1) * 100).toFixed(1) : 0}%，${lowList[0]?.count || 0}人）</p>
+    <p>• <b>整体判断</b>：${highSeg.count + segData[1].count} 人达到中高段以上（得分率≥80%，${((highSeg.count + segData[1].count) / records.length * 100).toFixed(1)}%），${lowSeg.count} 人在低分段（得分率<60%，${(lowSeg.count / records.length * 100).toFixed(1)}%），呈${segData[2].count > records.length * 0.3 ? "橄榄型（中间大两头小）" : "偏态分布"}。</p>
   `;
 }
 
@@ -5339,62 +5384,89 @@ function renderStudentsToWatch(records, exams, selectedExam, grade, subjects) {
     $("aa_students_grid").innerHTML = `<div class="empty-state"><div class="es-tip">暂无学生数据</div></div>`;
     return;
   }
+
+  // 获取筛选条件
+  const classFilter = $("aa_stu_class_filter")?.value || "all";
+  const displayLimit = parseInt($("aa_stu_limit")?.value) || 50;
+
+  // 根据班级筛选记录
+  const filteredRecords = classFilter === "all" ? records : records.filter(r => r.classNo === classFilter);
+
   const examIdx = exams.findIndex((e) => e.id === selectedExam.id);
   const prevExam = examIdx > 0 ? exams[examIdx - 1] : null;
   const prevRecs = prevExam ? DB.records.filter((r) => r.examId === prevExam.id && r.grade === grade) : [];
   const prevMap = {};
   prevRecs.forEach((r) => { prevMap[r.studentId] = r; });
 
-  // 计算总分满分
+  // 计算总分满分和及格线
   const totalFullScore = subjects.reduce((s, x) => s + x.fullScore, 0);
+  const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
 
   // 1) 偏科生：有学科优秀且有学科不及格
-  const partialStudents = records.map((r) => {
+  const allPartialStudents = filteredRecords.map((r) => {
     const excellentSubjects = subjects.filter((s) => (r.scores[s.name] ?? 0) >= s.excellent);
     const failSubjects = subjects.filter((s) => (r.scores[s.name] ?? 0) < s.pass);
     const score = excellentSubjects.length * 10 + failSubjects.length * 10;
     return { ...r, excellentSubjects, failSubjects, partialScore: score };
   }).filter((r) => r.excellentSubjects.length > 0 && r.failSubjects.length > 0)
-    .sort((a, b) => b.partialScore - a.partialScore)
-    .slice(0, 50);
+    .sort((a, b) => b.partialScore - a.partialScore);
+  const partialStudents = allPartialStudents.slice(0, displayLimit);
 
-  // 2) 未达线（总分<60%）
-  const belowStudents = records
-    .filter((r) => r.total < totalFullScore * 0.6)
-    .sort((a, b) => a.total - b.total)
-    .slice(0, 50);
+  // 2) 未达线（总分未达及格线）
+  const allBelowStudents = filteredRecords
+    .filter((r) => r.total < totalPassLine)
+    .sort((a, b) => a.total - b.total);
+  const belowStudents = allBelowStudents.slice(0, displayLimit);
 
   // 3) 进步明显
+  let allProgressStudents = [];
   let progressStudents = [];
   if (prevExam) {
-    progressStudents = records.map((r) => {
+    allProgressStudents = filteredRecords.map((r) => {
       const prev = prevMap[r.studentId];
       if (!prev) return null;
       return { ...r, prevTotal: prev.total, diff: r.total - prev.total };
     }).filter(Boolean)
       .filter((r) => r.diff >= 20)
-      .sort((a, b) => b.diff - a.diff)
-      .slice(0, 50);
+      .sort((a, b) => b.diff - a.diff);
+    progressStudents = allProgressStudents.slice(0, displayLimit);
   }
 
   // 4) 退步明显
+  let allRegressStudents = [];
   let regressStudents = [];
   if (prevExam) {
-    regressStudents = records.map((r) => {
+    allRegressStudents = filteredRecords.map((r) => {
       const prev = prevMap[r.studentId];
       if (!prev) return null;
       return { ...r, prevTotal: prev.total, diff: r.total - prev.total };
     }).filter(Boolean)
       .filter((r) => r.diff <= -20)
-      .sort((a, b) => a.diff - b.diff)
-      .slice(0, 50);
+      .sort((a, b) => a.diff - b.diff);
+    regressStudents = allRegressStudents.slice(0, displayLimit);
   }
 
+  // 存储全部数据供下载使用
+  window._aaWatchStudentsData = {
+    partial: allPartialStudents,
+    below: allBelowStudents,
+    progress: allProgressStudents,
+    regress: allRegressStudents
+  };
+  window._aaWatchStudentsInfo = {
+    grade,
+    examName: selectedExam.name,
+    subjects,
+    totalFullScore,
+    totalPassLine,
+    classFilter
+  };
+
   const tabs = [
-    { id: "partial", name: "偏科生", count: partialStudents.length, data: partialStudents, badge: "badge-partial" },
-    { id: "below", name: "未达线", count: belowStudents.length, data: belowStudents, badge: "badge-below" },
-    { id: "progress", name: "进步明显", count: progressStudents.length, data: progressStudents, badge: "badge-progress" },
-    { id: "regress", name: "退步明显", count: regressStudents.length, data: regressStudents, badge: "badge-regress" }
+    { id: "partial", name: "偏科生", count: allPartialStudents.length, data: partialStudents, badge: "badge-partial" },
+    { id: "below", name: "未达线", count: allBelowStudents.length, data: belowStudents, badge: "badge-below" },
+    { id: "progress", name: "进步明显", count: allProgressStudents.length, data: progressStudents, badge: "badge-progress" },
+    { id: "regress", name: "退步明显", count: allRegressStudents.length, data: regressStudents, badge: "badge-regress" }
   ];
 
   $("aa_student_tabs").innerHTML = tabs.map((t) => `
@@ -5489,9 +5561,140 @@ function renderStudentsToWatch(records, exams, selectedExam, grade, subjects) {
       }).join("")}
     </div>
     <div style="text-align:center;color:var(--text-light);font-size:12px;margin-top:12px">
-      显示前 ${Math.min(students.length, 50)} 名学生 / 共 ${students.length} 人
+      显示前 ${students.length} 名学生 / 共 ${activeTab.count} 人${classFilter !== 'all' ? `（${classFilter}）` : ''}
     </div>
   `;
+}
+
+// 关注学生批量下载功能
+window.downloadWatchStudents = function (type) {
+  const data = window._aaWatchStudentsData;
+  const info = window._aaWatchStudentsInfo;
+
+  if (!data || !info) {
+    showToast("请先选择考试并加载数据", "warning");
+    return;
+  }
+
+  const { grade, examName, subjects, totalFullScore, totalPassLine, classFilter } = info;
+  const activeTabId = _aaActiveStudentTab || "partial";
+
+  let students = data[activeTabId] || [];
+  const tabNames = { partial: "偏科生", below: "未达线", progress: "进步明显", regress: "退步明显" };
+  const tabName = tabNames[activeTabId] || "关注学生";
+
+  // 如果是班级下载，需要按班级分组
+  if (type === "class") {
+    const classGroups = {};
+    const classList = [...new Set(students.map(r => r.classNo))].sort();
+
+    classList.forEach(c => {
+      const classStudents = students.filter(r => r.classNo === c);
+      if (classStudents.length > 0) {
+        classGroups[c] = classStudents;
+      }
+    });
+
+    const wb = XLSX.utils.book_new();
+    const sheetNames = [];
+    const classFilterSel = $("aa_stu_class_filter");
+    const currentClass = classFilterSel?.value || "all";
+
+    // 如果当前显示的是某个班级，只下载该班级
+    if (currentClass !== "all") {
+      const classStudents = classGroups[currentClass] || [];
+      if (classStudents.length === 0) {
+        showToast("该班级暂无" + tabName, "warning");
+        return;
+      }
+      const sheetData = buildStudentSheetData(classStudents, subjects, totalFullScore, totalPassLine, activeTabId, examName, currentClass);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), currentClass + " " + tabName);
+      sheetNames.push(currentClass);
+    } else {
+      // 下载所有班级，每个班级一个sheet
+      Object.keys(classGroups).forEach((c, idx) => {
+        const classStudents = classGroups[c];
+        const sheetData = buildStudentSheetData(classStudents, subjects, totalFullScore, totalPassLine, activeTabId, examName, c);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), c + " " + tabName);
+        sheetNames.push(c);
+      });
+    }
+
+    if (sheetNames.length === 0) {
+      showToast("暂无数据可下载", "warning");
+      return;
+    }
+
+    XLSX.writeFile(wb, `${grade}_${examName}_${tabName}_班级下载.xlsx`);
+    showToast(`已下载 ${sheetNames.length} 个班级数据`, "success");
+  } else {
+    // 年级下载，所有学生一个sheet
+    if (students.length === 0) {
+      showToast("暂无" + tabName, "warning");
+      return;
+    }
+
+    const sheetData = buildStudentSheetData(students, subjects, totalFullScore, totalPassLine, activeTabId, examName, "全年级");
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), tabName);
+    XLSX.writeFile(wb, `${grade}_${examName}_${tabName}_年级下载.xlsx`);
+    showToast(`已下载 ${students.length} 名学生数据`, "success");
+  }
+};
+
+// 构建学生表格数据
+function buildStudentSheetData(students, subjects, totalFullScore, totalPassLine, tabType, examName, className) {
+  // 根据类型构建动态表头
+  let header = ["班级", "学号", "姓名", "总分", "得分率", "及格线", "距及格线", ...subjects.map(s => s.name)];
+  let extraHeaders = [];
+  let extraValues = [];
+
+  if (tabType === "partial") {
+    extraHeaders = ["优势学科", "薄弱学科"];
+  } else if (tabType === "progress") {
+    extraHeaders = ["上次总分", "进步幅度"];
+  } else if (tabType === "regress") {
+    extraHeaders = ["上次总分", "退步幅度"];
+  } else {
+    extraHeaders = ["不及格科目"];
+  }
+
+  header = [...header, ...extraHeaders];
+
+  const rows = students.map(r => {
+    const failSubs = subjects.filter(s => (r.scores[s.name] ?? 0) < s.pass);
+    const diff = r.total - totalPassLine;
+
+    if (tabType === "partial") {
+      const excSubs = subjects.filter(s => (r.scores[s.name] ?? 0) >= s.excellent);
+      extraValues = [excSubs.map(s => s.name).join("、"), failSubs.map(s => s.name).join("、")];
+    } else if (tabType === "progress") {
+      extraValues = [r.prevTotal, "+" + r.diff + "分"];
+    } else if (tabType === "regress") {
+      extraValues = [r.prevTotal, r.diff + "分"];
+    } else {
+      extraValues = [failSubs.length + "门"];
+    }
+
+    return [
+      r.classNo,
+      r.studentId,
+      r.studentName,
+      r.total,
+      (r.total / totalFullScore * 100).toFixed(1) + "%",
+      totalPassLine,
+      (diff >= 0 ? "+" : "") + diff,
+      ...subjects.map(s => r.scores[s.name] ?? "-"),
+      ...extraValues
+    ];
+  });
+
+  // 添加表头说明行
+  const typeNames = { partial: "偏科生", below: "未达线", progress: "进步明显", regress: "退步明显" };
+  const titleRow = [`${className} ${examName} 关注学生列表`];
+  const noteRow = [`类型：${typeNames[tabType] || "关注学生"}，共 ${students.length} 人`];
+
+  return [titleRow, noteRow, header, ...rows];
 }
 
 // 下载教务分析报告
@@ -7766,26 +7969,26 @@ function cmpDrawCharts(grade, subjects, selectedExams, examLabels, role, activeT
     drawChart("cmp_trend_total", "line", examLabels, totalDatasets);
 
     // 及格率趋势
+    const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
     const passDatasets = [{
       label: classNo || "全年级",
       data: selectedExams.map((e) => {
         const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
         if (!recs.length) return null;
-        const passLine = subjects[0]?.pass || 60;
-        const passCount = recs.filter((r) => r.total >= passLine).length;
+        const passCount = recs.filter((r) => r.total >= totalPassLine).length;
         return +fmt(passCount / recs.length * 100, 1);
       })
     }];
     drawChart("cmp_trend_pass", "line", examLabels, passDatasets);
 
     // 优秀率趋势
+    const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
     const excDatasets = [{
       label: classNo || "全年级",
       data: selectedExams.map((e) => {
         const recs = DB.records.filter((r) => r.examId === e.id && r.grade === grade && (!classNo || classNoEquals(r.classNo, classNo)));
         if (!recs.length) return null;
-        const excLine = subjects[0]?.excellent || 90;
-        const excCount = recs.filter((r) => r.total >= excLine).length;
+        const excCount = recs.filter((r) => r.total >= totalExcellentLine).length;
         return +fmt(excCount / recs.length * 100, 1);
       })
     }];
@@ -10430,10 +10633,11 @@ function generateRateAnswer(ctx) {
     html += `• 优秀率：<b>${fmt(st.excellentPct * 100, 1)}%</b>（${st.excellent}人，得分率≥90%）<br>`;
     html += `• 良好率：${fmt(st.goodPct * 100, 1)}%（${st.good}人，80%-90%）<br>`;
     html += `• 及格率：${fmt(st.passPct * 100, 1)}%（${st.passCount}人，≥60%）<br>`;
-    html += `• 不及格率：${fmt(st.lowPct * 100, 1)}%（${st.total - st.passCount}人）`;
+    const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
+    html += `• 不及格率：${fmt(failPct * 100, 1)}%（${st.total - st.passCount}人）`;
     html += `</div>`;
     const rateLevel = st.excellentPct > 0.3 ? "优秀率偏高，整体水平较好" :
-                      st.lowPct > 0.2 ? "不及格率偏高，基础薄弱学生多" :
+                      failPct > 0.2 ? "不及格率偏高，基础薄弱学生多" :
                       "分布相对均衡";
     html += `<div class="emc-tip">💡 ${rateLevel}。建议关注中等生向良好生转化。</div>`;
   } else {
@@ -10441,14 +10645,19 @@ function generateRateAnswer(ctx) {
     html += `<table><tr><th>科目</th><th>优秀率</th><th>良好率</th><th>及格率</th><th>不及格率</th></tr>`;
     subjects.forEach((s) => {
       const st = stats[s.name];
-      html += `<tr><td>${s.name}</td><td>${fmt(st.excellentPct * 100, 1)}%</td><td>${fmt(st.goodPct * 100, 1)}%</td><td>${fmt(st.passPct * 100, 1)}%</td><td>${fmt(st.lowPct * 100, 1)}%</td></tr>`;
+      const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
+      html += `<tr><td>${s.name}</td><td>${fmt(st.excellentPct * 100, 1)}%</td><td>${fmt(st.goodPct * 100, 1)}%</td><td>${fmt(st.passPct * 100, 1)}%</td><td>${fmt(failPct * 100, 1)}%</td></tr>`;
     });
     html += `</table>`;
     const sortedByExc = subjects.map(s => ({name:s.name, exc:stats[s.name].excellentPct})).sort((a,b)=>b.exc-a.exc);
-    const sortedByLow = subjects.map(s => ({name:s.name, low:stats[s.name].lowPct})).sort((a,b)=>b.low-a.low);
+    const sortedByFail = subjects.map(s => {
+      const st = stats[s.name];
+      const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
+      return {name:s.name, fail:failPct};
+    }).sort((a,b)=>b.fail-a.fail);
     html += `<div class="emc-highlight">`;
     html += `🏆 优秀率最高：${sortedByExc[0].name}（${fmt(sortedByExc[0].exc*100,1)}%）<br>`;
-    html += `⚠️ 不及格率最高：${sortedByLow[0].name}（${fmt(sortedByLow[0].low*100,1)}%）`;
+    html += `⚠️ 不及格率最高：${sortedByFail[0].name}（${fmt(sortedByFail[0].fail*100,1)}%）`;
     html += `</div>`;
   }
   return eaResp("📊 成绩率分析", html);
@@ -10456,15 +10665,15 @@ function generateRateAnswer(ctx) {
 
 function computeClassStats(allRecs, subjects, totalFullScore) {
   const classList = [...new Set(allRecs.map(r => r.classNo))].sort();
+  const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
+  const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
   const result = {};
   classList.forEach(c => {
     const recs = allRecs.filter(r => r.classNo === c);
     const totals = recs.map(r => r.total).filter(v => typeof v === "number");
     const avg = totals.length ? totals.reduce((a,b)=>a+b,0) / totals.length : 0;
-    const passLine = totalFullScore * 0.6;
-    const passCount = totals.filter(t => t >= passLine).length;
-    const excLine = totalFullScore * 0.9;
-    const excCount = totals.filter(t => t >= excLine).length;
+    const passCount = totals.filter(t => t >= totalPassLine).length;
+    const excCount = totals.filter(t => t >= totalExcellentLine).length;
     const variance = totals.length ? totals.reduce((s,t) => s + Math.pow(t-avg,2), 0) / totals.length : 0;
     const stdDev = Math.sqrt(variance);
     result[c] = { avg, passPct: totals.length ? passCount/totals.length : 0,
@@ -10503,6 +10712,8 @@ function generateClassRankingAnswer(ctx) {
 function generateStudentAnswer(ctx) {
   const { q, allRecs, subjects, exams, selectedExam, grade, qSubject, qStudent } = ctx;
   const totalFullScore = subjects.reduce((s, x) => s + x.fullScore, 0);
+  const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
+  const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
 
   // 偏科生识别
   const partialStudents = allRecs.map(r => {
@@ -10513,12 +10724,12 @@ function generateStudentAnswer(ctx) {
   }).filter(r => r.excellentSubjects.length > 0 && r.failSubjects.length > 0)
     .sort((a, b) => b.partialScore - a.partialScore).slice(0, 15);
 
-  // 不及格学生
-  const failStudents = allRecs.filter(r => r.total / totalFullScore < 0.6)
+  // 不及格学生（总分未达及格线）
+  const failStudents = allRecs.filter(r => r.total < totalPassLine)
     .sort((a, b) => a.total - b.total).slice(0, 15);
 
-  // 高分学生
-  const topStudents = allRecs.filter(r => r.total / totalFullScore >= 0.9)
+  // 高分学生（总分达到优秀线）
+  const topStudents = allRecs.filter(r => r.total >= totalExcellentLine)
     .sort((a, b) => b.total - a.total).slice(0, 10);
 
   let html = '';
@@ -10599,11 +10810,15 @@ function generateStudentAnswer(ctx) {
 function generateSubjectAnswer(ctx) {
   const { subjects, stats, allRecs, qSubject, totalFullScore } = ctx;
 
-  const sortedByRate = subjects.map(s => ({
-    name: s.name, rate: stats[s.name].avg / s.fullScore * 100,
-    avg: stats[s.name].avg, fullScore: s.fullScore,
-    excPct: stats[s.name].excellentPct, lowPct: stats[s.name].lowPct
-  })).sort((a, b) => b.rate - a.rate);
+  const sortedByRate = subjects.map(s => {
+    const st = stats[s.name];
+    const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
+    return {
+      name: s.name, rate: st.avg / s.fullScore * 100,
+      avg: st.avg, fullScore: s.fullScore,
+      excPct: st.excellentPct, failPct: failPct
+    };
+  }).sort((a, b) => b.rate - a.rate);
 
   let html = '';
 
@@ -10611,6 +10826,7 @@ function generateSubjectAnswer(ctx) {
     const s = subjects.find(x => x.name === qSubject);
     const st = stats[qSubject];
     if (s) {
+      const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
       html += `<p>「${qSubject}」学科深度分析：</p>`;
       html += `<div class="emc-highlight">`;
       html += `• 均分：${fmt(st.avg, 1)} / ${s.fullScore}（得分率 <b>${fmt(st.avg/s.fullScore*100,1)}%</b>）<br>`;
@@ -10620,7 +10836,7 @@ function generateSubjectAnswer(ctx) {
       html += `• 优秀率：${fmt(st.excellentPct*100,1)}%（${st.excellent}人）<br>`;
       html += `• 良好率：${fmt(st.goodPct*100,1)}%（${st.good}人）<br>`;
       html += `• 及格率：${fmt(st.passPct*100,1)}%（${st.passCount}人）<br>`;
-      html += `• 不及格率：${fmt(st.lowPct*100,1)}%（${st.total - st.passCount}人）`;
+      html += `• 不及格率：${fmt(failPct*100,1)}%（${st.total - st.passCount}人）`;
       html += `</div>`;
 
       // 班级间对比
@@ -10645,7 +10861,7 @@ function generateSubjectAnswer(ctx) {
   html += `<p>各科目得分率排名：</p>`;
   html += `<table><tr><th>排名</th><th>科目</th><th>均分</th><th>满分</th><th>得分率</th><th>优秀率</th><th>不及格率</th></tr>`;
   sortedByRate.forEach((s, i) => {
-    html += `<tr><td>${i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</td><td><b>${s.name}</b></td><td>${fmt(s.avg,1)}</td><td>${s.fullScore}</td><td>${fmt(s.rate,1)}%</td><td>${fmt(s.excPct*100,1)}%</td><td>${fmt(s.lowPct*100,1)}%</td></tr>`;
+    html += `<tr><td>${i===0?"🥇":i===1?"🥈":i===2?"🥉":i+1}</td><td><b>${s.name}</b></td><td>${fmt(s.avg,1)}</td><td>${s.fullScore}</td><td>${fmt(s.rate,1)}%</td><td>${fmt(s.excPct*100,1)}%</td><td>${fmt(s.failPct*100,1)}%</td></tr>`;
   });
   html += `</table>`;
 
@@ -10706,11 +10922,11 @@ function generateDistributionAnswer(ctx) {
   const cv = avg > 0 ? stdDev / avg * 100 : 0;
 
   const segs = [
-    { name: "优秀(≥90%)", min: totalFullScore * 0.9, max: totalFullScore + 1, color: "success" },
-    { name: "良好(80%-90%)", min: totalFullScore * 0.8, max: totalFullScore * 0.9, color: "info" },
-    { name: "中等(70%-80%)", min: totalFullScore * 0.7, max: totalFullScore * 0.8, color: "primary" },
-    { name: "及格(60%-70%)", min: totalFullScore * 0.6, max: totalFullScore * 0.7, color: "warning" },
-    { name: "不及格(<60%)", min: 0, max: totalFullScore * 0.6, color: "danger" }
+    { name: "高分段(≥90%)", min: totalFullScore * 0.9, max: totalFullScore + 1, color: "success" },
+    { name: "中高段(80%-90%)", min: totalFullScore * 0.8, max: totalFullScore * 0.9, color: "info" },
+    { name: "中等段(70%-80%)", min: totalFullScore * 0.7, max: totalFullScore * 0.8, color: "primary" },
+    { name: "中低段(60%-70%)", min: totalFullScore * 0.6, max: totalFullScore * 0.7, color: "warning" },
+    { name: "低分段(<60%)", min: 0, max: totalFullScore * 0.6, color: "danger" }
   ];
 
   let html = `<p>全年级 ${allRecs.length} 名学生总分分布：</p>`;
@@ -10952,13 +11168,14 @@ function generateSuggestionAnswer(ctx) {
   if (qSubject) {
     const st = stats[qSubject];
     const s = subjects.find(x => x.name === qSubject);
+    const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
     html += `<p>「${qSubject}」教学改进建议：</p>`;
     html += `<div class="emc-highlight">`;
     if (st.excellentPct < 0.1) {
       html += `🔴 优秀率偏低（${fmt(st.excellentPct*100,1)}%）：建议加强难题训练，拓展拔高内容。<br>`;
     }
-    if (st.lowPct > 0.2) {
-      html += `🔴 不及格率偏高（${fmt(st.lowPct*100,1)}%）：建议回归基础，降低起点，分层辅导后进生。<br>`;
+    if (failPct > 0.2) {
+      html += `🔴 不及格率偏高（${fmt(failPct*100,1)}%）：建议回归基础，降低起点，分层辅导后进生。<br>`;
     }
     if (st.avg / s.fullScore < 0.6) {
       html += `🔴 整体得分率不足60%：可能是试卷过难或基础薄弱，需重新评估教学进度。<br>`;
@@ -10973,13 +11190,16 @@ function generateSuggestionAnswer(ctx) {
 
   html += `<p>基于本次考试数据的教学建议：</p>`;
 
-  const sortedByLow = subjects.map(s => ({name:s.name, low:stats[s.name].lowPct, avg:stats[s.name].avg/s.fullScore*100}))
-    .sort((a,b) => b.low - a.low);
+  const sortedByFail = subjects.map(s => {
+    const st = stats[s.name];
+    const failPct = st.total > 0 ? (st.total - st.passCount) / st.total : 0;
+    return {name:s.name, fail:failPct, avg:stats[s.name].avg/s.fullScore*100};
+  }).sort((a,b) => b.fail - a.fail);
 
   html += `<div class="emc-highlight">`;
   html += `<b>一、学科层面</b><br>`;
-  html += `• 重点关注：${sortedByLow[0].name}（不及格率 ${fmt(sortedByLow[0].low*100,1)}%），建议开展教研会诊<br>`;
-  html += `• 优势学科：${sortedByLow[sortedByLow.length-1].name} 可总结经验，在年级推广`;
+  html += `• 重点关注：${sortedByFail[0].name}（不及格率 ${fmt(sortedByFail[0].fail*100,1)}%），建议开展教研会诊<br>`;
+  html += `• 优势学科：${sortedByFail[sortedByFail.length-1].name} 可总结经验，在年级推广`;
   html += `</div>`;
 
   html += `<div class="emc-highlight">`;
