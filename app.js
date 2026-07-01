@@ -267,6 +267,11 @@ const NAV_MENUS = {
       ]
     },
     {
+      group: "排课管理", icon: "📅", items: [
+        { id: "schedule_system", icon: "📅", text: "排课系统" }
+      ]
+    },
+    {
       group: "个人中心", icon: "👤", items: [
         { id: "account_profile", icon: "🔐", text: "修改我的密码" }
       ]
@@ -308,6 +313,11 @@ const NAV_MENUS = {
     {
       group: "全年组通知", icon: "🔔", items: [
         { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
+      ]
+    },
+    {
+      group: "排课管理", icon: "📅", items: [
+        { id: "schedule_system", icon: "📅", text: "排课系统" }
       ]
     },
     {
@@ -839,6 +849,15 @@ async function navigate(pageId) {
   setTimeout(() => { checkGradeNotifications(); }, 400);
 }
 
+// ========== 排课系统 ==========
+function renderScheduleSystem() {
+  $("pageContent").innerHTML = `
+    <div style="height: calc(100vh - 120px); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+      <iframe src="智教排课.html" style="width: 100%; height: 100%; border: none;" id="scheduleIframe"></iframe>
+    </div>
+  `;
+}
+
 // ========== 个人中心：修改密码 ==========
 function renderAccountProfile() {
   const u = currentUser;
@@ -968,6 +987,7 @@ const PAGE_RENDERERS = {
   academic_analysis: renderAcademicAnalysis,
   score_review: renderScoreReview,
   student_roster: renderStudentRoster,
+  schedule_system: renderScheduleSystem,
   upload_scores: renderUploadScores,
   my_class_scores: renderMyClassScores,
   download_scores: renderDownloadScores,

@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>智教排课系统 - 智能教务管理</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        }
+        body {
+            background: #f0f2f5;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .app-container {
+            display: flex;
+            height: 100vh;
+            width: 100%;
+        }
+        .sidebar {
+            width: 280px;
+            background: #1e2a3a;
+            color: #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.1);
+            z-index: 10;
+            overflow-y: auto;
+        }
+        .logo-area {
+            padding: 24px 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border-bottom: 1px solid #334155;
+            background: #0f172a;
+            color: #60a5fa;
+        }
+        .nav-menu {
+            flex: 1;
+            padding: 16px 0;
+        }
+        .nav-item {
+            padding: 10px 20px;
+            margin: 2px 12px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .nav-item:hover {
+            background: #334155;
+            color: white;
+        }
+        .nav-item.active {
+            background: #3b82f6;
+            color: white;
+            box-shadow: 0 2px 6px rgba(59,130,246,0.3);
+        }
+        .sub-nav {
+            margin-left: 28px;
+            margin-top: 4px;
+            margin-bottom: 8px;
+        }
+        .sub-nav-item {
+            padding: 8px 16px;
+            margin: 2px 0;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: 0.2s;
+        }
+        .sub-nav-item:hover {
+            background: #2d3a4b;
+        }
+        .sub-nav-item.active-sub {
+            background: #2563eb;
+            color: white;
+        }
+        .parent-nav {
+            font-weight: 600;
+        }
+        .footer-btns {
+            padding: 20px 16px;
+            border-top: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .btn-outline-light {
+            background: transparent;
+            border: 1px solid #5b6e8c;
+            color: #cbd5e6;
+            padding: 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            text-align: center;
+            font-size: 0.9rem;
+            transition: 0.2s;
+        }
+        .btn-outline-light:hover {
+            background: #2d3a4b;
+            border-color: #60a5fa;
+            color: white;
+        }
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 28px;
+            background: #f8fafc;
+        }
+        .card-panel {
+            background: white;
+            border-radius: 20px;
+            padding: 20px 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            margin-bottom: 24px;
+        }
+        .section-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            border-left: 5px solid #3b82f6;
+            padding-left: 14px;
+            color: #0f172a;
+        }
+        .rule-item {
+            background: #f8fafc;
+            padding: 10px 14px;
+            border-radius: 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            border: 1px solid #e2e8f0;
+        }
+        .period-check-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .period-check-group label {
+            background: #eef2ff;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: 0.1s;
+        }
+        .period-check-group label:hover {
+            background: #d9e6ff;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+        th, td {
+            border: 1px solid #e2e8f0;
+            padding: 10px 8px;
+            text-align: center;
+            vertical-align: middle;
+        }
+        th {
+            background: #f1f5f9;
+            font-weight: 600;
+            color: #1e293b;
+        }
+        .btn-sm {
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: #eef2ff;
+            border: none;
+            cursor: pointer;
+            font-size: 0.75rem;
+            margin: 0 2px;
+        }
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-success {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 6px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+        .btn-secondary {
+            background: #64748b;
+            color: white;
+        }
+        input, select {
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            outline: none;
+        }
+        .class-check-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-width: 280px;
+        }
+        .badge {
+            background: #e2e8f0;
+            padding: 2px 10px;
+            border-radius: 30px;
+            font-size: 0.7rem;
+        }
+        .timetable-cell {
+            cursor: pointer;
+            transition: 0.1s;
+            background: #ffffff;
+            vertical-align: middle;
+            padding: 4px;
+        }
+        .timetable-cell:hover {
+            background: #dbeafe;
+        }
+        .conflict-cell {
+            background: #fee2e2;
+            box-shadow: inset 0 0 0 1px #ef4444;
+        }
+        .cell-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            line-height: 1.4;
+            min-width: 70px;
+        }
+        .cell-subject {
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: #1e40af;
+        }
+        .cell-teacher {
+            font-size: 0.75rem;
+            color: #475569;
+            margin-top: 2px;
+        }
+        .cell-empty {
+            color: #9ca3af;
+            font-style: italic;
+            font-size: 0.8rem;
+        }
+        .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .grid-input-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .weekday-fixed-badge {
+            background: #d9f0ec;
+            padding: 5px 12px;
+            border-radius: 32px;
+            font-weight: 500;
+        }
+        .modal-mask {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-card {
+            background: white;
+            border-radius: 20px;
+            width: 420px;
+            padding: 24px;
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+        }
+        .rule-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="app-container">
+        <div class="sidebar">
+            <div class="logo-area">📚 智教排课系统</div>
+            <div class="nav-menu">
+                <div class="nav-item" :class="{active: activeMain === 'teachers'}" @click="setMainMenu('teachers')">
+                    <span>👥</span> 教师设置
+                </div>
+                <div class="nav-item parent-nav" :class="{active: activeMain === 'rules'}" @click="toggleRulesSub">
+                    <span>⚙️</span> 规则设置
+                    <span style="margin-left:auto;">{{ showRulesSub ? '▼' : '▶' }}</span>
+                </div>
+                <div class="sub-nav" v-show="showRulesSub">
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'forbid'}" @click="setRuleSubMenu('forbid')">🚫 禁止上课</div>
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'avoidConsecutive'}" @click="setRuleSubMenu('avoidConsecutive')">⛔ 避免连上</div>
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'priority'}" @click="setRuleSubMenu('priority')">⭐ 课程优先级</div>
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'maxDaily'}" @click="setRuleSubMenu('maxDaily')">📅 教师日课时上限</div>
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'subjectDailyLimit'}" @click="setRuleSubMenu('subjectDailyLimit')">📖 科目日课时上限</div>
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'subjectPeriodRange'}" @click="setRuleSubMenu('subjectPeriodRange')">📌 科目节次范围</div>
+                    <div class="sub-nav-item" :class="{active: activeSubRule === 'subjectHourType'}" @click="setRuleSubMenu('subjectHourType')">📊 课时类型规则</div>
+                </div>
+                <div class="nav-item" :class="{active: activeMain === 'scheduleSetting'}" @click="setMainMenu('scheduleSetting')">
+                    <span>📆</span> 课表设置
+                </div>
+                <div class="nav-item" :class="{active: activeMain === 'timetable'}" @click="setMainMenu('timetable')">
+                    <span>📅</span> 课表生成
+                </div>
+                <div class="nav-item" :class="{active: activeMain === 'classTimetable'}" @click="setMainMenu('classTimetable')">
+                    <span>🏫</span> 班级课表
+                </div>
+            </div>
+            <div class="footer-btns">
+                <button class="btn-outline-light" @click="exportProject">📦 导出工程文件</button>
+                <label class="btn-outline-light" style="display:block; text-align:center; cursor:pointer;">📂 导入工程文件
+                    <input type="file" accept=".json" style="display:none" @change="importProject">
+                </label>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <!-- 教师设置（增加保存按钮） -->
+            <div v-if="activeMain === 'teachers'">
+                <div class="card-panel">
+                    <div class="section-title">👩‍🏫 教师管理</div>
+                    <div class="flex-between">
+                        <div><button class="btn-primary" @click="addTeacher">+ 添加教师</button></div>
+                        <button class="btn-success" @click="saveTeachersSettings">💾 保存设置</button>
+                    </div>
+                    <table style="margin-top: 16px;">
+                        <thead><tr><th>姓名</th><th>任教科目</th><th>任教班级 (可多选)</th><th>周课时数</th><th>班主任</th><th>带班主任班级</th><th>操作</th></thead>
+                        <tbody>
+                            <tr v-for="(t, idx) in teachers" :key="t.id">
+                                <td><input v-model="t.name" style="width:90px"></td>
+                                <td><input v-model="t.subject" style="width:100px"></td>
+                                <td><div class="class-check-group"><label v-for="cls in classList" :key="cls" style="font-size:12px"><input type="checkbox" :value="cls" v-model="t.classes"> {{cls}}</label></div></td>
+                                <td><input type="number" v-model.number="t.weeklyHours" style="width:70px" min="0"></td>
+                                <td><input type="checkbox" v-model="t.isHomeroomTeacher"></td>
+                                <td><select v-model="t.homeroomClass" :disabled="!t.isHomeroomTeacher"><option value="">--</option><option v-for="cls in classList" :key="cls" :value="cls">{{cls}}</option></select></td>
+                                <td><button class="btn-sm btn-danger" @click="deleteTeacher(idx)">删除</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 规则子页面们（每个子类已有保存按钮，保持不变） -->
+            <div v-if="activeMain === 'rules' && activeSubRule === 'forbid'">
+                <div class="card-panel"><div class="section-title">🚫 禁止上课规则</div>
+                <div class="rule-header"><button class="btn-primary" @click="addTypedRule('forbid')">+ 添加禁止规则</button><button class="btn-success" @click="saveRulesToast('禁止上课')">💾 保存本类规则</button></div>
+                <div v-for="rule in rulesByType('forbid')" :key="rule.id" class="rule-item">
+                    <select v-model="rule.teacherId"><option value="">--教师--</option><option v-for="t in teachers" :value="t.id">{{t.name}}</option></select>
+                    <select v-model="rule.weekdayIdx"><option v-for="(w,wi) in weekdays" :value="wi">{{w}}</option></select>
+                    <select v-model="rule.periodIdx"><option v-for="(p,pi) in periods" :value="pi">{{p.name}}</option></select>
+                    <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                </div>
+                <div v-if="rulesByType('forbid').length===0" class="badge">暂无规则</div></div>
+            </div>
+            <div v-if="activeMain === 'rules' && activeSubRule === 'avoidConsecutive'">
+                <div class="card-panel"><div class="section-title">⛔ 避免连上规则</div>
+                <div class="rule-header"><button class="btn-primary" @click="addTypedRule('avoidConsecutive')">+ 添加</button><button class="btn-success" @click="saveRulesToast('避免连上')">💾 保存</button></div>
+                <div v-for="rule in rulesByType('avoidConsecutive')" :key="rule.id" class="rule-item">
+                    <select v-model="rule.teacherId"><option value="">--全体教师--</option><option v-for="t in teachers" :value="t.id">{{t.name}}</option></select>
+                    <span>最大连续:</span><input type="number" v-model.number="rule.maxConsecutive" style="width:70px">
+                    <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                </div>
+                <div v-if="rulesByType('avoidConsecutive').length===0" class="badge">暂无规则</div></div>
+            </div>
+            <div v-if="activeMain === 'rules' && activeSubRule === 'priority'">
+                <div class="card-panel"><div class="section-title">⭐ 课程优先级</div>
+                <div class="rule-header"><button class="btn-primary" @click="addTypedRule('priority')">+ 添加</button><button class="btn-success" @click="saveRulesToast('优先级')">💾 保存</button></div>
+                <div v-for="rule in rulesByType('priority')" :key="rule.id" class="rule-item">
+                    <input v-model="rule.subject" placeholder="科目"> <span>优先级:</span><input type="number" v-model.number="rule.priorityVal" style="width:70px">
+                    <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                </div>
+                <div v-if="rulesByType('priority').length===0" class="badge">暂无规则</div></div>
+            </div>
+            <div v-if="activeMain === 'rules' && activeSubRule === 'maxDaily'">
+                <div class="card-panel"><div class="section-title">📅 教师日课时上限</div>
+                <div class="rule-header"><button class="btn-primary" @click="addTypedRule('maxDaily')">+ 添加</button><button class="btn-success" @click="saveRulesToast('日课时上限')">💾 保存</button></div>
+                <div v-for="rule in rulesByType('maxDaily')" :key="rule.id" class="rule-item">
+                    <select v-model="rule.teacherId"><option value="">--教师--</option><option v-for="t in teachers" :value="t.id">{{t.name}}</option></select>
+                    <span>每日最大:</span><input type="number" v-model.number="rule.dailyMax" style="width:70px">
+                    <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                </div>
+                <div v-if="rulesByType('maxDaily').length===0" class="badge">暂无规则</div></div>
+            </div>
+            <div v-if="activeMain === 'rules' && activeSubRule === 'subjectDailyLimit'">
+                <div class="card-panel"><div class="section-title">📖 科目日课时上限</div>
+                <div class="rule-header"><button class="btn-primary" @click="addTypedRule('subjectDailyLimit')">+ 添加</button><button class="btn-success" @click="saveRulesToast('科目日上限')">💾 保存</button></div>
+                <div v-for="rule in rulesByType('subjectDailyLimit')" :key="rule.id" class="rule-item">
+                    <input v-model="rule.subject" placeholder="科目"> <span>每天每班最多:</span><input type="number" v-model.number="rule.dailyLimit" style="width:70px">
+                    <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                </div>
+                <div v-if="rulesByType('subjectDailyLimit').length===0" class="badge">暂无规则</div></div>
+            </div>
+            <div v-if="activeMain === 'rules' && activeSubRule === 'subjectPeriodRange'">
+                <div class="card-panel">
+                    <div class="section-title">📌 科目节次范围 (指定科目可以上课的节次)</div>
+                    <div class="rule-header">
+                        <button class="btn-primary" @click="addTypedRule('subjectPeriodRange')">+ 添加规则</button>
+                        <button class="btn-success" @click="saveRulesToast('科目节次范围')">💾 保存本类规则</button>
+                    </div>
+                    <div v-for="rule in rulesByType('subjectPeriodRange')" :key="rule.id" class="rule-item" style="flex-direction:column; align-items:flex-start;">
+                        <div style="display:flex; gap:12px; flex-wrap:wrap; width:100%;">
+                            <span>科目:</span>
+                            <input v-model="rule.subject" placeholder="科目名称" style="width:140px;">
+                            <span>允许的节次 (多选):</span>
+                            <div class="period-check-group">
+                                <label v-for="(p, pIdx) in periods" :key="pIdx">
+                                    <input type="checkbox" :value="pIdx" v-model="rule.allowedPeriodIndices"> {{ p.name }}
+                                </label>
+                            </div>
+                            <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                        </div>
+                        <div class="badge" style="margin-top:6px;">💡 勾选允许上课的节次，未勾选的节次该科目不可排课</div>
+                    </div>
+                    <div v-if="rulesByType('subjectPeriodRange').length === 0" class="badge">暂无规则，点击添加</div>
+                </div>
+            </div>
+
+            <div v-if="activeMain === 'rules' && activeSubRule === 'subjectHourType'">
+                <div class="card-panel">
+                    <div class="section-title">📊 课时类型规则 (设置科目计入课时的方式)</div>
+                    <div class="rule-header">
+                        <button class="btn-primary" @click="addTypedRule('subjectHourType')">+ 添加规则</button>
+                        <button class="btn-success" @click="saveRulesToast('课时类型')">💾 保存本类规则</button>
+                    </div>
+                    <div class="badge" style="margin-bottom:12px;">💡 <strong>课时型</strong>：计入教师周课时，受周课时数限制 &nbsp;|&nbsp; <strong>次数型</strong>：不计入周课时（如课后服务），每班必排，按次数分配</div>
+                    <div v-for="rule in rulesByType('subjectHourType')" :key="rule.id" class="rule-item" style="flex-direction:column; align-items:flex-start; gap:10px;">
+                        <div style="display:flex; gap:12px; flex-wrap:wrap; width:100%; align-items:center;">
+                            <span>科目:</span>
+                            <input v-model="rule.subject" placeholder="科目名称" style="width:140px;">
+                            <span>计算方式:</span>
+                            <select v-model="rule.hourType">
+                                <option value="hour">课时型 (计入周课时)</option>
+                                <option value="count">次数型 (不计课时，每班必排)</option>
+                            </select>
+                            <button class="btn-sm btn-danger" @click="deleteRuleById(rule.id)">删除</button>
+                        </div>
+                        <div v-if="rule.hourType === 'count'" style="display:flex; gap:16px; flex-wrap:wrap; width:100%; align-items:center; padding-left:10px; border-left:3px solid #60a5fa;">
+                            <span>每班每周次数:</span>
+                            <input type="number" v-model.number="rule.countPerClass" style="width:70px" min="1">
+                            <span>分配策略:</span>
+                            <select v-model="rule.assignStrategy">
+                                <option value="lightLoad">优先课少的老师</option>
+                                <option value="homeroomFirst">班主任优先 (自己班优先)</option>
+                                <option value="balance">均衡分配</option>
+                                <option value="random">随机分配</option>
+                            </select>
+                            <span>每人最多带班数:</span>
+                            <input type="number" v-model.number="rule.maxClassesPerTeacher" style="width:70px" min="0">
+                            <span class="badge">0表示不限</span>
+                        </div>
+                    </div>
+                    <div v-if="rulesByType('subjectHourType').length === 0" class="badge">暂无规则，默认所有科目均为课时型</div>
+                </div>
+            </div>
+
+            <!-- 课表设置（增加保存按钮） -->
+            <div v-if="activeMain === 'scheduleSetting'">
+                <div class="card-panel">
+                    <div class="section-title">📅 课表框架设置</div>
+                    <div class="flex-between">
+                        <div></div>
+                        <button class="btn-success" @click="saveScheduleSettings">💾 保存课表框架</button>
+                    </div>
+                    <div><strong>星期 (固定周一至周五)</strong></div>
+                    <div class="grid-input-row"><span v-for="(w,idx) in weekdays" :key="idx" class="weekday-fixed-badge">{{w}}</span><span class="badge">✅ 系统默认</span></div>
+                    <div><strong>节次管理 (可重命名/增删)</strong><button class="btn-sm" @click="addPeriod">+ 增加节次</button></div>
+                    <div class="grid-input-row"><span v-for="(p,idx) in periods" :key="idx" class="badge"><input v-model="p.name" style="width:80px"> <button @click="removePeriod(idx)">❌</button></span></div>
+                    <div><strong>班级管理</strong><button class="btn-sm" @click="addClass">+ 增加班级</button></div>
+                    <div class="grid-input-row"><span v-for="(cls,idx) in classList" :key="idx" class="badge">{{cls}} <button @click="removeClass(idx)">❌</button></span></div>
+                    <div class="badge">⚠️ 修改框架后请重新【自动排课】以保证课表内容匹配当前结构</div>
+                </div>
+            </div>
+
+            <!-- 课表生成 -->
+            <div v-if="activeMain === 'timetable'">
+                <div class="card-panel">
+                    <div class="section-title">📖 智能课表 · 学科 / 教师</div>
+                    <div class="flex-between">
+                        <div>
+                            <button class="btn-primary" @click="autoGenerateTimetable">🎲 自动排课</button>
+                            <button class="btn-secondary" style="margin-left:10px;" @click="refreshTimetableView">🔄 刷新</button>
+                            <button class="btn-secondary" style="margin-left:10px;" @click="exportToExcel">📎 导出Excel</button>
+                            <span class="badge">💡 单击单元格手动调课</span>
+                        </div>
+                    </div>
+                    <div style="overflow-x:auto; margin-top:20px;">
+                        <table>
+                            <thead><tr><th>星期</th><th>节次</th><th v-for="cls in classList">{{ cls }}</th></tr></thead>
+                            <tbody>
+                                <template v-for="(week, wIdx) in weekdays" :key="wIdx">
+                                    <tr v-for="(p, pIdx) in periods" :key="`${wIdx}_${pIdx}`">
+                                        <td v-if="pIdx === 0" :rowspan="periods.length" style="background:#fef9e3; font-weight:bold;">{{ week }}</td>
+                                        <td>{{ p.name }}</td>
+                                        <td v-for="cls in classList" :key="cls" :class="{'timetable-cell': true, 'conflict-cell': isConflictCell(wIdx, pIdx, cls)}" @click="openManualAdjust(wIdx, pIdx, cls)">
+                                            <div v-if="getTeacherByCell(wIdx, pIdx, cls)" class="cell-content">
+                                                <div class="cell-subject">{{ getTeacherByCell(wIdx, pIdx, cls).subject }}</div>
+                                                <div class="cell-teacher">{{ getTeacherByCell(wIdx, pIdx, cls).name }}</div>
+                                            </div>
+                                            <div v-else class="cell-empty">⚡未排</div>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div v-if="lastConflictMsg" class="badge" style="margin-top:16px; background:#fee2e2; color:#b91c1c; padding:8px;">⚠️ {{ lastConflictMsg }}</div>
+                </div>
+            </div>
+
+            <!-- 班级课表 -->
+            <div v-if="activeMain === 'classTimetable'">
+                <div class="card-panel">
+                    <div class="section-title">🏫 班级课表查看</div>
+                    <div class="flex-between">
+                        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                            <span><strong>选择班级：</strong></span>
+                            <select v-model="currentClassView" style="padding:6px 12px; font-size:0.9rem;">
+                                <option v-for="cls in classList" :key="cls" :value="cls">{{ cls }}</option>
+                            </select>
+                            <button class="btn-primary" @click="exportClassTimetableExcel">📎 导出当前班级课表</button>
+                            <button class="btn-success" @click="exportAllClassesExcel">📦 批量导出全部班级</button>
+                        </div>
+                    </div>
+                    <div style="overflow-x:auto; margin-top:20px;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width:80px;">节次</th>
+                                    <th v-for="w in weekdays" :key="w">{{ w }}</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="(p, pIdx) in periods" :key="pIdx">
+                                    <td style="background:#fef9e3; font-weight:bold;">{{ p.name }}</td>
+                                    <td v-for="(w, wIdx) in weekdays" :key="wIdx" class="timetable-cell">
+                                        <div v-if="getClassCellTeacher(wIdx, pIdx)" class="cell-content">
+                                            <div class="cell-subject">{{ getClassCellTeacher(wIdx, pIdx).subject }}</div>
+                                            <div class="cell-teacher">{{ getClassCellTeacher(wIdx, pIdx).name }}</div>
+                                        </div>
+                                        <div v-else class="cell-empty">⚡未排</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 手动调课弹窗 -->
+    <div v-if="showManualDialog" class="modal-mask">
+        <div class="modal-card">
+            <h3>✏️ 手动调课</h3>
+            <p>班级: <strong>{{ manualClass }}</strong> &nbsp; {{ weekdays[manualWeekIdx] }} {{ periods[manualPeriodIdx]?.name }}</p>
+            <select v-model="selectedTeacherId" style="width:100%; padding:8px; margin-top:12px;">
+                <option :value="null">-- 清空 / 未排 --</option>
+                <option v-for="t in teachers" :value="t.id">{{ t.name }} ({{ t.subject }}) 任教:{{ t.classes.join(',') }}</option>
+            </select>
+            <div style="margin-top:24px; display:flex; gap:12px; justify-content:flex-end;">
+                <button class="btn-secondary" @click="closeManualDialog">取消</button>
+                <button class="btn-primary" @click="applyManualAdjust">确认调课</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref } = Vue;
+    createApp({
+        setup() {
+            const activeMain = ref('teachers');
+            const showRulesSub = ref(false);
+            const activeSubRule = ref('forbid');
+            const weekdays = ref(['星期一', '星期二', '星期三', '星期四', '星期五']);
+            const periods = ref([{ name: '第1节' }, { name: '第2节' }, { name: '第3节' }, { name: '第4节' }, { name: '第5节' }]);
+            const classList = ref(['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班']);
+            const teachers = ref([]);
+            const rules = ref([]);
+            const timetableData = ref({});
+            const lastConflictMsg = ref('');
+            const showManualDialog = ref(false);
+            const currentClassView = ref('');
+            let manualWeekIdx = 0, manualPeriodIdx = 0, manualClass = '';
+            const selectedTeacherId = ref(null);
+
+            const rulesByType = (type) => rules.value.filter(r => r.type === type);
+            
+            // 保存教师设置到 localStorage
+            function saveTeachersSettings() {
+                localStorage.setItem('zhijiao_teachers', JSON.stringify(teachers.value));
+                alert('教师数据已保存到本地！');
+            }
+            // 保存课表框架（星期、节次、班级）
+            function saveScheduleSettings() {
+                const frameData = {
+                    weekdays: weekdays.value,
+                    periods: periods.value,
+                    classList: classList.value
+                };
+                localStorage.setItem('zhijiao_schedule_frame', JSON.stringify(frameData));
+                alert('课表框架已保存到本地！');
+            }
+            // 加载保存的教师和课表框架（初始化时调用）
+            function loadSavedData() {
+                const savedTeachers = localStorage.getItem('zhijiao_teachers');
+                if (savedTeachers) {
+                    try { teachers.value = JSON.parse(savedTeachers); } catch(e) {}
+                }
+                const savedFrame = localStorage.getItem('zhijiao_schedule_frame');
+                if (savedFrame) {
+                    try {
+                        const frame = JSON.parse(savedFrame);
+                        if (frame.weekdays) weekdays.value = frame.weekdays;
+                        if (frame.periods) periods.value = frame.periods;
+                        if (frame.classList) classList.value = frame.classList;
+                    } catch(e) {}
+                }
+            }
+
+            function addTypedRule(type) {
+                let newRule = { id: Date.now() + Math.random(), type: type };
+                switch (type) {
+                    case 'forbid': newRule.teacherId = ''; newRule.weekdayIdx = 0; newRule.periodIdx = 0; break;
+                    case 'avoidConsecutive': newRule.teacherId = ''; newRule.maxConsecutive = 2; break;
+                    case 'priority': newRule.subject = ''; newRule.priorityVal = 5; break;
+                    case 'maxDaily': newRule.teacherId = ''; newRule.dailyMax = 3; break;
+                    case 'subjectDailyLimit': newRule.subject = ''; newRule.dailyLimit = 2; break;
+                    case 'subjectPeriodRange': newRule.subject = ''; newRule.allowedPeriodIndices = []; break;
+                    case 'subjectHourType': newRule.subject = ''; newRule.hourType = 'hour'; newRule.countPerClass = 1; newRule.assignStrategy = 'lightLoad'; newRule.maxClassesPerTeacher = 0; break;
+                }
+                rules.value.push(newRule);
+            }
+            function deleteRuleById(id) { rules.value = rules.value.filter(r => r.id !== id); }
+            function saveRulesToast(category) { 
+                alert(`${category} 规则已保存！`); 
+                localStorage.setItem('zhijiao_rules', JSON.stringify(rules.value));
+            }
+            function setMainMenu(menu) {
+                activeMain.value = menu;
+                if (menu !== 'rules') showRulesSub.value = false;
+                if (menu === 'classTimetable' && !currentClassView.value && classList.value.length > 0) {
+                    currentClassView.value = classList.value[0];
+                }
+            }
+            function toggleRulesSub() { if (activeMain.value !== 'rules') activeMain.value = 'rules'; showRulesSub.value = !showRulesSub.value; }
+            function setRuleSubMenu(sub) { activeMain.value = 'rules'; showRulesSub.value = true; activeSubRule.value = sub; }
+
+            // 科目节次范围检查
+            function isSubjectPeriodAllowed(subject, periodIdx) {
+                for (let rule of rules.value) {
+                    if (rule.type === 'subjectPeriodRange' && rule.subject === subject) {
+                        if (!rule.allowedPeriodIndices || rule.allowedPeriodIndices.length === 0) return true;
+                        return rule.allowedPeriodIndices.includes(periodIdx);
+                    }
+                }
+                return true;
+            }
+
+            // 获取科目的课时类型规则
+            function getSubjectHourTypeRule(subject) {
+                for (let rule of rules.value) {
+                    if (rule.type === 'subjectHourType' && rule.subject === subject) {
+                        return rule;
+                    }
+                }
+                return null;
+            }
+            // 判断科目是否为次数型（不计入课时）
+            function isCountTypeSubject(subject) {
+                const rule = getSubjectHourTypeRule(subject);
+                return rule && rule.hourType === 'count';
+            }
+            // 获取次数型科目的配置
+            function getCountTypeConfig(subject) {
+                const rule = getSubjectHourTypeRule(subject);
+                if (!rule || rule.hourType !== 'count') return null;
+                return {
+                    countPerClass: rule.countPerClass || 1,
+                    assignStrategy: rule.assignStrategy || 'lightLoad',
+                    maxClassesPerTeacher: rule.maxClassesPerTeacher || 0
+                };
+            }
+            // 获取教师课时型课程的已用课时数（排除次数型）
+            function getTeacherHourCount(teacherId) {
+                let count = 0;
+                const teacher = teachers.value.find(t => t.id == teacherId);
+                if (!teacher) return 0;
+                for (let w = 0; w < weekdays.value.length; w++)
+                    for (let p = 0; p < periods.value.length; p++)
+                        for (let cls of classList.value)
+                            if (timetableData.value[`${w}_${p}_${cls}`] == teacherId) {
+                                if (!isCountTypeSubject(teacher.subject)) count++;
+                            }
+                return count;
+            }
+            // 获取教师次数型某科目的带班数（去重班级）
+            function getTeacherCountSubjectClasses(teacherId, subject) {
+                const classSet = new Set();
+                for (let w = 0; w < weekdays.value.length; w++)
+                    for (let p = 0; p < periods.value.length; p++)
+                        for (let cls of classList.value)
+                            if (timetableData.value[`${w}_${p}_${cls}`] == teacherId) {
+                                const t = teachers.value.find(t => t.id == teacherId);
+                                if (t && t.subject === subject && isCountTypeSubject(subject)) {
+                                    classSet.add(cls);
+                                }
+                            }
+                return classSet.size;
+            }
+            // 获取某班某次数型科目已排次数
+            function getClassCountSubjectScheduled(className, subject) {
+                let count = 0;
+                for (let w = 0; w < weekdays.value.length; w++)
+                    for (let p = 0; p < periods.value.length; p++) {
+                        const tid = timetableData.value[`${w}_${p}_${className}`];
+                        if (tid) {
+                            const t = teachers.value.find(t => t.id == tid);
+                            if (t && t.subject === subject && isCountTypeSubject(subject)) count++;
+                        }
+                    }
+                return count;
+            }
+
+            // 辅助函数
+            function getTeacherByCell(weekIdx, periodIdx, className) {
+                const key = `${weekIdx}_${periodIdx}_${className}`;
+                const tid = timetableData.value[key];
+                if (!tid) return null;
+                return teachers.value.find(t => t.id == tid) || null;
+            }
+            function getClassCellTeacher(weekIdx, periodIdx) {
+                if (!currentClassView.value) return null;
+                return getTeacherByCell(weekIdx, periodIdx, currentClassView.value);
+            }
+            function getTeacherCurrentHours(teacherId) {
+                let count = 0;
+                for (let w = 0; w < weekdays.value.length; w++)
+                    for (let p = 0; p < periods.value.length; p++)
+                        for (let cls of classList.value)
+                            if (timetableData.value[`${w}_${p}_${cls}`] == teacherId) count++;
+                return count;
+            }
+            function getTeacherDailyHours(teacherId, weekIdx) {
+                let count = 0;
+                for (let p = 0; p < periods.value.length; p++)
+                    for (let cls of classList.value)
+                        if (timetableData.value[`${weekIdx}_${p}_${cls}`] == teacherId) count++;
+                return count;
+            }
+            function getSubjectDailyCount(className, weekIdx, subject) {
+                let count = 0;
+                for (let p = 0; p < periods.value.length; p++) {
+                    const tid = timetableData.value[`${weekIdx}_${p}_${className}`];
+                    if (tid) {
+                        const teacher = teachers.value.find(t => t.id == tid);
+                        if (teacher && teacher.subject === subject) count++;
+                    }
+                }
+                return count;
+            }
+            function checkTeacherConflict(teacherId, weekIdx, periodIdx, exceptClass) {
+                if (!teacherId) return false;
+                for (let cls of classList.value)
+                    if (cls !== exceptClass && timetableData.value[`${weekIdx}_${periodIdx}_${cls}`] == teacherId) return true;
+                return false;
+            }
+            function isForbidden(teacherId, weekIdx, periodIdx) {
+                for (let rule of rules.value)
+                    if (rule.type === 'forbid' && rule.teacherId == teacherId && rule.weekdayIdx == weekIdx && rule.periodIdx == periodIdx) return true;
+                return false;
+            }
+            function checkConsecutiveRule(teacherId, weekIdx, periodIdx, className) {
+                if (periodIdx === 0) return true;
+                for (let rule of rules.value) {
+                    if (rule.type === 'avoidConsecutive' && (!rule.teacherId || rule.teacherId == teacherId)) {
+                        let consecutive = 0;
+                        for (let p = periodIdx; p >= 0; p--) {
+                            if (timetableData.value[`${weekIdx}_${p}_${className}`] == teacherId) consecutive++;
+                            else break;
+                        }
+                        if (consecutive >= (rule.maxConsecutive || 2)) return false;
+                    }
+                }
+                return true;
+            }
+            function checkTeacherDailyLimit(teacherId, weekIdx) {
+                for (let rule of rules.value) {
+                    if (rule.type === 'maxDaily' && rule.teacherId == teacherId && rule.dailyMax) {
+                        if (getTeacherDailyHours(teacherId, weekIdx) + 1 > rule.dailyMax) return false;
+                    }
+                }
+                return true;
+            }
+            function checkSubjectDailyLimit(className, weekIdx, subject) {
+                for (let rule of rules.value) {
+                    if (rule.type === 'subjectDailyLimit' && rule.subject === subject && rule.dailyLimit) {
+                        if (getSubjectDailyCount(className, weekIdx, subject) + 1 > rule.dailyLimit) return false;
+                    }
+                }
+                return true;
+            }
+            function isConflictCell(weekIdx, periodIdx, className) {
+                const tid = timetableData.value[`${weekIdx}_${periodIdx}_${className}`];
+                if (!tid) return false;
+                return checkTeacherConflict(tid, weekIdx, periodIdx, className);
+            }
+
+            function autoGenerateTimetable() {
+                timetableData.value = {};
+                lastConflictMsg.value = '';
+                const priorityMap = {};
+                rules.value.filter(r => r.type === 'priority' && r.subject).forEach(r => { priorityMap[r.subject] = r.priorityVal || 0; });
+
+                // ===== 第一阶段：排课时型课程 =====
+                let hourTasks = [];
+                for (let wi = 0; wi < weekdays.value.length; wi++)
+                    for (let pi = 0; pi < periods.value.length; pi++)
+                        for (let cls of classList.value)
+                            hourTasks.push({ weekIdx: wi, periodIdx: pi, className: cls });
+                for (let i = hourTasks.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [hourTasks[i], hourTasks[j]] = [hourTasks[j], hourTasks[i]];
+                }
+                for (let task of hourTasks) {
+                    const { weekIdx, periodIdx, className } = task;
+                    let candidates = teachers.value.filter(t => 
+                        t.classes.includes(className) && 
+                        !isCountTypeSubject(t.subject) &&
+                        getTeacherHourCount(t.id) < t.weeklyHours &&
+                        !isForbidden(t.id, weekIdx, periodIdx) &&
+                        checkTeacherDailyLimit(t.id, weekIdx) &&
+                        checkSubjectDailyLimit(className, weekIdx, t.subject) &&
+                        checkConsecutiveRule(t.id, weekIdx, periodIdx, className) &&
+                        isSubjectPeriodAllowed(t.subject, periodIdx)
+                    );
+                    if (candidates.length === 0) continue;
+                    candidates.sort((a,b) => {
+                        let pa = priorityMap[a.subject] || 0;
+                        let pb = priorityMap[b.subject] || 0;
+                        if (pa !== pb) return pb - pa;
+                        let remainA = a.weeklyHours - getTeacherHourCount(a.id);
+                        let remainB = b.weeklyHours - getTeacherHourCount(b.id);
+                        return remainA - remainB;
+                    });
+                    let selected = candidates[0];
+                    if (checkTeacherConflict(selected.id, weekIdx, periodIdx, className)) {
+                        let found = false;
+                        for (let i=1; i<candidates.length; i++) {
+                            if (!checkTeacherConflict(candidates[i].id, weekIdx, periodIdx, className)) {
+                                selected = candidates[i];
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) continue;
+                    }
+                    timetableData.value[`${weekIdx}_${periodIdx}_${className}`] = selected.id;
+                }
+
+                // ===== 第二阶段：排次数型课程 =====
+                const countTypeSubjects = [];
+                for (let rule of rules.value) {
+                    if (rule.type === 'subjectHourType' && rule.hourType === 'count' && rule.subject) {
+                        countTypeSubjects.push(rule.subject);
+                    }
+                }
+                for (let subject of countTypeSubjects) {
+                    const config = getCountTypeConfig(subject);
+                    if (!config) continue;
+                    const countPerClass = config.countPerClass || 1;
+                    const subjectTeachers = teachers.value.filter(t => t.subject === subject);
+                    if (subjectTeachers.length === 0) continue;
+
+                    for (let cls of classList.value) {
+                        for (let cnt = 0; cnt < countPerClass; cnt++) {
+                            // 收集可用的空位置
+                            let slots = [];
+                            for (let wi = 0; wi < weekdays.value.length; wi++) {
+                                for (let pi = 0; pi < periods.value.length; pi++) {
+                                    const key = `${wi}_${pi}_${cls}`;
+                                    if (!timetableData.value[key]) {
+                                        slots.push({ weekIdx: wi, periodIdx: pi });
+                                    }
+                                }
+                            }
+                            if (slots.length === 0) break;
+
+                            // 按分配策略排序候选教师
+                            let candidates = subjectTeachers.filter(t => {
+                                if (!t.classes.includes(cls)) return false;
+                                // 检查带班数上限
+                                if (config.maxClassesPerTeacher > 0) {
+                                    const curClasses = getTeacherCountSubjectClasses(t.id, subject);
+                                    if (curClasses >= config.maxClassesPerTeacher) return false;
+                                }
+                                return true;
+                            });
+
+                            // 根据策略排序
+                            candidates.sort((a, b) => {
+                                if (config.assignStrategy === 'homeroomFirst') {
+                                    // 班主任优先：如果该老师是这个班的班主任排最前
+                                    const aIsHR = a.isHomeroomTeacher && a.homeroomClass === cls ? 1 : 0;
+                                    const bIsHR = b.isHomeroomTeacher && b.homeroomClass === cls ? 1 : 0;
+                                    if (aIsHR !== bIsHR) return bIsHR - aIsHR;
+                                    // 其次按课时型课程的课少优先
+                                    return getTeacherHourCount(a.id) - getTeacherHourCount(b.id);
+                                } else if (config.assignStrategy === 'lightLoad') {
+                                    // 课少优先：课时型课程已用课时少的排前面
+                                    return getTeacherHourCount(a.id) - getTeacherHourCount(b.id);
+                                } else if (config.assignStrategy === 'balance') {
+                                    // 均衡分配：已带班数少的优先
+                                    const aCnt = getTeacherCountSubjectClasses(a.id, subject);
+                                    const bCnt = getTeacherCountSubjectClasses(b.id, subject);
+                                    return aCnt - bCnt;
+                                } else {
+                                    // 随机
+                                    return Math.random() - 0.5;
+                                }
+                            });
+
+                            // 在可用时段中找一个教师不冲突的位置
+                            let placed = false;
+                            for (let teacher of candidates) {
+                                // 打乱slots顺序
+                                const shuffledSlots = [...slots].sort(() => Math.random() - 0.5);
+                                for (let slot of shuffledSlots) {
+                                    const { weekIdx, periodIdx } = slot;
+                                    if (!checkTeacherConflict(teacher.id, weekIdx, periodIdx, cls) &&
+                                        !isForbidden(teacher.id, weekIdx, periodIdx) &&
+                                        isSubjectPeriodAllowed(subject, periodIdx)) {
+                                        timetableData.value[`${weekIdx}_${periodIdx}_${cls}`] = teacher.id;
+                                        placed = true;
+                                        break;
+                                    }
+                                }
+                                if (placed) break;
+                            }
+                        }
+                    }
+                }
+
+                // ===== 冲突检测和统计 =====
+                let conflictMsgs = [];
+                for (let wi = 0; wi < weekdays.value.length; wi++) {
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        const teacherMap = new Map();
+                        for (let cls of classList.value) {
+                            const tid = timetableData.value[`${wi}_${pi}_${cls}`];
+                            if (tid) teacherMap.set(tid, (teacherMap.get(tid)||0)+1);
+                        }
+                        for (let [tid, cnt] of teacherMap.entries())
+                            if (cnt > 1) conflictMsgs.push(`⚠️ ${teachers.value.find(t=>t.id==tid)?.name} 在 ${weekdays.value[wi]} ${periods.value[pi]?.name} 多班冲突`);
+                    }
+                }
+                teachers.value.forEach(t => {
+                    if (isCountTypeSubject(t.subject)) {
+                        // 次数型科目：统计带班数
+                        const classCnt = getTeacherCountSubjectClasses(t.id, t.subject);
+                        conflictMsgs.push(`📊 ${t.name} (${t.subject}) 带班数: ${classCnt} 班`);
+                    } else {
+                        let used = getTeacherHourCount(t.id);
+                        if (used > t.weeklyHours) conflictMsgs.push(`⚠️ ${t.name} 周课时超限 (${used}/${t.weeklyHours})`);
+                        else if (used < t.weeklyHours && t.weeklyHours > 0) conflictMsgs.push(`❗ ${t.name} 课时未满 (${used}/${t.weeklyHours})`);
+                    }
+                });
+                // 次数型科目统计每班完成情况
+                for (let subject of countTypeSubjects) {
+                    const config = getCountTypeConfig(subject);
+                    if (!config) continue;
+                    for (let cls of classList.value) {
+                        const scheduled = getClassCountSubjectScheduled(cls, subject);
+                        if (scheduled < config.countPerClass) {
+                            conflictMsgs.push(`⚠️ ${cls} ${subject}未排满 (${scheduled}/${config.countPerClass})`);
+                        }
+                    }
+                }
+                if (conflictMsgs.length) lastConflictMsg.value = conflictMsgs.slice(0,6).join(' ; ');
+                else lastConflictMsg.value = '✅ 自动排课完成，无严重冲突';
+            }
+
+            function refreshTimetableView() { lastConflictMsg.value = lastConflictMsg.value || '已刷新'; }
+            function openManualAdjust(weekIdx, periodIdx, className) {
+                manualWeekIdx = weekIdx; manualPeriodIdx = periodIdx; manualClass = className;
+                selectedTeacherId.value = timetableData.value[`${weekIdx}_${periodIdx}_${className}`] || null;
+                showManualDialog.value = true;
+            }
+            function closeManualDialog() { showManualDialog.value = false; }
+            function applyManualAdjust() {
+                const tid = selectedTeacherId.value;
+                const cls = manualClass;
+                const wIdx = manualWeekIdx, pIdx = manualPeriodIdx;
+                const key = `${wIdx}_${pIdx}_${cls}`;
+                if (tid) {
+                    const teacher = teachers.value.find(t=>t.id==tid);
+                    if (!teacher) { closeManualDialog(); return; }
+                    if (!teacher.classes.includes(cls)) { alert(`教师 ${teacher.name} 未任教 ${cls}`); closeManualDialog(); return; }
+                    if (isForbidden(tid, wIdx, pIdx)) { alert("违反禁止上课规则"); closeManualDialog(); return; }
+                    if (!checkTeacherDailyLimit(tid, wIdx)) { alert(`教师 ${teacher.name} 当天课时已达上限`); closeManualDialog(); return; }
+                    if (!checkSubjectDailyLimit(cls, wIdx, teacher.subject)) { alert(`科目 ${teacher.subject} 当天在该班级已达每日上限`); closeManualDialog(); return; }
+                    if (!checkConsecutiveRule(tid, wIdx, pIdx, cls)) { alert("违反避免连上规则"); closeManualDialog(); return; }
+                    if (!isSubjectPeriodAllowed(teacher.subject, pIdx)) { alert(`科目 ${teacher.subject} 不允许在第${periods.value[pIdx]?.name}上课`); closeManualDialog(); return; }
+                    if (checkTeacherConflict(tid, wIdx, pIdx, cls)) { alert("教师同一时段冲突"); closeManualDialog(); return; }
+                    // 课时型科目才检查周课时上限
+                    if (!isCountTypeSubject(teacher.subject)) {
+                        let curHour = getTeacherHourCount(tid);
+                        if (curHour >= teacher.weeklyHours && teacher.weeklyHours > 0 && !confirm(`课时已达周上限(${curHour}/${teacher.weeklyHours})，仍要继续？`)) { closeManualDialog(); return; }
+                    } else {
+                        // 次数型科目检查带班数上限
+                        const config = getCountTypeConfig(teacher.subject);
+                        if (config && config.maxClassesPerTeacher > 0) {
+                            const curClasses = getTeacherCountSubjectClasses(tid, teacher.subject);
+                            // 检查该班是否已经算在统计里了（可能只是调时段）
+                            const alreadyHasThisClass = Array.from(
+                                (function(){ 
+                                    const s = new Set();
+                                    for (let w=0;w<weekdays.value.length;w++)
+                                        for (let p=0;p<periods.value.length;p++)
+                                            if (timetableData.value[`${w}_${p}_${cls}`]==tid) s.add(cls);
+                                    return s;
+                                })()
+                            ).length > 0;
+                            if (!alreadyHasThisClass && curClasses >= config.maxClassesPerTeacher) {
+                                if (!confirm(`该教师${teacher.subject}带班数已达上限(${curClasses}/${config.maxClassesPerTeacher})，仍要继续？`)) { closeManualDialog(); return; }
+                            }
+                        }
+                    }
+                }
+                timetableData.value[key] = tid;
+                closeManualDialog();
+                lastConflictMsg.value = '手动调课完成，请检查提示';
+                refreshTimetableView();
+            }
+
+            function exportToExcel() {
+                let sheetData = [['星期', '节次', ...classList.value]];
+                for (let wi = 0; wi < weekdays.value.length; wi++)
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        let row = [weekdays.value[wi], periods.value[pi].name];
+                        for (let cls of classList.value) {
+                            const teacher = getTeacherByCell(wi, pi, cls);
+                            row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
+                        }
+                        sheetData.push(row);
+                    }
+                const ws = XLSX.utils.aoa_to_sheet(sheetData);
+                if(!ws['!cols']) ws['!cols'] = [];
+                for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, '排课表');
+                XLSX.writeFile(wb, `智教课表_${new Date().toISOString().slice(0,19)}.xlsx`);
+            }
+            function exportClassTimetableExcel() {
+                const cls = currentClassView.value;
+                if (!cls) { alert('请先选择班级'); return; }
+                let sheetData = [['节次', ...weekdays.value]];
+                for (let pi = 0; pi < periods.value.length; pi++) {
+                    let row = [periods.value[pi].name];
+                    for (let wi = 0; wi < weekdays.value.length; wi++) {
+                        const teacher = getTeacherByCell(wi, pi, cls);
+                        row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
+                    }
+                    sheetData.push(row);
+                }
+                const ws = XLSX.utils.aoa_to_sheet(sheetData);
+                if(!ws['!cols']) ws['!cols'] = [];
+                for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, cls);
+                XLSX.writeFile(wb, `${cls}_课表_${new Date().toISOString().slice(0,19)}.xlsx`);
+            }
+            function exportAllClassesExcel() {
+                const wb = XLSX.utils.book_new();
+                for (let cls of classList.value) {
+                    let sheetData = [['节次', ...weekdays.value]];
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        let row = [periods.value[pi].name];
+                        for (let wi = 0; wi < weekdays.value.length; wi++) {
+                            const teacher = getTeacherByCell(wi, pi, cls);
+                            row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
+                        }
+                        sheetData.push(row);
+                    }
+                    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+                    if(!ws['!cols']) ws['!cols'] = [];
+                    for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
+                    XLSX.utils.book_append_sheet(wb, ws, cls);
+                }
+                XLSX.writeFile(wb, `全部班级课表_${new Date().toISOString().slice(0,19)}.xlsx`);
+            }
+            function exportProject() {
+                const data = { teachers: teachers.value, rules: rules.value, weekdays: weekdays.value, periods: periods.value, classList: classList.value, timetableData: timetableData.value };
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], {type: "application/json"}));
+                a.download = "zhijiao_project.json";
+                a.click();
+                URL.revokeObjectURL(a.href);
+            }
+            function importProject(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = ev => {
+                    try {
+                        const data = JSON.parse(ev.target.result);
+                        teachers.value = data.teachers || [];
+                        rules.value = data.rules || [];
+                        if (data.weekdays) weekdays.value = data.weekdays;
+                        if (data.periods) periods.value = data.periods;
+                        if (data.classList) classList.value = data.classList;
+                        timetableData.value = data.timetableData || {};
+                        lastConflictMsg.value = '导入成功！';
+                    } catch(e) { alert('解析失败'); }
+                };
+                reader.readAsText(file);
+            }
+            function addTeacher() { teachers.value.push({ id: Date.now(), name: '新教师', subject: '科目', classes: [], weeklyHours: 10, isHomeroomTeacher: false, homeroomClass: '' }); }
+            function deleteTeacher(idx) { teachers.value.splice(idx,1); }
+            function addPeriod() { periods.value.push({ name: `第${periods.value.length+1}节` }); }
+            function removePeriod(idx) { if(periods.value.length>1) periods.value.splice(idx,1); else alert("至少保留一节"); }
+            function addClass() { classList.value.push(`${classList.value.length+1}班`); }
+            function removeClass(idx) { if(classList.value.length>1) classList.value.splice(idx,1); else alert("至少保留一班"); }
+            
+            function initMockData() {
+                // 如果是独立打开页面（非iframe），直接使用模拟数据
+                var isInIframe = (window.parent !== window);
+                if (!isInIframe) {
+                    teachers.value = [
+                        { id: 1, name: '张明', subject: '数学', classes: ['1班','2班','3班','4班'], weeklyHours: 12, isHomeroomTeacher: true, homeroomClass: '1班' },
+                        { id: 2, name: '李芳', subject: '语文', classes: ['1班','2班','3班','4班','5班'], weeklyHours: 14, isHomeroomTeacher: true, homeroomClass: '2班' },
+                        { id: 3, name: '王磊', subject: '英语', classes: ['1班','2班','3班','5班','6班','7班'], weeklyHours: 12, isHomeroomTeacher: false, homeroomClass: '' },
+                        { id: 4, name: '陈丽', subject: '物理', classes: ['4班','5班','6班','7班','8班'], weeklyHours: 10, isHomeroomTeacher: true, homeroomClass: '3班' },
+                        { id: 5, name: '赵阳', subject: '体育', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 8, isHomeroomTeacher: false, homeroomClass: '' },
+                        { id: 6, name: '刘强', subject: '课后服务', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 0, isHomeroomTeacher: false, homeroomClass: '' }
+                    ];
+                } else {
+                    // 在iframe中：从父页面（教务平台）获取教师数据
+                    window.addEventListener('message', function(event) {
+                        if (event.data && event.data.type === 'teachersData' && event.data.data) {
+                            if (event.data.data.length > 0) {
+                                teachers.value = event.data.data;
+                            }
+                        }
+                    });
+                    // 向父页面请求教师数据
+                    window.parent.postMessage({ type: 'getTeachers' }, '*');
+                    // 3秒内没收到响应则用模拟数据
+                    setTimeout(function() {
+                        if (teachers.value.length === 0) {
+                            teachers.value = [
+                                { id: 1, name: '张明', subject: '数学', classes: ['1班','2班','3班','4班'], weeklyHours: 12, isHomeroomTeacher: true, homeroomClass: '1班' },
+                                { id: 2, name: '李芳', subject: '语文', classes: ['1班','2班','3班','4班','5班'], weeklyHours: 14, isHomeroomTeacher: true, homeroomClass: '2班' },
+                                { id: 3, name: '王磊', subject: '英语', classes: ['1班','2班','3班','5班','6班','7班'], weeklyHours: 12, isHomeroomTeacher: false, homeroomClass: '' },
+                                { id: 4, name: '陈丽', subject: '物理', classes: ['4班','5班','6班','7班','8班'], weeklyHours: 10, isHomeroomTeacher: true, homeroomClass: '3班' },
+                                { id: 5, name: '赵阳', subject: '体育', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 8, isHomeroomTeacher: false, homeroomClass: '' },
+                                { id: 6, name: '刘强', subject: '课后服务', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 0, isHomeroomTeacher: false, homeroomClass: '' }
+                            ];
+                        }
+                    }, 3000);
+                }
+                rules.value = [
+                    { id: 11, type: 'forbid', teacherId: 1, weekdayIdx: 0, periodIdx: 0 },
+                    { id: 12, type: 'priority', subject: '数学', priorityVal: 9 },
+                    { id: 13, type: 'maxDaily', teacherId: 1, dailyMax: 3 },
+                    { id: 14, type: 'subjectDailyLimit', subject: '数学', dailyLimit: 2 },
+                    { id: 15, type: 'subjectPeriodRange', subject: '体育', allowedPeriodIndices: [0,1,2,3] },
+                    { id: 16, type: 'subjectHourType', subject: '课后服务', hourType: 'count', countPerClass: 1, assignStrategy: 'homeroomFirst', maxClassesPerTeacher: 3 }
+                ];
+                // 加载本地保存的数据（如果有）
+                loadSavedData();
+                // 如果有本地保存的规则也加载
+                const savedRules = localStorage.getItem('zhijiao_rules');
+                if (savedRules) {
+                    try { rules.value = JSON.parse(savedRules); } catch(e) {}
+                }
+            }
+            initMockData();
+
+            return {
+                activeMain, showRulesSub, activeSubRule, weekdays, periods, classList, teachers, rules, timetableData, lastConflictMsg,
+                showManualDialog, manualWeekIdx, manualPeriodIdx, manualClass, selectedTeacherId, currentClassView,
+                rulesByType, addTypedRule, deleteRuleById, saveRulesToast, setMainMenu, toggleRulesSub, setRuleSubMenu,
+                saveTeachersSettings, saveScheduleSettings,
+                getTeacherByCell, getClassCellTeacher, isConflictCell, autoGenerateTimetable, refreshTimetableView,
+                openManualAdjust, closeManualDialog, applyManualAdjust, exportToExcel, exportClassTimetableExcel, exportAllClassesExcel, exportProject, importProject,
+                addTeacher, deleteTeacher, addPeriod, removePeriod, addClass, removeClass
+            };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
