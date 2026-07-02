@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>智教排课系统 - 智能教务管理</title>
-    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="vue.global.js"></script>
+    <script src="xlsx.full.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -345,6 +345,9 @@
                 <div class="nav-item" :class="{active: activeMain === 'timetable'}" @click="setMainMenu('timetable')">
                     <span>📅</span> 课表生成
                 </div>
+                <div class="nav-item" :class="{active: activeMain === 'classSchedule'}" @click="setMainMenu('classSchedule')">
+                    <span>📖</span> 班级课表
+                </div>
             </div>
             <div class="footer-btns">
                 <button class="btn-outline-light" @click="exportProject">📦 导出工程文件</button>
@@ -546,7 +549,72 @@
                             </tbody>
                         </table>
                     </div>
-                    <div v-if="lastConflictMsg" class="badge" style="margin-top:16px; background:#fee2e2; color:#b91c1c; padding:8px;">⚠️ {{ lastConflictMsg }}</div>
+                    <div v-if="lastConflictMsg" class="badge" style="margin-top:16px; background:#fee2e2; color:#b91c1c; padding:12px; white-space:pre-wrap; text-align:left; max-height:300px; overflow-y:auto;">{{ lastConflictMsg }}</div>
+                </div>
+            </div>
+
+            <!-- 班级课表 -->
+            <div v-if="activeMain === 'classSchedule'">
+                <div class="card-panel">
+                    <div class="section-title">📖 班级课表</div>
+                    <div class="flex-between">
+                        <div>
+                            <select v-model="selectedClass" style="padding:6px; margin-right:10px;">
+                                <option value="">-- 全部班级 --</option>
+                                <option v-for="cls in classList" :key="cls" :value="cls">{{ cls }}</option>
+                            </select>
+                            <button class="btn-secondary" @click="viewAllClassSchedules">📋 查看全部班级</button>
+                        </div>
+                        <div>
+                            <button class="btn-success" @click="exportAllClassSchedules">📥 批量下载所有班级课表</button>
+                            <button class="btn-primary" style="margin-left:10px;" @click="exportCurrentClassSchedule">📄 下载当前班级课表</button>
+                        </div>
+                    </div>
+                    
+                    <div v-if="selectedClass" style="margin-top:20px;">
+                        <div class="card-panel" style="border:2px solid #3b82f6;">
+                            <div style="font-size:1.3rem; font-weight:600; color:#3b82f6; margin-bottom:16px;">📚 {{ selectedClass }} 课表</div>
+                            <table>
+                                <thead><tr><th>星期</th><th v-for="p in periods">{{ p.name }}</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="(week, wIdx) in weekdays" :key="wIdx">
+                                        <td style="background:#fef9e3; font-weight:bold;">{{ week }}</td>
+                                        <td v-for="(p, pIdx) in periods" :key="`${wIdx}_${pIdx}`" :class="{'timetable-cell': true}">
+                                            <div v-if="getTeacherByCell(wIdx, pIdx, selectedClass)" class="cell-content">
+                                                <div class="cell-subject">{{ getTeacherByCell(wIdx, pIdx, selectedClass).subject }}</div>
+                                                <div class="cell-teacher">{{ getTeacherByCell(wIdx, pIdx, selectedClass).name }}</div>
+                                            </div>
+                                            <div v-else class="cell-empty">⚡未排</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div v-else style="margin-top:20px; display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
+                        <div v-for="cls in classList" :key="cls" class="card-panel" style="cursor:pointer;" @click="selectedClass = cls">
+                            <div style="font-size:1.1rem; font-weight:600; margin-bottom:12px; display:flex; justify-content:space-between;">
+                                <span>📚 {{ cls }} 课表</span>
+                                <button class="btn-sm" @click.stop="exportSingleClassSchedule(cls)">📄 下载</button>
+                            </div>
+                            <table style="font-size:0.8rem;">
+                                <thead><tr><th>星期</th><th v-for="p in periods">{{ p.name }}</th></tr></thead>
+                                <tbody>
+                                    <tr v-for="(week, wIdx) in weekdays" :key="wIdx">
+                                        <td style="background:#f8fafc; font-weight:bold; width:60px;">{{ week }}</td>
+                                        <td v-for="(p, pIdx) in periods" :key="`${wIdx}_${pIdx}`">
+                                            <div v-if="getTeacherByCell(wIdx, pIdx, cls)" style="text-align:center;">
+                                                <div style="font-weight:600; color:#1e40af; font-size:0.75rem;">{{ getTeacherByCell(wIdx, pIdx, cls).subject }}</div>
+                                                <div style="font-size:0.65rem; color:#475569;">{{ getTeacherByCell(wIdx, pIdx, cls).name }}</div>
+                                            </div>
+                                            <div v-else style="color:#9ca3af; font-size:0.65rem;">未排</div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -584,8 +652,9 @@
             const timetableData = ref({});
             const lastConflictMsg = ref('');
             const showManualDialog = ref(false);
-            let manualWeekIdx = 0, manualPeriodIdx = 0, manualClass = '';
-            const selectedTeacherId = ref(null);
+                let manualWeekIdx = 0, manualPeriodIdx = 0, manualClass = '';
+                const selectedTeacherId = ref(null);
+                const selectedClass = ref('');
 
             const rulesByType = (type) => rules.value.filter(r => r.type === type);
             
@@ -625,14 +694,17 @@
                     return eduTeachers.map((u, idx) => {
                         const subject = (u.subjects && u.subjects.length > 0) ? u.subjects[0] : '科目';
                         const isHomeroom = u.role === 'headteacher';
-                        const homeroomClass = isHomeroom ? u.classNo : '';
                         
                         let classes = [];
-                        if (gradeClasses[u.grade]) {
+                        if (u.classNo && u.classNo.trim()) {
+                            classes = u.classNo.split(/[,，]/).map(c => c.trim()).filter(Boolean);
+                        } else if (gradeClasses[u.grade]) {
                             classes = gradeClasses[u.grade];
                         } else {
                             classes = classList.value;
                         }
+                        
+                        const homeroomClass = isHomeroom && u.classNo ? u.classNo.split(/[,，]/)[0].trim() : '';
                         
                         return {
                             id: Date.now() + idx,
@@ -651,6 +723,20 @@
             }
 
             function loadSavedData() {
+                const eduDBKey = 'smart_edu_platform_db_v1';
+                const eduDB = localStorage.getItem(eduDBKey);
+                if (eduDB) {
+                    try {
+                        const db = JSON.parse(eduDB);
+                        if (db.studentRoster) {
+                            const currentGrade = currentUser?.grade || Object.keys(db.studentRoster)[0];
+                            if (currentGrade && db.studentRoster[currentGrade]) {
+                                classList.value = Object.keys(db.studentRoster[currentGrade]);
+                            }
+                        }
+                    } catch (e) {}
+                }
+                
                 const eduTeachers = loadTeachersFromEduPlatform();
                 if (eduTeachers && eduTeachers.length > 0) {
                     teachers.value = eduTeachers;
@@ -668,7 +754,7 @@
                         const frame = JSON.parse(savedFrame);
                         if (frame.weekdays) weekdays.value = frame.weekdays;
                         if (frame.periods) periods.value = frame.periods;
-                        if (frame.classList) classList.value = frame.classList;
+                        if (frame.classList && classList.value.length === 0) classList.value = frame.classList;
                     } catch(e) {}
                 }
             }
@@ -988,41 +1074,168 @@
 
                 // ===== 冲突检测和统计 =====
                 let conflictMsgs = [];
+                let warnings = [];
+                let infos = [];
+                let suggestions = [];
+                
                 for (let wi = 0; wi < weekdays.value.length; wi++) {
                     for (let pi = 0; pi < periods.value.length; pi++) {
                         const teacherMap = new Map();
+                        const classMap = new Map();
                         for (let cls of classList.value) {
                             const tid = timetableData.value[`${wi}_${pi}_${cls}`];
-                            if (tid) teacherMap.set(tid, (teacherMap.get(tid)||0)+1);
+                            if (tid) {
+                                teacherMap.set(tid, (teacherMap.get(tid)||0)+1);
+                                classMap.set(cls, tid);
+                            }
                         }
-                        for (let [tid, cnt] of teacherMap.entries())
-                            if (cnt > 1) conflictMsgs.push(`⚠️ ${teachers.value.find(t=>t.id==tid)?.name} 在 ${weekdays.value[wi]} ${periods.value[pi]?.name} 多班冲突`);
+                        for (let [tid, cnt] of teacherMap.entries()) {
+                            if (cnt > 1) {
+                                const teacher = teachers.value.find(t=>t.id==tid);
+                                conflictMsgs.push(`🔴 严重冲突：${teacher?.name || '未知教师'} 在 ${weekdays.value[wi]} ${periods.value[pi]?.name} 同时在 ${cnt} 个班级上课`);
+                            }
+                        }
                     }
                 }
+                if (conflictMsgs.length > 0) {
+                    suggestions.push('💡 建议：存在教师时间冲突，请通过手动调课功能调整冲突时段，或增加同科教师分担课程。');
+                }
+
                 teachers.value.forEach(t => {
                     if (isCountTypeSubject(t.subject)) {
-                        // 次数型科目：统计带班数
                         const classCnt = getTeacherCountSubjectClasses(t.id, t.subject);
-                        conflictMsgs.push(`📊 ${t.name} (${t.subject}) 带班数: ${classCnt} 班`);
+                        infos.push(`📊 ${t.name} (${t.subject}) 带班数: ${classCnt} 班`);
                     } else {
                         let used = getTeacherHourCount(t.id);
-                        if (used > t.weeklyHours) conflictMsgs.push(`⚠️ ${t.name} 周课时超限 (${used}/${t.weeklyHours})`);
-                        else if (used < t.weeklyHours && t.weeklyHours > 0) conflictMsgs.push(`❗ ${t.name} 课时未满 (${used}/${t.weeklyHours})`);
+                        if (used > t.weeklyHours) {
+                            conflictMsgs.push(`🔴 课时超限：${t.name} 周课时 ${used}节 > 上限 ${t.weeklyHours}节`);
+                        } else if (used < t.weeklyHours && t.weeklyHours > 0) {
+                            warnings.push(`🟡 课时未满：${t.name} 周课时 ${used}/${t.weeklyHours}节 (差${t.weeklyHours-used}节)`);
+                        } else {
+                            infos.push(`✅ ${t.name} 周课时已满 (${used}/${t.weeklyHours})`);
+                        }
                     }
                 });
-                // 次数型科目统计每班完成情况
+                
+                const underloadedTeachers = teachers.value.filter(t => 
+                    !isCountTypeSubject(t.subject) && t.weeklyHours > 0 && getTeacherHourCount(t.id) < t.weeklyHours
+                );
+                if (underloadedTeachers.length > 0) {
+                    suggestions.push(`💡 建议：有 ${underloadedTeachers.length} 位教师课时未满，可增加其任教班级或调整课时分配，例如：${underloadedTeachers.slice(0,3).map(t=>t.name).join('、')}${underloadedTeachers.length > 3 ? '等' : ''}`);
+                }
+
                 for (let subject of countTypeSubjects) {
                     const config = getCountTypeConfig(subject);
                     if (!config) continue;
+                    let underScheduledClasses = [];
                     for (let cls of classList.value) {
                         const scheduled = getClassCountSubjectScheduled(cls, subject);
                         if (scheduled < config.countPerClass) {
-                            conflictMsgs.push(`⚠️ ${cls} ${subject}未排满 (${scheduled}/${config.countPerClass})`);
+                            warnings.push(`🟡 排课不足：${cls} ${subject}仅排${scheduled}节，应排${config.countPerClass}节`);
+                            underScheduledClasses.push(cls);
+                        }
+                    }
+                    if (underScheduledClasses.length > 0) {
+                        suggestions.push(`💡 建议：${subject}有 ${underScheduledClasses.length} 个班级未排满，请检查规则设置或增加${subject}教师，涉及班级：${underScheduledClasses.slice(0,5).join('、')}${underScheduledClasses.length > 5 ? '等' : ''}`);
+                    }
+                }
+
+                for (let wi = 0; wi < weekdays.value.length; wi++) {
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        for (let cls of classList.value) {
+                            const tid = timetableData.value[`${wi}_${pi}_${cls}`];
+                            if (tid) {
+                                const teacher = teachers.value.find(t=>t.id==tid);
+                                if (teacher) {
+                                    if (isForbidden(tid, wi, pi)) {
+                                        conflictMsgs.push(`🔴 违反规则：${teacher.name} 在 ${weekdays.value[wi]} ${periods.value[pi]?.name} 上课（禁止上课时段）`);
+                                    }
+                                    if (!isSubjectPeriodAllowed(teacher.subject, pi)) {
+                                        warnings.push(`🟡 规则警告：${cls} ${teacher.subject}安排在${periods.value[pi]?.name}（非推荐时段）`);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-                if (conflictMsgs.length) lastConflictMsg.value = conflictMsgs.slice(0,6).join(' ; ');
-                else lastConflictMsg.value = '✅ 自动排课完成，无严重冲突';
+
+                let consecutiveViolations = 0;
+                for (let wi = 0; wi < weekdays.value.length; wi++) {
+                    for (let cls of classList.value) {
+                        let consecutive = 0;
+                        let lastTid = null;
+                        for (let pi = 0; pi < periods.value.length; pi++) {
+                            const tid = timetableData.value[`${wi}_${pi}_${cls}`];
+                            if (tid && tid === lastTid) {
+                                consecutive++;
+                                if (consecutive >= 2) {
+                                    const teacher = teachers.value.find(t=>t.id==tid);
+                                    warnings.push(`🟡 连续上课：${cls} ${teacher?.name} 在${weekdays.value[wi]}第${pi-consecutive+1}~${pi+1}节连续${consecutive+1}节`);
+                                    consecutiveViolations++;
+                                }
+                            } else {
+                                consecutive = 0;
+                                lastTid = tid;
+                            }
+                        }
+                    }
+                }
+                if (consecutiveViolations > 0) {
+                    suggestions.push(`💡 建议：存在 ${consecutiveViolations} 处连续上课超过2节的情况，建议通过手动调课分散安排，避免学生疲劳。`);
+                }
+
+                let emptyCount = 0;
+                for (let wi = 0; wi < weekdays.value.length; wi++) {
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        for (let cls of classList.value) {
+                            if (!timetableData.value[`${wi}_${pi}_${cls}`]) {
+                                emptyCount++;
+                            }
+                        }
+                    }
+                }
+                if (emptyCount > 0) {
+                    const totalSlots = weekdays.value.length * periods.value.length * classList.value.length;
+                    const filledRate = ((totalSlots - emptyCount) / totalSlots * 100).toFixed(1);
+                    infos.push(`📊 课表填充率：${filledRate}% (${totalSlots-emptyCount}/${totalSlots}节)`);
+                    if (emptyCount > totalSlots * 0.3) {
+                        warnings.push(`🟡 课表空缺较多：仍有${emptyCount}个时段未排课`);
+                        suggestions.push(`💡 建议：课表空缺较多（${filledRate}%填充率），请检查：1）教师人数是否充足 2）科目设置是否完整 3）排课规则是否过于严格`);
+                    }
+                }
+                
+                const unassignedSubjects = new Set();
+                for (let subject of countTypeSubjects) {
+                    for (let cls of classList.value) {
+                        const scheduled = getClassCountSubjectScheduled(cls, subject);
+                        const config = getCountTypeConfig(subject);
+                        if (config && scheduled < config.countPerClass) {
+                            unassignedSubjects.add(subject);
+                        }
+                    }
+                }
+                if (unassignedSubjects.size > 0) {
+                    suggestions.push(`💡 建议：以下科目存在未排满的情况：${[...unassignedSubjects].join('、')}，可在规则设置中调整排课策略或增加对应科目的教师。`);
+                }
+
+                let resultMsg = '';
+                if (conflictMsgs.length > 0) {
+                    resultMsg = `━━━ 🔴 严重冲突 (${conflictMsgs.length}个) ━━━\n` + conflictMsgs.join('\n');
+                }
+                if (warnings.length > 0) {
+                    resultMsg += (resultMsg ? '\n\n' : '') + `━━━ 🟡 警告 (${warnings.length}个) ━━━\n` + warnings.join('\n');
+                }
+                if (infos.length > 0) {
+                    resultMsg += (resultMsg ? '\n\n' : '') + `━━━ 📊 统计信息 ━━━\n` + infos.join('\n');
+                }
+                if (suggestions.length > 0) {
+                    resultMsg += (resultMsg ? '\n\n' : '') + `━━━ 💡 排课建议 ━━━\n` + suggestions.join('\n');
+                }
+                if (!conflictMsgs.length && !warnings.length && !suggestions.length) {
+                    resultMsg = '✅ 自动排课完成，状态良好，无冲突！';
+                }
+                
+                lastConflictMsg.value = resultMsg;
             }
 
             function refreshTimetableView() { lastConflictMsg.value = lastConflictMsg.value || '已刷新'; }
@@ -1096,6 +1309,57 @@
                 XLSX.utils.book_append_sheet(wb, ws, '排课表');
                 XLSX.writeFile(wb, `智教课表_${new Date().toISOString().slice(0,19)}.xlsx`);
             }
+
+            function exportSingleClassSchedule(cls) {
+                let sheetData = [['星期', ...periods.value.map(p => p.name)]];
+                for (let wi = 0; wi < weekdays.value.length; wi++) {
+                    let row = [weekdays.value[wi]];
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        const teacher = getTeacherByCell(wi, pi, cls);
+                        row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
+                    }
+                    sheetData.push(row);
+                }
+                const ws = XLSX.utils.aoa_to_sheet(sheetData);
+                if(!ws['!cols']) ws['!cols'] = [];
+                for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, `${cls}课表`);
+                XLSX.writeFile(wb, `${cls}课表_${new Date().toISOString().slice(0,10)}.xlsx`);
+            }
+
+            function exportCurrentClassSchedule() {
+                if (!selectedClass.value) {
+                    alert('请先选择一个班级');
+                    return;
+                }
+                exportSingleClassSchedule(selectedClass.value);
+            }
+
+            function exportAllClassSchedules() {
+                const wb = XLSX.utils.book_new();
+                for (let cls of classList.value) {
+                    let sheetData = [['星期', ...periods.value.map(p => p.name)]];
+                    for (let wi = 0; wi < weekdays.value.length; wi++) {
+                        let row = [weekdays.value[wi]];
+                        for (let pi = 0; pi < periods.value.length; pi++) {
+                            const teacher = getTeacherByCell(wi, pi, cls);
+                            row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
+                        }
+                        sheetData.push(row);
+                    }
+                    const ws = XLSX.utils.aoa_to_sheet(sheetData);
+                    if(!ws['!cols']) ws['!cols'] = [];
+                    for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
+                    XLSX.utils.book_append_sheet(wb, ws, `${cls}课表`);
+                }
+                XLSX.writeFile(wb, `所有班级课表_${new Date().toISOString().slice(0,10)}.xlsx`);
+                alert(`✅ 成功导出 ${classList.value.length} 个班级课表！`);
+            }
+
+            function viewAllClassSchedules() {
+                selectedClass.value = '';
+            }
             function exportProject() {
                 const data = { teachers: teachers.value, rules: rules.value, weekdays: weekdays.value, periods: periods.value, classList: classList.value, timetableData: timetableData.value };
                 const a = document.createElement('a');
@@ -1167,12 +1431,13 @@
 
             return {
                 activeMain, showRulesSub, activeSubRule, weekdays, periods, classList, teachers, rules, timetableData, lastConflictMsg,
-                showManualDialog, manualWeekIdx, manualPeriodIdx, manualClass, selectedTeacherId,
+                showManualDialog, manualWeekIdx, manualPeriodIdx, manualClass, selectedTeacherId, selectedClass,
                 rulesByType, addTypedRule, deleteRuleById, saveRulesToast, setMainMenu, toggleRulesSub, setRuleSubMenu,
                 saveTeachersSettings, saveScheduleSettings,
                 getTeacherByCell, isConflictCell, autoGenerateTimetable, refreshTimetableView,
                 openManualAdjust, closeManualDialog, applyManualAdjust, exportToExcel, exportProject, importProject,
-                addTeacher, syncTeachersFromEdu, deleteTeacher, addPeriod, removePeriod, addClass, removeClass
+                addTeacher, syncTeachersFromEdu, deleteTeacher, addPeriod, removePeriod, addClass, removeClass,
+                exportSingleClassSchedule, exportCurrentClassSchedule, exportAllClassSchedules, viewAllClassSchedules
             };
         }
     }).mount('#app');
