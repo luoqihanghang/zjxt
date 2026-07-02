@@ -311,6 +311,11 @@ const NAV_MENUS = {
       ]
     },
     {
+      group: "考务管理", icon: "🏛️", items: [
+        { id: "exam_arrangement", icon: "📋", text: "排考场系统" }
+      ]
+    },
+    {
       group: "全年组通知", icon: "🔔", items: [
         { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
       ]
@@ -955,6 +960,248 @@ function renderSchedule() {
   `;
 }
 
+// ========== 排考场系统 ==========
+function renderExamArrangement() {
+  // 仅教务端可见
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") {
+    $("pageContent").innerHTML = `<div class="empty-state"><div class="es-icon">🔒</div><div class="es-title">无权限</div><div class="es-tip">仅教务老师可使用排考场功能</div></div>`;
+    return;
+  }
+
+  const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
+  const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
+  const rosterClassCount = Object.keys(roster).length;
+  const rosterStudentCount = Object.values(roster).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
+  const examCount = (DB.exams || []).filter((e) => e.grade === grade).length;
+
+  $("pageContent").innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:linear-gradient(135deg,#1890ff,#096dd9);color:#fff">
+        <div>
+          <div style="font-size:18px;font-weight:600">📋 排考场系统</div>
+          <div style="font-size:13px;opacity:0.9;margin-top:4px">支持调取教务端考试数据 / 学生名单，便捷导入考生与考场信息</div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-light" onclick="openExamImportPicker()" style="background:#fff;color:#1890ff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
+            📥 便捷导入
+          </button>
+          <button class="btn btn-light" onclick="window.open('exam_arrangement.html', '_blank')" style="background:#fff;color:#1890ff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
+            🚀 新窗口打开
+          </button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;padding:16px 20px;background:#fafafa;border-bottom:1px solid #f0f0f0">
+        <div class="stat-card" style="padding:14px">
+          <div class="label">当前年级</div>
+          <div class="value primary" style="font-size:20px">${esc(grade)}</div>
+        </div>
+        <div class="stat-card" style="padding:14px">
+          <div class="label">已建班级</div>
+          <div class="value" style="font-size:20px">${rosterClassCount}</div>
+        </div>
+        <div class="stat-card" style="padding:14px">
+          <div class="label">学生总数</div>
+          <div class="value success" style="font-size:20px">${rosterStudentCount}</div>
+        </div>
+        <div class="stat-card" style="padding:14px">
+          <div class="label">关联考试</div>
+          <div class="value warning" style="font-size:20px">${examCount}</div>
+        </div>
+      </div>
+
+      <div style="padding:0">
+        <iframe id="examArrangementFrame" src="exam_arrangement.html" style="width:100%;height:calc(100vh - 320px);border:none;display:block;min-height:540px"></iframe>
+      </div>
+    </div>
+  `;
+}
+
+// 收集教务端的学生名单数据，转成排考场系统期望的格式
+function collectRosterStudentsForExam() {
+  const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
+  const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
+  const students = [];
+  const classNames = Object.keys(roster).sort((a, b) => {
+    const na = parseInt(a) || 0, nb = parseInt(b) || 0;
+    return na - nb;
+  });
+  classNames.forEach((classNo) => {
+    const list = roster[classNo] || [];
+    // 班级代码：取班级数字
+    const classNumMatch = String(classNo).match(/(\d+)/);
+    const classNum = classNumMatch ? classNumMatch[1] : "1";
+    const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
+    list.forEach((s, idx) => {
+      students.push({
+        name: s.studentName || s.name || "",
+        studentId: s.studentId || "",
+        className: classNo,
+        classCode: classCode,
+        classRank: 0,
+        gender: s.gender || "",
+        remark: ""
+      });
+    });
+  });
+  return { grade, students, classNames };
+}
+
+// 收集教务端的考试数据（用于命名 / 关联）
+function collectExamListForExamArrangement() {
+  const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
+  const exams = (DB.exams || [])
+    .filter((e) => e.grade === grade)
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .map((e) => ({ id: e.id, name: e.name, date: e.date, subjects: e.subjects || [] }));
+  return { grade, exams };
+}
+
+// 打开导入选择器：选考试（可选，用于带成绩排序） / 选考生范围
+window.openExamImportPicker = function () {
+  const { grade, students, classNames } = collectRosterStudentsForExam();
+  const { exams } = collectExamListForExamArrangement();
+
+  if (students.length === 0) {
+    showModal("暂无可导入的考生", `
+      <div class="alert alert-warning">
+        当前年级 <b>${esc(grade)}</b> 还没有学生名单数据。<br>
+        请先在【学生名单管理】中导入名单，再使用排考场。
+      </div>
+    `, "我知道了");
+    return;
+  }
+
+  const examOptions = exams.length > 0
+    ? `<div class="form-group"><label>关联考试（用于"成绩蛇形"等排序，可选）</label>
+         <select id="imp_exam"><option value="">不关联</option>${exams.map((e) => `<option value="${esc(e.id)}">${esc(e.name)}（${esc(e.date || "")}）</option>`).join("")}</select>
+       </div>`
+    : "";
+
+  const body = `
+    <div class="alert alert-info">
+      💡 将从教务端【学生名单管理】中读取 <b>${esc(grade)}</b> 的 <b>${students.length}</b> 名考生，
+      涵盖 <b>${classNames.length}</b> 个班级，一键导入到排考场系统。
+    </div>
+    <div class="form-group">
+      <label>选择要导入的班级（不选则导入全部）</label>
+      <div class="checkbox-group" style="max-height:160px;overflow-y:auto;border:1px solid #f0f0f0;padding:8px;border-radius:6px">
+        <label class="checkbox-item"><input type="checkbox" id="imp_all" checked /> <b>全选</b></label>
+        ${classNames.map((c) => {
+          const cnt = (DB.studentRoster[grade][c] || []).length;
+          return `<label class="checkbox-item"><input type="checkbox" class="imp_cls" value="${esc(c)}" checked /> ${esc(c)}（${cnt} 人）</label>`;
+        }).join("")}
+      </div>
+    </div>
+    ${examOptions}
+    <div class="form-group">
+      <label>导入方式</label>
+      <select id="imp_mode">
+        <option value="replace">替换现有考生（清空再导入）</option>
+        <option value="append" selected>追加（保留已有考生，仅新增缺失的）</option>
+      </select>
+    </div>
+  `;
+
+  showModal("📥 从教务端便捷导入", body, "开始导入", () => {
+    const selected = Array.from(document.querySelectorAll(".imp_cls:checked")).map((el) => el.value);
+    const mode = $("imp_mode").value;
+    const examId = $("imp_exam") ? $("imp_exam").value : "";
+    doImportRosterToExam({ grade, selectedClasses: selected, mode, examId });
+    return false; // 自己关闭
+  });
+
+  // 绑定全选联动
+  setTimeout(() => {
+    const all = $("imp_all");
+    if (!all) return;
+    all.onchange = () => {
+      document.querySelectorAll(".imp_cls").forEach((el) => (el.checked = all.checked));
+    };
+    document.querySelectorAll(".imp_cls").forEach((el) => {
+      el.onchange = () => {
+        const total = document.querySelectorAll(".imp_cls").length;
+        const checked = document.querySelectorAll(".imp_cls:checked").length;
+        all.checked = total === checked;
+        all.indeterminate = checked > 0 && checked < total;
+      };
+    });
+  }, 50);
+};
+
+// 执行导入：收集数据 → 通过 postMessage 推送给 iframe
+function doImportRosterToExam({ grade, selectedClasses, mode, examId }) {
+  const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
+  const students = [];
+  const classNames = (selectedClasses && selectedClasses.length > 0) ? selectedClasses : Object.keys(roster);
+
+  // 如果选择了考试，则提取该考试的总分作为 classRank 依据（供"成绩蛇形"用）
+  let scoreMap = {};
+  if (examId) {
+    const exam = (DB.exams || []).find((e) => e.id === examId);
+    const subjects = (exam && exam.subjects) || [];
+    (DB.records || []).filter((r) => r.examId === examId).forEach((r) => {
+      let total = 0;
+      subjects.forEach((s) => { total += Number(r.scores && r.scores[s]) || 0; });
+      if (total > 0) scoreMap[`${r.classNo}|${r.studentName}`] = total;
+    });
+  }
+
+  classNames.forEach((classNo) => {
+    const list = roster[classNo] || [];
+    const classNumMatch = String(classNo).match(/(\d+)/);
+    const classNum = classNumMatch ? classNumMatch[1] : "1";
+    const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
+    list.forEach((s) => {
+      const totalScore = scoreMap[`${classNo}|${s.studentName}`] || 0;
+      students.push({
+        name: s.studentName || s.name || "",
+        studentId: s.studentId || "",
+        className: classNo,
+        classCode: classCode,
+        classRank: 0,
+        gender: s.gender || "",
+        remark: totalScore > 0 ? `成绩:${totalScore}` : ""
+      });
+    });
+  });
+
+  // 关联考试名（写入 settings.examName 提示）
+  let examName = "";
+  if (examId) {
+    const exam = (DB.exams || []).find((e) => e.id === examId);
+    if (exam) examName = exam.name;
+  }
+
+  // 推送到 iframe
+  const frame = document.getElementById("examArrangementFrame");
+  if (frame && frame.contentWindow) {
+    frame.contentWindow.postMessage({
+      type: "eduImportStudents",
+      mode,
+      students,
+      examName,
+      grade
+    }, "*");
+    showToast(`已发送 ${students.length} 名考生到排考场系统`, "success", 2000);
+  } else {
+    showToast("iframe 未就绪，请稍后再试", "warning");
+  }
+
+  // 同步开新窗口场景：通过 localStorage 共享（仅"替换"模式覆盖一次）
+  try {
+    localStorage.setItem("eduExamArrangementImport", JSON.stringify({
+      ts: Date.now(),
+      mode,
+      students,
+      examName,
+      grade
+    }));
+  } catch (e) {}
+
+  closeModal();
+}
+
 // ========== 公告 ==========
 function renderAnnouncement() {
   const list = DB.announcements.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
@@ -1005,7 +1252,8 @@ const PAGE_RENDERERS = {
   group_scores: renderGroupScores,
   custom_analysis: renderCustomAnalysis,
   account_profile: renderAccountProfile,
-  schedule: renderSchedule
+  schedule: renderSchedule,
+  exam_arrangement: renderExamArrangement
 };
 
 // ========== 平台概览 ==========

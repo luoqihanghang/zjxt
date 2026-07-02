@@ -1,0 +1,3312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>专业排考场系统</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; }
+
+/* 顶部导航 */
+.header { background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%); color: #fff; padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.header h1 { font-size: 22px; font-weight: 600; }
+.header .subtitle { font-size: 13px; opacity: 0.9; margin-top: 4px; }
+.header-actions { display: flex; gap: 10px; }
+
+/* 主体布局 */
+.container { display: flex; height: calc(100vh - 68px); }
+.sidebar { width: 200px; background: #fff; border-right: 1px solid #e8e8e8; padding: 12px 0; }
+.sidebar-item { padding: 12px 20px; cursor: pointer; transition: all 0.2s; border-left: 3px solid transparent; display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.sidebar-item:hover { background: #e6f7ff; }
+.sidebar-item.active { background: #e6f7ff; border-left-color: #1890ff; color: #1890ff; font-weight: 500; }
+.sidebar-item .icon { font-size: 16px; width: 20px; text-align: center; }
+
+.main-content { flex: 1; overflow-y: auto; padding: 20px; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* 卡片 */
+.card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 16px; }
+.card-header { padding: 14px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+.card-title { font-size: 15px; font-weight: 600; color: #262626; }
+.card-body { padding: 20px; }
+
+/* 按钮 */
+.btn { padding: 7px 16px; border: 1px solid #d9d9d9; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; }
+.btn:hover { border-color: #1890ff; color: #1890ff; }
+.btn-primary { background: #1890ff; color: #fff; border-color: #1890ff; }
+.btn-primary:hover { background: #40a9ff; border-color: #40a9ff; color: #fff; }
+.btn-danger { background: #ff4d4f; color: #fff; border-color: #ff4d4f; }
+.btn-danger:hover { background: #ff7875; border-color: #ff7875; color: #fff; }
+.btn-success { background: #52c41a; color: #fff; border-color: #52c41a; }
+.btn-success:hover { background: #73d13d; border-color: #73d13d; color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+.btn-block { display: block; width: 100%; }
+
+/* 表单 */
+.form-row { display: flex; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+.form-item { flex: 1; min-width: 200px; }
+.form-label { display: block; font-size: 13px; color: #595959; margin-bottom: 6px; }
+.form-input, .form-select { width: 100%; padding: 7px 11px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 13px; outline: none; transition: border-color 0.2s; }
+.form-input:focus, .form-select:focus { border-color: #1890ff; box-shadow: 0 0 0 2px rgba(24,144,255,0.2); }
+
+/* 表格 */
+.table-wrapper { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #f0f0f0; }
+th { background: #fafafa; font-weight: 600; color: #262626; }
+tr:hover td { background: #fafafa; }
+
+/* 座位图 */
+.seat-map-container { display: flex; justify-content: center; padding: 20px; overflow: auto; }
+.seat-map { display: inline-block; }
+.seat-row { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; }
+.seat { width: 60px; height: 50px; border: 2px solid #d9d9d9; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 11px; background: #fff; cursor: pointer; transition: all 0.2s; position: relative; }
+.seat:hover { border-color: #1890ff; transform: scale(1.05); }
+.seat.occupied { background: #e6f7ff; border-color: #91d5ff; }
+.seat.empty { background: #fafafa; border-color: #e8e8e8; color: #bfbfbf; }
+.seat .seat-no { font-weight: 600; font-size: 13px; color: #1890ff; }
+.seat .name { font-size: 10px; color: #595959; margin-top: 2px; }
+.podium { background: #f0f0f0; padding: 12px; text-align: center; margin-bottom: 20px; border-radius: 6px; font-size: 13px; color: #595959; }
+
+/* 标签页 */
+.tabs { display: flex; border-bottom: 2px solid #f0f0f0; margin-bottom: 16px; }
+.tab { padding: 10px 20px; cursor: pointer; font-size: 14px; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+.tab:hover { color: #1890ff; }
+.tab.active { color: #1890ff; border-bottom-color: #1890ff; font-weight: 500; }
+
+/* 模态框 */
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); display: none; justify-content: center; align-items: center; z-index: 1000; }
+.modal-overlay.show { display: flex; }
+.modal { background: #fff; border-radius: 8px; max-width: 90vw; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; }
+.modal-header { padding: 14px 20px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+.modal-title { font-size: 16px; font-weight: 600; }
+.modal-close { cursor: pointer; font-size: 20px; color: #8c8c8c; }
+.modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-footer { padding: 12px 20px; border-top: 1px solid #f0f0f0; text-align: right; }
+
+/* 桌签 */
+.desk-card { width: 200px; height: 100px; border: 2px solid #333; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px; margin: 10px; page-break-inside: avoid; }
+.desk-card .name { font-size: 28px; font-weight: bold; margin-bottom: 8px; }
+.desk-card .info { font-size: 12px; color: #666; text-align: center; }
+.desk-cards-grid { display: flex; flex-wrap: wrap; justify-content: flex-start; }
+
+/* 打印样式 */
+@media print {
+    .no-print { display: none !important; }
+    .print-area { display: block !important; }
+    body { background: #fff; }
+    .main-content { padding: 0; overflow: visible; }
+    @page { margin: 10mm; }
+}
+.print-area { display: none; }
+
+/* 统计卡片 */
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 20px; }
+.stat-card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.stat-card .label { font-size: 13px; color: #8c8c8c; margin-bottom: 8px; }
+.stat-card .value { font-size: 28px; font-weight: 600; color: #262626; }
+.stat-card .value.primary { color: #1890ff; }
+.stat-card .value.success { color: #52c41a; }
+.stat-card .value.warning { color: #faad14; }
+
+/* 考场卡片列表 */
+.exam-room-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.exam-room-card { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px solid #f0f0f0; transition: all 0.2s; }
+.exam-room-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.exam-room-card .room-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+.exam-room-card .room-name { font-size: 16px; font-weight: 600; color: #262626; }
+.exam-room-card .room-info { font-size: 12px; color: #8c8c8c; line-height: 1.8; }
+.exam-room-card .room-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #f0f0f0; }
+
+/* 提示 */
+.alert { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+.alert-info { background: #e6f7ff; border: 1px solid #91d5ff; color: #0050b3; }
+.alert-warning { background: #fffbe6; border: 1px solid #ffe58f; color: #d48806; }
+.alert-success { background: #f6ffed; border: 1px solid #b7eb8f; color: #389e0d; }
+
+/* 开关 */
+.switch { position: relative; display: inline-block; width: 44px; height: 22px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .3s; border-radius: 22px; }
+.slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+input:checked + .slider { background-color: #1890ff; }
+input:checked + .slider:before { transform: translateX(22px); }
+
+/* 颜色选择 */
+.color-picker { width: 40px; height: 32px; padding: 2px; border: 1px solid #d9d9d9; border-radius: 6px; cursor: pointer; }
+
+/* 复选框组 */
+.checkbox-group { display: flex; flex-wrap: wrap; gap: 10px; }
+.checkbox-item { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+
+/* 拖拽排序 */
+.drag-handle { cursor: move; color: #bfbfbf; margin-right: 8px; }
+.drag-item { padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 6px; margin-bottom: 8px; background: #fff; display: flex; align-items: center; }
+.drag-item:hover { border-color: #1890ff; }
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+/* 步骤条 */
+.steps { display: flex; margin-bottom: 24px; }
+.step { flex: 1; text-align: center; position: relative; }
+.step .step-number { width: 32px; height: 32px; border-radius: 50%; background: #f0f0f0; color: #8c8c8c; display: inline-flex; align-items: center; justify-content: center; font-weight: 600; margin-bottom: 8px; }
+.step.active .step-number { background: #1890ff; color: #fff; }
+.step.completed .step-number { background: #52c41a; color: #fff; }
+.step .step-title { font-size: 13px; color: #595959; }
+.step.active .step-title { color: #1890ff; font-weight: 500; }
+
+/* 徽章 */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 500; }
+.badge-primary { background: #e6f7ff; color: #1890ff; }
+.badge-success { background: #f6ffed; color: #52c41a; }
+.badge-warning { background: #fffbe6; color: #faad14; }
+.badge-default { background: #f0f0f0; color: #595959; }
+</style>
+</head>
+<body>
+
+<div class="header no-print">
+    <div>
+        <h1>📋 专业排考场系统</h1>
+        <div class="subtitle">智能编排 · 自定义打印 · 批量导出</div>
+    </div>
+    <div class="header-actions">
+        <button class="btn" onclick="saveData()" title="保存数据">💾 保存</button>
+        <button class="btn" onclick="loadData()" title="加载数据">📂 加载</button>
+        <button class="btn btn-primary" onclick="showHelp()">❓ 帮助</button>
+    </div>
+</div>
+
+<div class="container">
+    <div class="sidebar no-print">
+        <div class="sidebar-item active" onclick="switchTab('dashboard')" data-tab="dashboard">
+            <span class="icon">📊</span><span>数据总览</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('students')" data-tab="students">
+            <span class="icon">👥</span><span>考生管理</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('examRooms')" data-tab="examRooms">
+            <span class="icon">🏫</span><span>考场管理</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('arrange')" data-tab="arrange">
+            <span class="icon">⚙️</span><span>排考设置</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('result')" data-tab="result">
+            <span class="icon">📋</span><span>编排结果</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('print')" data-tab="print">
+            <span class="icon">🖨️</span><span>打印中心</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('export')" data-tab="export">
+            <span class="icon">📥</span><span>数据导出</span>
+        </div>
+        <div class="sidebar-item" onclick="switchTab('settings')" data-tab="settings">
+            <span class="icon">⚙️</span><span>系统设置</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+
+        <!-- 数据总览 -->
+        <div id="tab-dashboard" class="tab-panel active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="label">考生总数</div>
+                    <div class="value primary" id="stat-students">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">考场总数</div>
+                    <div class="value success" id="stat-rooms">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">座位总数</div>
+                    <div class="value warning" id="stat-seats">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">已编排</div>
+                    <div class="value" id="stat-arranged">0</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">快速操作</div>
+                </div>
+                <div class="card-body">
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button class="btn btn-primary" onclick="switchTab('students')">👥 管理考生</button>
+                        <button class="btn btn-primary" onclick="switchTab('examRooms')">🏫 管理考场</button>
+                        <button class="btn btn-success" onclick="switchTab('arrange')">⚙️ 开始排考</button>
+                        <button class="btn" onclick="switchTab('print')">🖨️ 打印中心</button>
+                        <button class="btn" onclick="switchTab('export')">📥 数据导出</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">编排状态</div>
+                </div>
+                <div class="card-body">
+                    <div id="dashboard-status">
+                        <div class="alert alert-info">暂无编排数据，请先添加考生和考场，然后进行排考。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 考生管理 -->
+        <div id="tab-students" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">考生列表</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm" onclick="downloadTemplate()">📥 下载模板</button>
+                        <button class="btn btn-sm" onclick="document.getElementById('importFile').click()">📤 导入Excel</button>
+                        <input type="file" id="importFile" style="display:none;" accept=".xlsx,.xls,.csv" onchange="importStudents(event)">
+                        <button class="btn btn-sm btn-primary" onclick="showAddStudentModal()">➕ 添加考生</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearAllStudents()">🗑️ 清空</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">搜索考生</label>
+                            <input type="text" class="form-input" placeholder="输入姓名/班级搜索..." oninput="filterStudents(this.value)">
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">按班级筛选</label>
+                            <select class="form-select" id="filterClass" onchange="filterStudents(document.querySelector('#tab-students .form-input').value)">
+                                <option value="">全部班级</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-wrapper">
+                        <table id="studentsTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;">序号</th>
+                                    <th>姓名</th>
+                                    <th>班级</th>
+                                    <th>班级代码</th>
+                                    <th>班级排名</th>
+                                    <th>学号</th>
+                                    <th>性别</th>
+                                    <th>备注</th>
+                                    <th style="width: 120px;">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="studentsTbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">批量添加考生</div>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">班级</label>
+                            <input type="text" class="form-input" id="batchClass" placeholder="如：高三(1)班">
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">班级代码（两位）</label>
+                            <input type="text" class="form-input" id="batchClassCode" placeholder="如：01" maxlength="2">
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">人数</label>
+                            <input type="number" class="form-input" id="batchCount" placeholder="人数" min="1" value="40">
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">命名前缀</label>
+                            <input type="text" class="form-input" id="batchPrefix" placeholder="如：学生" value="学生">
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" onclick="batchAddStudents()">批量生成</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 考场管理 -->
+        <div id="tab-examRooms" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">考场列表</div>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn btn-sm btn-primary" onclick="showAddRoomModal()">➕ 添加考场</button>
+                        <button class="btn btn-sm" onclick="batchAddRooms()">📋 批量添加</button>
+                        <button class="btn btn-sm btn-danger" onclick="clearAllRooms()">🗑️ 清空</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="examRoomsList" class="exam-room-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 排考设置 -->
+        <div id="tab-arrange" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">排考设置</div>
+                </div>
+                <div class="card-body">
+                    <div class="steps">
+                        <div class="step active">
+                            <div class="step-number">1</div>
+                            <div class="step-title">选择排考规则</div>
+                        </div>
+                        <div class="step">
+                            <div class="step-number">2</div>
+                            <div class="step-title">选择考场</div>
+                        </div>
+                        <div class="step">
+                            <div class="step-number">3</div>
+                            <div class="step-title">开始编排</div>
+                        </div>
+                    </div>
+
+                    <div class="tabs" style="margin-top: 20px;">
+                        <div class="tab active" onclick="switchArrangeSubTab('basic')">基础排考</div>
+                        <div class="tab" onclick="switchArrangeSubTab('advanced')">高级排考</div>
+                        <div class="tab" onclick="switchArrangeSubTab('layered')">分层排考</div>
+                    </div>
+
+                    <!-- 基础排考 -->
+                    <div id="arrange-basic">
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">排序方式</label>
+                                <select class="form-select" id="arrangeMethod">
+                                    <option value="random">随机排序</option>
+                                    <option value="classRank">按班级排名</option>
+                                    <option value="scoreDesc">按成绩降序</option>
+                                    <option value="scoreAsc">按成绩升序</option>
+                                    <option value="className">按班级+姓名</option>
+                                    <option value="studentId">按学号</option>
+                                    <option value="snakeClass">蛇形分班（不同班级错开）</option>
+                                    <option value="classInterleave">班级交叉排列</option>
+                                    <option value="scoreSnake">成绩蛇形（S形分班）</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">考场分配策略</label>
+                                <select class="form-select" id="roomAssignStrategy">
+                                    <option value="sequential">按顺序填充（考场1填满再考场2）</option>
+                                    <option value="roundRobin">轮次分配（1号考场1，2号考场2...）</option>
+                                    <option value="balanced">均衡分配（各考场人数尽量平均）</option>
+                                    <option value="snakeRoom">蛇形分配（考场1→N→1）</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">座位填充顺序</label>
+                                <select class="form-select" id="fillOrder">
+                                    <option value="rowMajor">按行填充（先行后列）</option>
+                                    <option value="colMajor">按列填充（先列后行）</option>
+                                    <option value="snakeRow">蛇形行（S形）</option>
+                                    <option value="snakeCol">蛇形列（S形）</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">座位起始位置</label>
+                                <select class="form-select" id="startPosition">
+                                    <option value="tl">左上角（1号在左上）</option>
+                                    <option value="tr">右上角（1号在右上）</option>
+                                    <option value="bl">左下角（1号在左下）</option>
+                                    <option value="br">右下角（1号在右下）</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">
+                                    <input type="checkbox" id="differentClassAdjacent">
+                                    相邻座位不同班级（尽量）
+                                </label>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">
+                                    <input type="checkbox" id="allowEmptySeats" checked>
+                                    允许空座位（考场未满）
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 高级排考 -->
+                    <div id="arrange-advanced" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">主排序字段</label>
+                                <select class="form-select" id="advPrimarySort">
+                                    <option value="className">班级</option>
+                                    <option value="classRank">班级排名</option>
+                                    <option value="score">成绩</option>
+                                    <option value="studentId">学号</option>
+                                    <option value="name">姓名</option>
+                                    <option value="random">随机</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">主排序方向</label>
+                                <select class="form-select" id="advPrimaryOrder">
+                                    <option value="asc">升序</option>
+                                    <option value="desc">降序</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">次排序字段</label>
+                                <select class="form-select" id="advSecondarySort">
+                                    <option value="">无</option>
+                                    <option value="className">班级</option>
+                                    <option value="classRank">班级排名</option>
+                                    <option value="score">成绩</option>
+                                    <option value="studentId">学号</option>
+                                    <option value="name">姓名</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">次排序方向</label>
+                                <select class="form-select" id="advSecondaryOrder">
+                                    <option value="asc">升序</option>
+                                    <option value="desc">降序</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">考场分配方式</label>
+                                <select class="form-select" id="advRoomAssign" onchange="updateAdvRoomOptions()">
+                                    <option value="sequential">按顺序填充</option>
+                                    <option value="roundRobin">轮次分配</option>
+                                    <option value="balanced">均衡分配</option>
+                                    <option value="snakeRoom">蛇形分配</option>
+                                    <option value="byClass">按班级集中（同班尽量同考场）</option>
+                                    <option value="scatterClass">按班级分散（同班尽量不同考场）</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">考场内座位排列</label>
+                                <select class="form-select" id="advSeatFill">
+                                    <option value="rowMajor">按行填充</option>
+                                    <option value="colMajor">按列填充</option>
+                                    <option value="snakeRow">蛇形行</option>
+                                    <option value="snakeCol">蛇形列</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">座位起始位置</label>
+                                <select class="form-select" id="advStartPos">
+                                    <option value="tl">左上角</option>
+                                    <option value="tr">右上角</option>
+                                    <option value="bl">左下角</option>
+                                    <option value="br">右下角</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">
+                                    <input type="checkbox" id="advDifferentClass">
+                                    相邻座位尽量不同班级
+                                </label>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">
+                                    <input type="checkbox" id="advShuffleSameRank">
+                                    同排名学生随机打乱
+                                </label>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">
+                                    <input type="checkbox" id="advReserveFront">
+                                    考场前排预留空位
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 分层排考 -->
+                    <div id="arrange-layered" style="display:none;">
+                        <div class="alert alert-info">
+                            💡 分层排考：将考生按成绩/排名分成若干层，每层使用不同的分配策略。
+                            例如：前30名按成绩蛇形分配到各考场，剩余学生按班级轮次分配。
+                        </div>
+
+                        <div id="layerConfigContainer">
+                            <div class="card" style="border: 1px dashed #d9d9d9; margin-bottom: 12px;">
+                                <div class="card-body" style="padding: 16px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <strong>第1层（顶层）</strong>
+                                        <span class="badge badge-primary">按成绩分层</span>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-item">
+                                            <label class="form-label">分层方式</label>
+                                            <select class="form-select layer-method" data-layer="0">
+                                                <option value="topN">前N名</option>
+                                                <option value="topPercent">前N%</option>
+                                                <option value="scoreAbove">分数大于等于</option>
+                                                <option value="rankRange">排名范围</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-item">
+                                            <label class="form-label">数值</label>
+                                            <input type="number" class="form-input layer-value" data-layer="0" value="30" min="1">
+                                        </div>
+                                        <div class="form-item">
+                                            <label class="form-label">本层排序</label>
+                                            <select class="form-select layer-sort" data-layer="0">
+                                                <option value="scoreDesc">成绩降序</option>
+                                                <option value="scoreAsc">成绩升序</option>
+                                                <option value="classRank">班级排名</option>
+                                                <option value="random">随机</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-item">
+                                            <label class="form-label">分配策略</label>
+                                            <select class="form-select layer-strategy" data-layer="0">
+                                                <option value="snakeRoom">蛇形分配（S形）</option>
+                                                <option value="roundRobin">轮次分配</option>
+                                                <option value="sequential">按顺序填充</option>
+                                                <option value="balanced">均衡分配</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card" style="border: 1px dashed #d9d9d9; margin-bottom: 12px;">
+                                <div class="card-body" style="padding: 16px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <strong>第2层（剩余学生）</strong>
+                                        <span class="badge badge-success">默认层</span>
+                                    </div>
+                                    <div class="form-row">
+                                        <div class="form-item">
+                                            <label class="form-label">本层排序</label>
+                                            <select class="form-select layer-sort" data-layer="1">
+                                                <option value="classInterleave">班级交叉</option>
+                                                <option value="random">随机</option>
+                                                <option value="className">按班级</option>
+                                                <option value="classRank">班级排名</option>
+                                                <option value="scoreDesc">成绩降序</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-item">
+                                            <label class="form-label">分配策略</label>
+                                            <select class="form-select layer-strategy" data-layer="1">
+                                                <option value="roundRobin">轮次分配</option>
+                                                <option value="snakeRoom">蛇形分配</option>
+                                                <option value="sequential">按顺序填充</option>
+                                                <option value="balanced">均衡分配</option>
+                                                <option value="byClass">按班级集中</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="margin-bottom: 12px;">
+                            <button class="btn btn-sm" onclick="addLayer()">➕ 添加分层</button>
+                            <button class="btn btn-sm btn-danger" onclick="removeLayer()" id="removeLayerBtn" style="display:none;">➖ 移除最后一层</button>
+                        </div>
+                    </div>
+
+                    <div class="form-row" style="margin-top: 16px;">
+                        <div class="form-item">
+                            <label class="form-label">准考证号格式</label>
+                            <input type="text" class="form-input" id="ticketFormat" value="{room}{seatNo2}{classCode2}{classRank2}" readonly>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info">
+                        💡 准考证号规则：考场号（不补零）+ 座位号（两位）+ 班级代码（两位）+ 班级排名（两位）
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 12px; font-size: 14px;">选择参与排考的考场</h4>
+                        <div id="roomSelection"></div>
+                    </div>
+
+                    <div style="margin-top: 20px; text-align: center;">
+                        <button class="btn btn-primary btn-lg" style="padding: 10px 30px; font-size: 15px;" onclick="doArrange()">
+                        🚀 开始排考
+                    </button>
+                        <button class="btn" style="padding: 10px 30px; font-size: 15px; margin-left: 10px;" onclick="resetArrange()">
+                        🔄 重置编排
+                    </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 编排结果 -->
+        <div id="tab-result" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">编排结果</div>
+                    <div style="display: flex; gap: 8px;">
+                        <select class="form-select form-select-sm" id="resultRoomSelect" style="width: 200px;" onchange="showRoomSeatMap()">
+                            <option value="">选择考场...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="seat-map-container" id="seatMapContainer">
+                        <div style="text-align: center; color: #8c8c8c; padding: 40px;">
+                            请先进行排考，然后选择考场查看座位图
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">考生编排详情</div>
+                    <div style="display: flex; gap: 8px;">
+                        <select class="form-select form-select-sm" id="detailFilter" style="width: 150px;" onchange="filterResultDetail()">
+                            <option value="all">全部</option>
+                            <option value="room">按考场</option>
+                            <option value="class">按班级</option>
+                        </select>
+                        <select class="form-select form-select-sm" id="detailFilterValue" style="width: 150px;" onchange="filterResultDetail()">
+                        </select>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>准考证号</th>
+                                <th>姓名</th>
+                                <th>班级</th>
+                                <th>考场号</th>
+                                <th>座位号</th>
+                                <th>班级排名</th>
+                            </tr>
+                        </thead>
+                        <tbody id="resultTbody"></tbody>
+                    </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 打印中心 -->
+        <div id="tab-print" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">打印中心</div>
+                </div>
+                <div class="card-body">
+                    <div class="tabs">
+                        <div class="tab active" onclick="switchPrintTab('desk')">桌签打印</div>
+                        <div class="tab" onclick="switchPrintTab('info')">考生信息表</div>
+                        <div class="tab" onclick="switchPrintTab('seatMap')">座位表</div>
+                    </div>
+
+                    <!-- 桌签打印 -->
+                    <div id="print-desk">
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">打印范围</label>
+                                <select class="form-select" id="deskPrintRange" onchange="updateDeskPrintOptions()">
+                                    <option value="all">全部考场</option>
+                                    <option value="room">指定考场</option>
+                                    <option value="class">指定班级</option>
+                                </select>
+                            </div>
+                            <div class="form-item" id="deskRoomSelect" style="display:none;">
+                                <label class="form-label">选择考场</label>
+                                <select class="form-select" id="deskRoom">
+                                    <option value="">请选择</option>
+                                </select>
+                            </div>
+                            <div class="form-item" id="deskClassSelect" style="display:none;">
+                                <label class="form-label">选择班级</label>
+                                <select class="form-select" id="deskClass">
+                                    <option value="">请选择</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">每页数量（每行）</label>
+                                <select class="form-select" id="deskPerRow">
+                                    <option value="2">2个/行</option>
+                                    <option value="3">3个/行</option>
+                                    <option value="4" selected>4个/行</option>
+                                    <option value="5">5个/行</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">桌签内容</label>
+                                <div class="checkbox-group">
+                                    <label class="checkbox-item"><input type="checkbox" id="deskShowName" checked> 姓名</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="deskShowTicket" checked> 准考证号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="deskShowRoom"> 考场号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="deskShowSeat"> 座位号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="deskShowClass"> 班级</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">姓名大小</label>
+                                <input type="number" class="form-input" id="deskNameSize" value="28" min="12" max="60">
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">桌签宽度(px)</label>
+                                <input type="number" class="form-input" id="deskWidth" value="200" min="100" max="500">
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">桌签高度(px)</label>
+                                <input type="number" class="form-input" id="deskHeight" value="100" min="50" max="300">
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">边框颜色</label>
+                                <input type="color" class="color-picker" id="deskBorderColor" value="#333333">
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" onclick="previewDeskCards()">👁️ 预览桌签</button>
+                        <button class="btn btn-success" onclick="printDeskCards()">🖨️ 打印桌签</button>
+                    </div>
+
+                    <!-- 考生信息表 -->
+                    <div id="print-info" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">打印范围</label>
+                                <select class="form-select" id="infoPrintRange" onchange="updateInfoPrintOptions()">
+                                    <option value="all">全部考生</option>
+                                    <option value="room">按考场</option>
+                                    <option value="class">按班级</option>
+                                </select>
+                            </div>
+                            <div class="form-item" id="infoRoomSelect" style="display:none;">
+                                <label class="form-label">选择考场</label>
+                                <select class="form-select" id="infoRoom">
+                                    <option value="">请选择</option>
+                                </select>
+                            </div>
+                            <div class="form-item" id="infoClassSelect" style="display:none;">
+                                <label class="form-label">选择班级</label>
+                                <select class="form-select" id="infoClass">
+                                    <option value="">请选择</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">每页条数</label>
+                                <select class="form-select" id="infoPerPage">
+                                    <option value="20">20条/页</option>
+                                    <option value="30">30条/页</option>
+                                    <option value="40" selected>40条/页</option>
+                                    <option value="50">50条/页</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">显示列</label>
+                                <div class="checkbox-group">
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColTicket" checked> 准考证号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColName" checked> 姓名</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColClass" checked> 班级</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColRoom" checked> 考场号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColSeat" checked> 座位号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColRank"> 班级排名</label>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="previewInfoTable()">👁️ 预览</button>
+                        <button class="btn btn-success" onclick="printInfoTable()">🖨️ 打印</button>
+                    </div>
+
+                    <!-- 座位表 -->
+                    <div id="print-seatMap" style="display:none;">
+                        <div class="form-row">
+                            <div class="form-item">
+                                <label class="form-label">选择考场</label>
+                                <select class="form-select" id="seatMapRoom">
+                                    <option value="">请选择</option>
+                                </select>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">显示姓名</label>
+                                <label class="switch">
+                                    <input type="checkbox" id="seatMapShowName" checked>
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                            <div class="form-item">
+                                <label class="form-label">显示准考证号</label>
+                                <label class="switch">
+                                    <input type="checkbox" id="seatMapShowTicket">
+                                    <span class="slider"></span>
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary" onclick="previewSeatMapPrint()">👁️ 预览</button>
+                        <button class="btn btn-success" onclick="printSeatMap()">🖨️ 打印座位表</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 打印预览区 -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">打印预览</div>
+                </div>
+                <div class="card-body" id="printPreviewArea">
+                    <div style="text-align: center; color: #8c8c8c; padding: 40px;">
+                    请选择打印类型并点击预览
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 数据导出 -->
+        <div id="tab-export" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">数据导出</div>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">导出方式</label>
+                            <select class="form-select" id="exportType" onchange="updateExportOptions()">
+                                <option value="all">全部考生信息（总表）</option>
+                                <option value="byRoom">按考场分批导出</option>
+                                <option value="byClass">按班级分批导出</option>
+                                <option value="studentsOnly">仅考生名单</option>
+                                <option value="roomsOnly">仅考场信息</option>
+                            </select>
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">文件格式</label>
+                            <select class="form-select" id="exportFormat">
+                                <option value="xlsx">Excel (.xlsx)</option>
+                                <option value="xls">Excel 97-2003 (.xls)</option>
+                                <option value="csv">CSV (.csv)</option>
+                            </select>
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">文件名前缀</label>
+                            <input type="text" class="form-input" id="exportFileName" value="考场编排">
+                        </div>
+                    </div>
+
+                    <div class="form-row" id="exportRoomOptions" style="display:none;">
+                        <div class="form-item">
+                            <label class="form-label">选择考场（可多选）</label>
+                            <div id="exportRoomCheckboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #d9d9d9; border-radius: 6px; padding: 10px;"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-row" id="exportClassOptions" style="display:none;">
+                        <div class="form-item">
+                            <label class="form-label">选择班级（可多选）</label>
+                            <div id="exportClassCheckboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #d9d9d9; border-radius: 6px; padding: 10px;"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">导出字段</label>
+                            <div class="checkbox-group">
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="ticketNo" checked> 准考证号</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="name" checked> 姓名</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="className" checked> 班级</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="classCode"> 班级代码</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="roomNo" checked> 考场号</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="seatNo" checked> 座位号</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="classRank"> 班级排名</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="studentId"> 学号</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="gender"> 性别</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary btn-lg" onclick="doExport()">📥 导出数据</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统设置 -->
+        <div id="tab-settings" class="tab-panel">
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">系统设置</div>
+                </div>
+                <div class="card-body">
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">考试名称</label>
+                            <input type="text" class="form-input" id="settingExamName" value="期末考试" placeholder="如：2024年秋季学期期末考试">
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">学校名称</label>
+                            <input type="text" class="form-input" id="settingSchoolName" value="示例中学" placeholder="学校名称">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">主题色</label>
+                            <input type="color" class="color-picker" id="settingThemeColor" value="#1890ff" onchange="updateThemeColor(this.value)">
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">座位号位数</label>
+                            <select class="form-select" id="settingSeatDigits">
+                                <option value="2" selected>2位</option>
+                                <option value="3">3位</option>
+                            </select>
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">班级代码位数</label>
+                            <select class="form-select" id="settingClassCodeDigits">
+                                <option value="2" selected>2位</option>
+                                <option value="3">3位</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-item">
+                            <label class="form-label">
+                                <input type="checkbox" id="settingAutoSave" checked>
+                                自动保存到本地
+                            </label>
+                        </div>
+                        <div class="form-item">
+                            <label class="form-label">
+                                <input type="checkbox" id="settingConfirmDelete" checked>
+                                删除前确认
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <h4 style="margin-bottom: 12px; font-size: 14px;">数据管理</h4>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn" onclick="exportAllData()">📤 导出全部数据</button>
+                            <button class="btn" onclick="document.getElementById('importAllFile').click()">📥 导入数据文件</button>
+                            <input type="file" id="importAllFile" style="display:none;" accept=".json" onchange="importAllData(event)">
+                            <button class="btn btn-danger" onclick="resetAllData()">🔄 重置所有数据</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">关于系统</div>
+                </div>
+                <div class="card-body">
+                    <p style="font-size: 13px; color: #595959; line-height: 1.8;">
+                        <strong>专业排考场系统 v2.0</strong><br>
+                        功能特性：<br>
+                        • 灵活的考生管理，支持Excel导入导出<br>
+                        • 自定义考场信息，支持多种座位排列方式<br>
+                        • 多种排考规则，支持蛇形排列、随机排列等<br>
+                        • 自定义准考证号生成规则<br>
+                        • 丰富的打印功能，桌签、考生信息表、座位表<br>
+                        • 按考场/按班级批量导出<br>
+                        • 数据本地保存，安全可靠
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- 添加考生模态框 -->
+<div class="modal-overlay" id="studentModal">
+    <div class="modal" style="width: 500px;">
+        <div class="modal-header">
+            <div class="modal-title" id="studentModalTitle">添加考生</div>
+            <span class="modal-close" onclick="closeModal('studentModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editStudentIndex">
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">姓名 *</label>
+                    <input type="text" class="form-input" id="studentName" placeholder="请输入姓名">
+                </div>
+                <div class="form-item">
+                    <label class="form-label">学号</label>
+                    <input type="text" class="form-input" id="studentId" placeholder="请输入学号">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">班级 *</label>
+                    <input type="text" class="form-input" id="studentClass" placeholder="如：高三(1)班">
+                </div>
+                <div class="form-item">
+                    <label class="form-label">班级代码（两位）*</label>
+                    <input type="text" class="form-input" id="studentClassCode" placeholder="如：01" maxlength="2">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">班级排名 *</label>
+                    <input type="number" class="form-input" id="studentClassRank" placeholder="班级内排名" min="1">
+                </div>
+                <div class="form-item">
+                    <label class="form-label">性别</label>
+                    <select class="form-select" id="studentGender">
+                        <option value="">未设置</option>
+                        <option value="男">男</option>
+                        <option value="女">女</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">备注</label>
+                    <input type="text" class="form-input" id="studentRemark" placeholder="备注信息">
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal('studentModal')">取消</button>
+            <button class="btn btn-primary" onclick="saveStudent()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 添加考场模态框 -->
+<div class="modal-overlay" id="roomModal">
+    <div class="modal" style="width: 600px;">
+        <div class="modal-header">
+            <div class="modal-title" id="roomModalTitle">添加考场</div>
+            <span class="modal-close" onclick="closeModal('roomModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="editRoomIndex">
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">考场号 *</label>
+                    <input type="text" class="form-input" id="roomNo" placeholder="如：01 或 1">
+                </div>
+                <div class="form-item">
+                    <label class="form-label">考场名称</label>
+                    <input type="text" class="form-input" id="roomName" placeholder="如：第一考场">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">教室位置</label>
+                    <input type="text" class="form-input" id="roomLocation" placeholder="如：教学楼301室">
+                </div>
+                <div class="form-item">
+                    <label class="form-label">监考老师</label>
+                    <input type="text" class="form-input" id="roomInvigilator" placeholder="监考老师姓名">
+                </div>
+            </div>
+
+            <h4 style="font-size: 14px; margin: 16px 0 12px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">座位排列设置</h4>
+
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">列数（横排几个）*</label>
+                    <input type="number" class="form-input" id="roomCols" value="6" min="1" max="20">
+                </div>
+                <div class="form-item">
+                    <label class="form-label">行数（纵排几个）*</label>
+                    <input type="number" class="form-input" id="roomRows" value="6" min="1" max="20">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">排列方向</label>
+                    <select class="form-select" id="roomDirection">
+                        <option value="horizontal">横向排列（行优先）</option>
+                        <option value="vertical">纵向排列（列优先）</option>
+                        <option value="snakeH">蛇形横向（S形）</option>
+                        <option value="snakeV">蛇形纵向（S形）</option>
+                    </select>
+                </div>
+                <div class="form-item">
+                    <label class="form-label">起始位置</label>
+                    <select class="form-select" id="roomStartPos">
+                        <option value="tl">左上角 → 向右向下</option>
+                        <option value="tr">右上角 → 向左向下</option>
+                        <option value="bl">左下角 → 向右向上</option>
+                        <option value="br">右下角 → 向左向上</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">
+                        <input type="checkbox" id="roomHasPodium" checked>
+                        显示讲台
+                    </label>
+                </div>
+                <div class="form-item">
+                    <label class="form-label">讲台位置</label>
+                    <select class="form-select" id="roomPodiumPos">
+                        <option value="top">上方（顶部）</option>
+                        <option value="bottom">下方（底部）</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">禁用座位（逗号分隔，如：3,7,15）</label>
+                    <input type="text" class="form-input" id="roomDisabledSeats" placeholder="输入要禁用的座位号">
+                </div>
+            </div>
+
+            <div style="margin-top: 16px; padding: 12px; background: #fafafa; border-radius: 6px;">
+                <div style="font-size: 13px; color: #595959; margin-bottom: 8px;">座位预览：</div>
+                <div id="roomPreview" style="display: flex; justify-content: center;"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal('roomModal')">取消</button>
+            <button class="btn btn-primary" onclick="saveRoom()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 帮助模态框 -->
+<div class="modal-overlay" id="helpModal">
+    <div class="modal" style="width: 700px; max-height: 80vh;">
+        <div class="modal-header">
+            <div class="modal-title">使用帮助</div>
+            <span class="modal-close" onclick="closeModal('helpModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div style="font-size: 13px; line-height: 2; color: #595959;">
+                <h3 style="color: #262626; margin-bottom: 10px;">📋 快速入门</h3>
+                <p><strong>第一步：添加考生</strong></p>
+                <p>在"考生管理"页面添加考生信息，可以手动添加、批量生成，或通过Excel导入。Excel导入时请先下载模板。</p>
+                
+                <p><strong>第二步：添加考场</strong></p>
+                <p>在"考场管理"页面添加考场，设置考场的行列数、排列方向、起始位置等。</p>
+                
+                <p><strong>第三步：排考设置</strong></p>
+                <p>在"排考设置"页面选择排序方式、填充顺序等规则，点击"开始排考"。</p>
+                
+                <p><strong>第四步：查看结果</strong></p>
+                <p>在"编排结果"页面查看座位图和考生详情。</p>
+                
+                <p><strong>第五步：打印/导出</strong></p>
+                <p>在"打印中心"打印桌签、考生信息表、座位表；在"数据导出"页面导出Excel。</p>
+
+                <h3 style="color: #262626; margin: 20px 0 10px;">🎫 准考证号规则</h3>
+                <p>准考证号 = 考场号（不补零）+ 座位号（两位）+ 班级代码（两位）+ 班级排名（两位）</p>
+                <p>例如：考场1，座位05，班级代码03，班级排名12 → 准考证号为 1050312</p>
+
+                <h3 style="color: #262626; margin: 20px 0 10px;">📐 座位排列说明</h3>
+                <p><strong>排列方向：</strong></p>
+                <p>• 横向排列：从左到右，从上到下依次编号</p>
+                <p>• 纵向排列：从上到下，从左到右依次编号</p>
+                <p>• 蛇形横向：奇数行从左到右，偶数行从右到左（S形）</p>
+                <p>• 蛇形纵向：奇数列从上到下，偶数列从下到上（S形）</p>
+                
+                <p><strong>起始位置：</strong>1号座位的起始角落</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 打印区域 -->
+<div id="printArea" class="print-area"></div>
+
+<script>
+// ==================== 数据存储 ====================
+let appData = {
+    students: [],
+    rooms: [],
+    arrangements: [],
+    settings: {
+        examName: '期末考试',
+        schoolName: '示例中学',
+        themeColor: '#1890ff',
+        seatDigits: 2,
+        classCodeDigits: 2,
+        autoSave: true,
+        confirmDelete: true
+    }
+};
+
+// ==================== 初始化 ====================
+document.addEventListener('DOMContentLoaded', function() {
+    loadFromLocal();
+    updateDashboard();
+    renderStudents();
+    renderRooms();
+    updateRoomSelections();
+    updateFilterOptions();
+    initRoomPreview();
+    
+    // 考场预览实时更新
+    ['roomCols', 'roomRows', 'roomDirection', 'roomStartPos', 'roomDisabledSeats', 'roomHasPodium'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', updateRoomPreview);
+        if (el) el.addEventListener('input', updateRoomPreview);
+    });
+});
+
+// ==================== 标签页切换 ====================
+function switchTab(tabName) {
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.tab === tabName) item.classList.add('active');
+    });
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    document.getElementById('tab-' + tabName).classList.add('active');
+    
+    if (tabName === 'result') {
+        updateResultRoomSelect();
+        renderResultDetail();
+    }
+    if (tabName === 'print') {
+        updatePrintSelects();
+    }
+    if (tabName === 'export') {
+        updateExportCheckboxes();
+    }
+    if (tabName === 'dashboard') {
+        updateDashboard();
+    }
+}
+
+// ==================== 数据总览 ====================
+function updateDashboard() {
+    document.getElementById('stat-students').textContent = appData.students.length;
+    document.getElementById('stat-rooms').textContent = appData.rooms.length;
+    let totalSeats = 0;
+    appData.rooms.forEach(r => {
+        totalSeats += (r.rows * r.cols);
+    });
+    document.getElementById('stat-seats').textContent = totalSeats;
+    document.getElementById('stat-arranged').textContent = appData.arrangements.length;
+    
+    const statusEl = document.getElementById('dashboard-status');
+    if (appData.arrangements.length > 0) {
+        statusEl.innerHTML = `
+            <div class="alert alert-success">
+                ✅ 已完成编排，共 ${appData.arrangements.length} 名考生已分配座位。
+            </div>
+        `;
+    } else {
+        statusEl.innerHTML = `
+            <div class="alert alert-info">
+                暂无编排数据，请先添加考生和考场，然后进行排考。
+            </div>
+        `;
+    }
+}
+
+// ==================== 考生管理 ====================
+function renderStudents(filter = '') {
+    const tbody = document.getElementById('studentsTbody');
+    let students = appData.students;
+    
+    if (filter) {
+        students = students.filter(s => 
+            s.name.includes(filter) || 
+            s.className.includes(filter)
+        );
+    }
+    
+    const classFilter = document.getElementById('filterClass').value;
+    if (classFilter) {
+        students = students.filter(s => s.className === classFilter);
+    }
+    
+    tbody.innerHTML = students.map((s, i) => `
+        <tr>
+            <td>${i + 1}</td>
+            <td>${s.name || '-'}</td>
+            <td>${s.className || '-'}</td>
+            <td>${s.classCode || '-'}</td>
+            <td>${s.classRank || '-'}</td>
+            <td>${s.studentId || '-'}</td>
+            <td>${s.gender || '-'}</td>
+            <td>${s.remark || '-'}</td>
+            <td>
+                <button class="btn btn-sm" onclick="editStudent(${appData.students.indexOf(s)})">编辑</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteStudent(${appData.students.indexOf(s)})">删除</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function filterStudents(keyword) {
+    renderStudents(keyword);
+}
+
+function updateFilterOptions() {
+    const classes = [...new Set(appData.students.map(s => s.className))];
+    const select = document.getElementById('filterClass');
+    select.innerHTML = '<option value="">全部班级</option>' + 
+        classes.map(c => `<option value="${c}">${c}</option>`).join('');
+}
+
+function showAddStudentModal() {
+    document.getElementById('studentModalTitle').textContent = '添加考生';
+    document.getElementById('editStudentIndex').value = '';
+    document.getElementById('studentName').value = '';
+    document.getElementById('studentId').value = '';
+    document.getElementById('studentClass').value = '';
+    document.getElementById('studentClassCode').value = '';
+    document.getElementById('studentClassRank').value = '';
+    document.getElementById('studentGender').value = '';
+    document.getElementById('studentRemark').value = '';
+    showModal('studentModal');
+}
+
+function editStudent(index) {
+    const s = appData.students[index];
+    document.getElementById('studentModalTitle').textContent = '编辑考生';
+    document.getElementById('editStudentIndex').value = index;
+    document.getElementById('studentName').value = s.name || '';
+    document.getElementById('studentId').value = s.studentId || '';
+    document.getElementById('studentClass').value = s.className || '';
+    document.getElementById('studentClassCode').value = s.classCode || '';
+    document.getElementById('studentClassRank').value = s.classRank || '';
+    document.getElementById('studentGender').value = s.gender || '';
+    document.getElementById('studentRemark').value = s.remark || '';
+    showModal('studentModal');
+}
+
+function saveStudent() {
+    const index = document.getElementById('editStudentIndex').value;
+    const student = {
+        name: document.getElementById('studentName').value.trim(),
+        studentId: document.getElementById('studentId').value.trim(),
+        className: document.getElementById('studentClass').value.trim(),
+        classCode: document.getElementById('studentClassCode').value.trim(),
+        classRank: parseInt(document.getElementById('studentClassRank').value) || 0,
+        gender: document.getElementById('studentGender').value,
+        remark: document.getElementById('studentRemark').value.trim()
+    };
+    
+    if (!student.name) { alert('请输入姓名'); return; }
+    if (!student.className) { alert('请输入班级'); return; }
+    if (!student.classCode) { alert('请输入班级代码'); return; }
+    
+    if (index !== '') {
+        appData.students[index] = student;
+    } else {
+        appData.students.push(student);
+    }
+    
+    closeModal('studentModal');
+    renderStudents();
+    updateFilterOptions();
+    updateDashboard();
+    autoSave();
+}
+
+function deleteStudent(index) {
+    if (appData.settings.confirmDelete && !confirm('确定删除该考生吗？')) return;
+    appData.students.splice(index, 1);
+    renderStudents();
+    updateFilterOptions();
+    updateDashboard();
+    autoSave();
+}
+
+function clearAllStudents() {
+    if (appData.settings.confirmDelete && !confirm('确定清空所有考生吗？')) return;
+    appData.students = [];
+    renderStudents();
+    updateFilterOptions();
+    updateDashboard();
+    autoSave();
+}
+
+function batchAddStudents() {
+    const className = document.getElementById('batchClass').value.trim();
+    const classCode = document.getElementById('batchClassCode').value.trim();
+    const count = parseInt(document.getElementById('batchCount').value) || 0;
+    const prefix = document.getElementById('batchPrefix').value.trim() || '学生';
+    
+    if (!className) { alert('请输入班级'); return; }
+    if (!classCode) { alert('请输入班级代码'); return; }
+    if (count <= 0) { alert('请输入有效人数'); return; }
+    
+    for (let i = 1; i <= count; i++) {
+        appData.students.push({
+            name: prefix + i,
+            studentId: '',
+            className: className,
+            classCode: classCode,
+            classRank: i,
+            gender: '',
+            remark: ''
+        });
+    }
+    
+    renderStudents();
+    updateFilterOptions();
+    updateDashboard();
+    autoSave();
+    alert(`成功添加 ${count} 名考生`);
+}
+
+function downloadTemplate() {
+    const data = [
+        ['姓名', '班级', '班级代码', '班级排名', '学号', '性别', '备注'],
+        ['张三', '高三(1)班', '01', '1', '2024001', '男', '']
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '考生名单');
+    XLSX.writeFile(wb, '考生导入模板.xlsx');
+}
+
+function importStudents(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(sheet);
+            
+            let count = 0;
+            jsonData.forEach(row => {
+                const student = {
+                    name: row['姓名'] || row['name'] || '',
+                    className: row['班级'] || row['className'] || '',
+                    classCode: String(row['班级代码'] || row['classCode'] || ''),
+                    classRank: parseInt(row['班级排名'] || row['classRank']) || 0,
+                    studentId: row['学号'] || row['studentId'] || '',
+                    gender: row['性别'] || row['gender'] || '',
+                    remark: row['备注'] || row['remark'] || ''
+                };
+                if (student.name && student.className) {
+                    appData.students.push(student);
+                    count++;
+                }
+            });
+            
+            renderStudents();
+            updateFilterOptions();
+            updateDashboard();
+            autoSave();
+            alert(`成功导入 ${count} 名考生`);
+        } catch (err) {
+            alert('导入失败：' + err.message);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    event.target.value = '';
+}
+
+// ==================== 考场管理 ====================
+function renderRooms() {
+    const container = document.getElementById('examRoomsList');
+    if (appData.rooms.length === 0) {
+        container.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #8c8c8c; padding: 40px;">暂无考场，点击"添加考场"开始创建</div>';
+        return;
+    }
+    
+    container.innerHTML = appData.rooms.map((r, i) => `
+        <div class="exam-room-card">
+            <div class="room-header">
+                <div class="room-name">${r.roomName || '考场' + r.roomNo}</div>
+                <span class="badge badge-primary">${r.roomNo}号</span>
+            </div>
+            <div class="room-info">
+                <div>📍 位置：${r.location || '-'}</div>
+                <div>👨‍🏫 监考：${r.invigilator || '-'}</div>
+                <div>📐 ${r.rows}行 × ${r.cols}列 = ${r.rows * r.cols}座</div>
+                <div>🔄 排列：${getDirectionText(r.direction)}</div>
+                <div>📍 起点：${getStartPosText(r.startPos)}</div>
+            </div>
+            <div class="room-actions">
+                <button class="btn btn-sm" onclick="editRoom(${i})">编辑</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteRoom(${i})">删除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getDirectionText(dir) {
+    const map = {
+        'horizontal': '横向排列',
+        'vertical': '纵向排列',
+        'snakeH': '蛇形横向',
+        'snakeV': '蛇形纵向'
+    };
+    return map[dir] || dir;
+}
+
+function getStartPosText(pos) {
+    const map = {
+        'tl': '左上角',
+        'tr': '右上角',
+        'bl': '左下角',
+        'br': '右下角'
+    };
+    return map[pos] || pos;
+}
+
+function showAddRoomModal() {
+    document.getElementById('roomModalTitle').textContent = '添加考场';
+    document.getElementById('editRoomIndex').value = '';
+    document.getElementById('roomNo').value = '';
+    document.getElementById('roomName').value = '';
+    document.getElementById('roomLocation').value = '';
+    document.getElementById('roomInvigilator').value = '';
+    document.getElementById('roomCols').value = '6';
+    document.getElementById('roomRows').value = '6';
+    document.getElementById('roomDirection').value = 'horizontal';
+    document.getElementById('roomStartPos').value = 'tl';
+    document.getElementById('roomHasPodium').checked = true;
+    document.getElementById('roomPodiumPos').value = 'top';
+    document.getElementById('roomDisabledSeats').value = '';
+    updateRoomPreview();
+    showModal('roomModal');
+}
+
+function editRoom(index) {
+    const r = appData.rooms[index];
+    document.getElementById('roomModalTitle').textContent = '编辑考场';
+    document.getElementById('editRoomIndex').value = index;
+    document.getElementById('roomNo').value = r.roomNo;
+    document.getElementById('roomName').value = r.roomName || '';
+    document.getElementById('roomLocation').value = r.location || '';
+    document.getElementById('roomInvigilator').value = r.invigilator || '';
+    document.getElementById('roomCols').value = r.cols;
+    document.getElementById('roomRows').value = r.rows;
+    document.getElementById('roomDirection').value = r.direction || 'horizontal';
+    document.getElementById('roomStartPos').value = r.startPos || 'tl';
+    document.getElementById('roomHasPodium').checked = r.hasPodium !== false;
+    document.getElementById('roomPodiumPos').value = r.podiumPos || 'top';
+    document.getElementById('roomDisabledSeats').value = (r.disabledSeats || []).join(',');
+    updateRoomPreview();
+    showModal('roomModal');
+}
+
+function saveRoom() {
+    const index = document.getElementById('editRoomIndex').value;
+    const disabledStr = document.getElementById('roomDisabledSeats').value.trim();
+    const disabledSeats = disabledStr ? disabledStr.split(/[,，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
+    
+    const room = {
+        roomNo: document.getElementById('roomNo').value.trim(),
+        roomName: document.getElementById('roomName').value.trim(),
+        location: document.getElementById('roomLocation').value.trim(),
+        invigilator: document.getElementById('roomInvigilator').value.trim(),
+        cols: parseInt(document.getElementById('roomCols').value) || 6,
+        rows: parseInt(document.getElementById('roomRows').value) || 6,
+        direction: document.getElementById('roomDirection').value,
+        startPos: document.getElementById('roomStartPos').value,
+        hasPodium: document.getElementById('roomHasPodium').checked,
+        podiumPos: document.getElementById('roomPodiumPos').value,
+        disabledSeats: disabledSeats
+    };
+    
+    if (!room.roomNo) { alert('请输入考场号'); return; }
+    
+    if (index !== '') {
+        appData.rooms[index] = room;
+    } else {
+        appData.rooms.push(room);
+    }
+    
+    closeModal('roomModal');
+    renderRooms();
+    updateRoomSelections();
+    updateDashboard();
+    autoSave();
+}
+
+function deleteRoom(index) {
+    if (appData.settings.confirmDelete && !confirm('确定删除该考场吗？')) return;
+    appData.rooms.splice(index, 1);
+    renderRooms();
+    updateRoomSelections();
+    updateDashboard();
+    autoSave();
+}
+
+function clearAllRooms() {
+    if (appData.settings.confirmDelete && !confirm('确定清空所有考场吗？')) return;
+    appData.rooms = [];
+    renderRooms();
+    updateRoomSelections();
+    updateDashboard();
+    autoSave();
+}
+
+function batchAddRooms() {
+    const count = prompt('请输入要添加的考场数量：', '5');
+    if (!count) return;
+    const n = parseInt(count);
+    if (isNaN(n) || n <= 0) { alert('请输入有效数字'); return; }
+    
+    const cols = parseInt(prompt('每个考场列数：', '6')) || 6;
+    const rows = parseInt(prompt('每个考场行数：', '6')) || 6;
+    
+    for (let i = 1; i <= n; i++) {
+        appData.rooms.push({
+            roomNo: String(i),
+            roomName: `第${i}考场`,
+            location: '',
+            invigilator: '',
+            cols: cols,
+            rows: rows,
+            direction: 'horizontal',
+            startPos: 'tl',
+            hasPodium: true,
+            podiumPos: 'top',
+            disabledSeats: []
+        });
+    }
+    
+    renderRooms();
+    updateRoomSelections();
+    updateDashboard();
+    autoSave();
+    alert(`成功添加 ${n} 个考场`);
+}
+
+function initRoomPreview() {
+    updateRoomPreview();
+}
+
+function updateRoomPreview() {
+    const cols = parseInt(document.getElementById('roomCols').value) || 6;
+    const rows = parseInt(document.getElementById('roomRows').value) || 6;
+    const direction = document.getElementById('roomDirection').value;
+    const startPos = document.getElementById('roomStartPos').value;
+    const hasPodium = document.getElementById('roomHasPodium').checked;
+    
+    const seatOrder = generateSeatOrder(rows, cols, direction, startPos);
+    const seatMap = {};
+    seatOrder.forEach((seat, idx) => {
+        seatMap[`${seat.row}-${seat.col}`] = idx + 1;
+    });
+    
+    let html = '<div style="display: inline-block;">';
+    
+    if (hasPodium) {
+        html += '<div style="background:#f0f0f0; padding:8px; text-align:center; margin-bottom:10px; border-radius:4px; font-size:11px; color:#666;">讲台</div>';
+    }
+    
+    for (let r = 0; r < rows; r++) {
+        html += '<div style="display:flex; gap:4px; margin-bottom:4px; justify-content:center;">';
+        for (let c = 0; c < cols; c++) {
+            const seatNo = seatMap[`${r}-${c}`];
+            html += `<div style="width:36px; height:30px; border:1px solid #d9d9d9; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:11px; background:${seatNo ? '#e6f7ff' : '#fafafa'};">${seatNo || ''}</div>`;
+        }
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    document.getElementById('roomPreview').innerHTML = html;
+}
+
+// 生成座位顺序数组
+function generateSeatOrder(rows, cols, direction, startPos) {
+    const seats = [];
+    
+    // 根据起始位置调整行列遍历顺序
+    let rowStart, rowEnd, rowStep;
+    let colStart, colEnd, colStep;
+    
+    // 确定行方向
+    if (startPos === 'tl' || startPos === 'tr') {
+        rowStart = 0; rowEnd = rows; rowStep = 1;
+    } else {
+        rowStart = rows - 1; rowEnd = -1; rowStep = -1;
+    }
+    
+    // 确定列方向
+    if (startPos === 'tl' || startPos === 'bl') {
+        colStart = 0; colEnd = cols; colStep = 1;
+    } else {
+        colStart = cols - 1; colEnd = -1; colStep = -1;
+    }
+    
+    if (direction === 'horizontal' || direction === 'snakeH') {
+        // 行优先
+        let rowIdx = 0;
+        for (let r = rowStart; r !== rowEnd; r += rowStep) {
+            if (direction === 'snakeH' && rowIdx % 2 === 1) {
+                // 蛇形：偶数行反向
+                for (let c = (colStep === 1 ? colEnd - 1 : colStart); c !== (colStep === 1 ? colStart - 1 : colEnd); c -= colStep) {
+                    seats.push({ row: r, col: c });
+                }
+            } else {
+                for (let c = colStart; c !== colEnd; c += colStep) {
+                    seats.push({ row: r, col: c });
+                }
+            }
+            rowIdx++;
+        }
+    } else {
+        // 列优先
+        let colIdx = 0;
+        for (let c = colStart; c !== colEnd; c += colStep) {
+            if (direction === 'snakeV' && colIdx % 2 === 1) {
+                // 蛇形：偶数列反向
+                for (let r = (rowStep === 1 ? rowEnd - 1 : rowStart); r !== (rowStep === 1 ? rowStart - 1 : rowEnd); r -= rowStep) {
+                    seats.push({ row: r, col: c });
+                }
+            } else {
+                for (let r = rowStart; r !== rowEnd; r += rowStep) {
+                    seats.push({ row: r, col: c });
+                }
+            }
+            colIdx++;
+        }
+    }
+    
+    return seats;
+}
+
+// ==================== 排考设置 - 子标签切换 ====================
+let currentArrangeTab = 'basic';
+
+function switchArrangeSubTab(tab) {
+    currentArrangeTab = tab;
+    document.querySelectorAll('#tab-arrange .tabs .tab').forEach((t, i) => {
+        t.classList.remove('active');
+        if (i === 0 && tab === 'basic') t.classList.add('active');
+        if (i === 1 && tab === 'advanced') t.classList.add('active');
+        if (i === 2 && tab === 'layered') t.classList.add('active');
+    });
+    document.getElementById('arrange-basic').style.display = tab === 'basic' ? 'block' : 'none';
+    document.getElementById('arrange-advanced').style.display = tab === 'advanced' ? 'block' : 'none';
+    document.getElementById('arrange-layered').style.display = tab === 'layered' ? 'block' : 'none';
+}
+
+function updateAdvRoomOptions() {
+}
+
+let layerCount = 2;
+
+function addLayer() {
+    layerCount++;
+    const container = document.getElementById('layerConfigContainer');
+    const layerIdx = layerCount - 2;
+    const isLast = layerIdx === 0;
+    
+    const layerHtml = `
+        <div class="card" style="border: 1px dashed #d9d9d9; margin-bottom: 12px;" data-layer-card="${layerIdx}">
+            <div class="card-body" style="padding: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <strong>第${layerIdx + 1}层</strong>
+                    <span class="badge badge-warning">中间层</span>
+                </div>
+                <div class="form-row">
+                    <div class="form-item">
+                        <label class="form-label">分层方式</label>
+                        <select class="form-select layer-method" data-layer="${layerIdx}">
+                            <option value="topN">前N名（总排名）</option>
+                            <option value="topPercent">前N%</option>
+                            <option value="scoreAbove">分数大于等于</option>
+                            <option value="rankRange">排名范围</option>
+                        </select>
+                    </div>
+                    <div class="form-item">
+                        <label class="form-label">数值</label>
+                        <input type="number" class="form-input layer-value" data-layer="${layerIdx}" value="50" min="1">
+                    </div>
+                    <div class="form-item">
+                        <label class="form-label">本层排序</label>
+                        <select class="form-select layer-sort" data-layer="${layerIdx}">
+                            <option value="scoreDesc">成绩降序</option>
+                            <option value="scoreAsc">成绩升序</option>
+                            <option value="classRank">班级排名</option>
+                            <option value="random">随机</option>
+                            <option value="classInterleave">班级交叉</option>
+                        </select>
+                    </div>
+                    <div class="form-item">
+                        <label class="form-label">分配策略</label>
+                        <select class="form-select layer-strategy" data-layer="${layerIdx}">
+                            <option value="snakeRoom">蛇形分配（S形）</option>
+                            <option value="roundRobin">轮次分配</option>
+                            <option value="sequential">按顺序填充</option>
+                            <option value="balanced">均衡分配</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    const lastCard = container.lastElementChild;
+    container.insertBefore(document.createRange().createContextualFragment(layerHtml), lastCard);
+    
+    // 更新第2层的标题
+    if (lastCard) {
+        const strongEl = lastCard.querySelector('strong');
+        if (strongEl) strongEl.textContent = `第${layerCount}层（剩余学生）`;
+    }
+    
+    document.getElementById('removeLayerBtn').style.display = 'inline-block';
+    
+    // 更新最后一层的数据索引
+    const lastLayerIdx = layerCount - 1;
+    lastCard.querySelectorAll('[data-layer]').forEach(el => {
+        el.dataset.layer = lastLayerIdx;
+    });
+}
+
+function removeLayer() {
+    const container = document.getElementById('layerConfigContainer');
+    const cards = container.querySelectorAll('[data-layer-card]');
+    if (cards.length <= 2) return;
+    
+    const lastMiddleCard = cards[cards.length - 2];
+    lastMiddleCard.remove();
+    layerCount--;
+    
+    // 更新最后一层的标题
+    const lastCard = container.lastElementChild;
+    if (lastCard) {
+        const strongEl = lastCard.querySelector('strong');
+        if (strongEl) strongEl.textContent = `第${layerCount}层（剩余学生）`;
+        const lastLayerIdx = layerCount - 1;
+        lastCard.querySelectorAll('[data-layer]').forEach(el => {
+            el.dataset.layer = lastLayerIdx;
+        });
+    }
+    
+    if (layerCount <= 2) {
+        document.getElementById('removeLayerBtn').style.display = 'none';
+    }
+}
+
+// ==================== 排考设置 - 主函数 ====================
+function updateRoomSelections() {
+    const container = document.getElementById('roomSelection');
+    if (appData.rooms.length === 0) {
+        container.innerHTML = '<div class="alert alert-warning">暂无考场，请先添加考场</div>';
+        return;
+    }
+    
+    container.innerHTML = '<div class="checkbox-group">' + appData.rooms.map((r, i) => `
+        <label class="checkbox-item">
+            <input type="checkbox" class="room-select" value="${i}" checked>
+            ${r.roomName || '考场' + r.roomNo} (${r.rows * r.cols}座)
+        </label>
+    `).join('') + '</div>';
+}
+
+function doArrange() {
+    if (appData.students.length === 0) {
+        alert('请先添加考生');
+        return;
+    }
+    
+    const selectedRooms = [];
+    document.querySelectorAll('.room-select:checked').forEach(cb => {
+        selectedRooms.push(appData.rooms[parseInt(cb.value)]);
+    });
+    
+    if (selectedRooms.length === 0) {
+        alert('请至少选择一个考场');
+        return;
+    }
+    
+    let totalSeats = calcTotalSeats(selectedRooms);
+    
+    if (totalSeats < appData.students.length) {
+        if (!confirm(`座位不足！总座位${totalSeats}个，考生${appData.students.length}人，将有${appData.students.length - totalSeats}人无法安排。是否继续？`)) {
+            return;
+        }
+    }
+    
+    appData.arrangements = [];
+    
+    if (currentArrangeTab === 'basic') {
+        doBasicArrange(selectedRooms);
+    } else if (currentArrangeTab === 'advanced') {
+        doAdvancedArrange(selectedRooms);
+    } else if (currentArrangeTab === 'layered') {
+        doLayeredArrange(selectedRooms);
+    }
+    
+    alert(`排考完成！共安排 ${appData.arrangements.length} 名考生。`);
+    updateDashboard();
+    switchTab('result');
+    autoSave();
+}
+
+function calcTotalSeats(rooms) {
+    let total = 0;
+    rooms.forEach(r => {
+        total += (r.rows * r.cols - (r.disabledSeats || []).length);
+    });
+    return total;
+}
+
+// ===== 基础排考 =====
+function doBasicArrange(selectedRooms) {
+    const method = document.getElementById('arrangeMethod').value;
+    const roomStrategy = document.getElementById('roomAssignStrategy').value;
+    const seatFillOrder = document.getElementById('fillOrder').value;
+    const startPos = document.getElementById('startPosition').value;
+    
+    let students = sortStudents([...appData.students], method);
+    assignStudentsToRooms(students, selectedRooms, roomStrategy, seatFillOrder, startPos);
+}
+
+// ===== 高级排考 =====
+function doAdvancedArrange(selectedRooms) {
+    const primarySort = document.getElementById('advPrimarySort').value;
+    const primaryOrder = document.getElementById('advPrimaryOrder').value;
+    const secondarySort = document.getElementById('advSecondarySort').value;
+    const secondaryOrder = document.getElementById('advSecondaryOrder').value;
+    const roomStrategy = document.getElementById('advRoomAssign').value;
+    const seatFill = document.getElementById('advSeatFill').value;
+    const startPos = document.getElementById('advStartPos').value;
+    const shuffleSameRank = document.getElementById('advShuffleSameRank').checked;
+    
+    let students = [...appData.students];
+    
+    // 主排序
+    students = customSortStudents(students, primarySort, primaryOrder);
+    
+    // 次排序
+    if (secondarySort) {
+        students.sort((a, b) => {
+            const primaryA = getSortValue(a, primarySort);
+            const primaryB = getSortValue(b, primarySort);
+            if (primaryA === primaryB) {
+                const secA = getSortValue(a, secondarySort);
+                const secB = getSortValue(b, secondarySort);
+                if (typeof secA === 'number' && typeof secB === 'number') {
+                    return secondaryOrder === 'asc' ? secA - secB : secB - secA;
+                }
+                return secondaryOrder === 'asc' 
+                    ? String(secA).localeCompare(String(secB))
+                    : String(secB).localeCompare(String(secA));
+            }
+            return 0;
+        });
+    }
+    
+    // 同排名随机打乱
+    if (shuffleSameRank) {
+        students = shuffleSameGroup(students, primarySort);
+    }
+    
+    assignStudentsToRooms(students, selectedRooms, roomStrategy, seatFill, startPos);
+}
+
+// ===== 分层排考 =====
+function doLayeredArrange(selectedRooms) {
+    // 获取所有分层配置
+    const layers = [];
+    const layerCards = document.querySelectorAll('#layerConfigContainer > [data-layer-card], #layerConfigContainer > .card');
+    
+    // 收集所有层（除了最后一层是剩余学生）
+    const totalLayers = layerCount;
+    
+    for (let i = 0; i < totalLayers; i++) {
+        const methodEl = document.querySelector(`.layer-method[data-layer="${i}"]`);
+        const valueEl = document.querySelector(`.layer-value[data-layer="${i}"]`);
+        const sortEl = document.querySelector(`.layer-sort[data-layer="${i}"]`);
+        const strategyEl = document.querySelector(`.layer-strategy[data-layer="${i}"]`);
+        
+        if (methodEl || sortEl) {
+            layers.push({
+                index: i,
+                method: methodEl ? methodEl.value : 'remaining',
+                value: valueEl ? parseFloat(valueEl.value) || 0 : 0,
+                sort: sortEl ? sortEl.value : 'random',
+                strategy: strategyEl ? strategyEl.value : 'roundRobin',
+                isLast: i === totalLayers - 1
+            });
+        }
+    }
+    
+    // 按成绩对所有学生排序，用于分层
+    const allSorted = [...appData.students].sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    let remainingStudents = [...allSorted];
+    let processedCount = 0;
+    
+    layers.forEach((layer, layerIdx) => {
+        if (remainingStudents.length === 0) return;
+        
+        let layerStudents = [];
+        
+        if (layer.isLast) {
+            // 最后一层：剩余所有学生
+            layerStudents = [...remainingStudents];
+        } else {
+            // 根据分层方式选择学生
+            switch (layer.method) {
+                case 'topN':
+                    const n = Math.min(layer.value, remainingStudents.length);
+                    layerStudents = remainingStudents.slice(0, n);
+                    remainingStudents = remainingStudents.slice(n);
+                    break;
+                    
+                case 'topPercent':
+                    const pct = Math.min(layer.value, 100) / 100;
+                    const count = Math.ceil(remainingStudents.length * pct);
+                    layerStudents = remainingStudents.slice(0, count);
+                    remainingStudents = remainingStudents.slice(count);
+                    break;
+                    
+                case 'scoreAbove':
+                    layerStudents = remainingStudents.filter(s => (s.score || 0) >= layer.value);
+                    remainingStudents = remainingStudents.filter(s => (s.score || 0) < layer.value);
+                    break;
+                    
+                case 'rankRange':
+                    // 使用总排名范围（这里使用剩余学生的排名）
+                    const rangeEnd = Math.min(layer.value, remainingStudents.length);
+                    layerStudents = remainingStudents.slice(0, rangeEnd);
+                    remainingStudents = remainingStudents.slice(rangeEnd);
+                    break;
+                    
+                default:
+                    layerStudents = remainingStudents;
+                    remainingStudents = [];
+            }
+        }
+        
+        // 对本层学生进行排序
+        layerStudents = sortStudents(layerStudents, layer.sort);
+        
+        // 分配本层学生到考场
+        assignStudentsToRooms(
+            layerStudents, 
+            selectedRooms, 
+            layer.strategy,
+            document.getElementById('fillOrder') ? document.getElementById('fillOrder').value : 'rowMajor',
+            document.getElementById('startPosition') ? document.getElementById('startPosition').value : 'tl',
+            true  // append模式
+        );
+    });
+}
+
+// ===== 通用：学生排序 =====
+function sortStudents(students, method) {
+    const result = [...students];
+    
+    switch (method) {
+        case 'random':
+            return shuffleArray(result);
+            
+        case 'classRank':
+            result.sort((a, b) => (a.classRank || 0) - (b.classRank || 0));
+            return result;
+            
+        case 'scoreDesc':
+            result.sort((a, b) => (b.score || 0) - (a.score || 0));
+            return result;
+            
+        case 'scoreAsc':
+            result.sort((a, b) => (a.score || 0) - (b.score || 0));
+            return result;
+            
+        case 'className':
+            result.sort((a, b) => {
+                if (a.className !== b.className) return a.className.localeCompare(b.className);
+                return (a.classRank || 0) - (b.classRank || 0);
+            });
+            return result;
+            
+        case 'studentId':
+            result.sort((a, b) => (a.studentId || '').localeCompare(b.studentId || ''));
+            return result;
+            
+        case 'snakeClass':
+        case 'scoreSnake':
+            return scoreSnakeSort(result);
+            
+        case 'classInterleave':
+            return classInterleaveSort(result);
+            
+        default:
+            return result;
+    }
+}
+
+function getSortValue(student, field) {
+    switch (field) {
+        case 'className': return student.className || '';
+        case 'classRank': return student.classRank || 0;
+        case 'score': return student.score || 0;
+        case 'studentId': return student.studentId || '';
+        case 'name': return student.name || '';
+        default: return 0;
+    }
+}
+
+function customSortStudents(students, field, order) {
+    const result = [...students];
+    result.sort((a, b) => {
+        const valA = getSortValue(a, field);
+        const valB = getSortValue(b, field);
+        if (typeof valA === 'number' && typeof valB === 'number') {
+            return order === 'asc' ? valA - valB : valB - valA;
+        }
+        return order === 'asc' 
+            ? String(valA).localeCompare(String(valB))
+            : String(valB).localeCompare(String(valA));
+    });
+    return result;
+}
+
+function shuffleSameGroup(students, groupField) {
+    const groups = {};
+    students.forEach(s => {
+        const key = getSortValue(s, groupField);
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(s);
+    });
+    
+    const result = [];
+    const keys = Object.keys(groups).sort((a, b) => {
+        const numA = parseFloat(a);
+        const numB = parseFloat(b);
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+        return String(a).localeCompare(String(b));
+    });
+    
+    keys.forEach(key => {
+        result.push(...shuffleArray(groups[key]));
+    });
+    
+    return result;
+}
+
+// 成绩蛇形排序（S形分班）
+function scoreSnakeSort(students) {
+    const sorted = [...students].sort((a, b) => (b.score || 0) - (a.score || 0));
+    return sorted;
+}
+
+// 班级交叉排列
+function classInterleaveSort(students) {
+    const classMap = {};
+    students.forEach(s => {
+        if (!classMap[s.className]) classMap[s.className] = [];
+        classMap[s.className].push(s);
+    });
+    
+    Object.values(classMap).forEach(arr => {
+        arr.sort((a, b) => (a.classRank || 0) - (b.classRank || 0));
+    });
+    
+    return snakeMergeClasses(classMap);
+}
+
+// ===== 通用：分配到考场 =====
+function assignStudentsToRooms(students, rooms, strategy, seatFillOrder, startPos, appendMode) {
+    if (students.length === 0) return;
+    
+    // 获取每个考场可用座位列表
+    const roomSeats = rooms.map(room => {
+        const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos);
+        const disabledSeats = room.disabledSeats || [];
+        const availableSeats = [];
+        seatOrder.forEach((seat, idx) => {
+            const seatNo = idx + 1;
+            if (!disabledSeats.includes(seatNo)) {
+                availableSeats.push({ seatNo: seatNo, row: seat.row, col: seat.col });
+            }
+        });
+        return { room: room, seats: availableSeats, occupied: 0 };
+    });
+    
+    // 计算已占用座位数（追加模式下）
+    if (appendMode) {
+        roomSeats.forEach(rs => {
+            const existing = appData.arrangements.filter(a => a.roomNo === rs.room.roomNo);
+            rs.occupied = existing.length;
+        });
+    }
+    
+    switch (strategy) {
+        case 'sequential':
+            assignSequential(students, roomSeats, appendMode);
+            break;
+        case 'roundRobin':
+            assignRoundRobin(students, roomSeats, appendMode);
+            break;
+        case 'balanced':
+            assignBalanced(students, roomSeats, appendMode);
+            break;
+        case 'snakeRoom':
+            assignSnakeRoom(students, roomSeats, appendMode);
+            break;
+        case 'byClass':
+            assignByClass(students, roomSeats, appendMode);
+            break;
+        case 'scatterClass':
+            assignScatterClass(students, roomSeats, appendMode);
+            break;
+        default:
+            assignSequential(students, roomSeats, appendMode);
+    }
+}
+
+// 策略1：按顺序填充
+function assignSequential(students, roomSeats, appendMode) {
+    let studentIdx = 0;
+    roomSeats.forEach(rs => {
+        const startIdx = rs.occupied;
+        for (let i = startIdx; i < rs.seats.length && studentIdx < students.length; i++) {
+            const student = students[studentIdx];
+            const seat = rs.seats[i];
+            addArrangement(student, rs.room, seat);
+            studentIdx++;
+        }
+    });
+}
+
+// 策略2：轮次分配（1号考场1人，2号考场1人...）
+function assignRoundRobin(students, roomSeats, appendMode) {
+    const roomCursors = roomSeats.map(rs => rs.occupied);
+    let studentIdx = 0;
+    let roomIdx = 0;
+    
+    while (studentIdx < students.length) {
+        const rs = roomSeats[roomIdx];
+        const cursor = roomCursors[roomIdx];
+        
+        if (cursor < rs.seats.length) {
+            const student = students[studentIdx];
+            const seat = rs.seats[cursor];
+            addArrangement(student, rs.room, seat);
+            roomCursors[roomIdx]++;
+            studentIdx++;
+        }
+        
+        roomIdx = (roomIdx + 1) % roomSeats.length;
+        
+        // 检查是否所有考场都满了
+        const allFull = roomSeats.every((rs, i) => roomCursors[i] >= rs.seats.length);
+        if (allFull) break;
+    }
+}
+
+// 策略3：均衡分配（各考场人数尽量平均）
+function assignBalanced(students, roomSeats, appendMode) {
+    const totalRooms = roomSeats.length;
+    const totalStudents = students.length;
+    const baseCount = Math.floor(totalStudents / totalRooms);
+    const extraCount = totalStudents % totalRooms;
+    
+    let studentIdx = 0;
+    roomSeats.forEach((rs, i) => {
+        const targetCount = baseCount + (i < extraCount ? 1 : 0);
+        const startIdx = rs.occupied;
+        const endIdx = Math.min(startIdx + targetCount, rs.seats.length);
+        
+        for (let j = startIdx; j < endIdx && studentIdx < students.length; j++) {
+            const student = students[studentIdx];
+            const seat = rs.seats[j];
+            addArrangement(student, rs.room, seat);
+            studentIdx++;
+        }
+    });
+}
+
+// 策略4：蛇形分配（考场1→N→1→N）
+function assignSnakeRoom(students, roomSeats, appendMode) {
+    const roomCursors = roomSeats.map(rs => rs.occupied);
+    let studentIdx = 0;
+    let direction = 1;
+    let roomIdx = 0;
+    
+    while (studentIdx < students.length) {
+        const rs = roomSeats[roomIdx];
+        const cursor = roomCursors[roomIdx];
+        
+        if (cursor < rs.seats.length) {
+            const student = students[studentIdx];
+            const seat = rs.seats[cursor];
+            addArrangement(student, rs.room, seat);
+            roomCursors[roomIdx]++;
+            studentIdx++;
+        }
+        
+        // 移动到下一个考场
+        roomIdx += direction;
+        if (roomIdx >= roomSeats.length) {
+            roomIdx = roomSeats.length - 1;
+            direction = -1;
+        } else if (roomIdx < 0) {
+            roomIdx = 0;
+            direction = 1;
+        }
+        
+        const allFull = roomSeats.every((rs, i) => roomCursors[i] >= rs.seats.length);
+        if (allFull) break;
+    }
+}
+
+// 策略5：按班级集中（同班尽量同考场）
+function assignByClass(students, roomSeats, appendMode) {
+    const classMap = {};
+    students.forEach(s => {
+        if (!classMap[s.className]) classMap[s.className] = [];
+        classMap[s.className].push(s);
+    });
+    
+    let currentRoomIdx = 0;
+    const roomCursors = roomSeats.map(rs => rs.occupied);
+    
+    Object.values(classMap).forEach(classStudents => {
+        let placed = 0;
+        while (placed < classStudents.length) {
+            const rs = roomSeats[currentRoomIdx];
+            const cursor = roomCursors[currentRoomIdx];
+            const remaining = rs.seats.length - cursor;
+            
+            if (remaining <= 0) {
+                currentRoomIdx = (currentRoomIdx + 1) % roomSeats.length;
+                continue;
+            }
+            
+            const toPlace = Math.min(remaining, classStudents.length - placed);
+            for (let i = 0; i < toPlace; i++) {
+                const student = classStudents[placed + i];
+                const seat = rs.seats[cursor + i];
+                addArrangement(student, rs.room, seat);
+            }
+            roomCursors[currentRoomIdx] += toPlace;
+            placed += toPlace;
+            
+            if (placed < classStudents.length) {
+                currentRoomIdx = (currentRoomIdx + 1) % roomSeats.length;
+            }
+        }
+    });
+}
+
+// 策略6：按班级分散（同班尽量不同考场）
+function assignScatterClass(students, roomSeats, appendMode) {
+    const sorted = classInterleaveSort(students);
+    assignRoundRobin(sorted, roomSeats, appendMode);
+}
+
+function addArrangement(student, room, seat) {
+    const ticketNo = generateTicketNo(room.roomNo, seat.seatNo, student.classCode, student.classRank);
+    appData.arrangements.push({
+        ticketNo: ticketNo,
+        name: student.name,
+        className: student.className,
+        classCode: student.classCode,
+        classRank: student.classRank,
+        studentId: student.studentId,
+        gender: student.gender,
+        roomNo: room.roomNo,
+        roomName: room.roomName,
+        seatNo: seat.seatNo,
+        row: seat.row,
+        col: seat.col
+    });
+}
+
+// ===== 工具函数 =====
+function shuffleArray(array) {
+    const arr = [...array];
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function snakeMergeClasses(classMap) {
+    const result = [];
+    const classes = Object.keys(classMap).sort();
+    const maxLen = Math.max(...Object.values(classMap).map(arr => arr.length));
+    
+    for (let i = 0; i < maxLen; i++) {
+        if (i % 2 === 0) {
+            for (const cls of classes) {
+                if (classMap[cls][i]) result.push(classMap[cls][i]);
+            }
+        } else {
+            for (let j = classes.length - 1; j >= 0; j--) {
+                if (classMap[classes[j]][i]) result.push(classMap[classes[j]][i]);
+            }
+        }
+    }
+    
+    return result;
+}
+
+function generateTicketNo(roomNo, seatNo, classCode, classRank) {
+    const seatDigits = appData.settings.seatDigits || 2;
+    const codeDigits = appData.settings.classCodeDigits || 2;
+    return roomNo + 
+        String(seatNo).padStart(seatDigits, '0') + 
+        String(classCode || '').padStart(codeDigits, '0').slice(0, codeDigits) + 
+        String(classRank || 0).padStart(2, '0');
+}
+
+function resetArrange() {
+    if (appData.settings.confirmDelete && !confirm('确定重置编排结果吗？')) return;
+    appData.arrangements = [];
+    updateDashboard();
+    alert('已重置编排结果');
+    autoSave();
+}
+
+// ==================== 编排结果 ====================
+function updateResultRoomSelect() {
+    const select = document.getElementById('resultRoomSelect');
+    const roomNos = [...new Set(appData.arrangements.map(a => a.roomNo))];
+    select.innerHTML = '<option value="">选择考场...</option>' + 
+        roomNos.map(n => `<option value="${n}">第${n}考场</option>`).join('');
+}
+
+function showRoomSeatMap() {
+    const roomNo = document.getElementById('resultRoomSelect').value;
+    const container = document.getElementById('seatMapContainer');
+    
+    if (!roomNo || appData.arrangements.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:#8c8c8c; padding:40px;">请先进行排考，然后选择考场查看座位图</div>';
+        return;
+    }
+    
+    const room = appData.rooms.find(r => r.roomNo === roomNo);
+    if (!room) return;
+    
+    const roomArrangements = appData.arrangements.filter(a => a.roomNo === roomNo);
+    
+    // 创建座位映射
+    const seatMap = {};
+    roomArrangements.forEach(a => {
+        seatMap[`${a.row}-${a.col}`] = a;
+    });
+    
+    const disabledSeats = room.disabledSeats || [];
+    const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos);
+    const seatNoMap = {};
+    seatOrder.forEach((seat, idx) => {
+        seatNoMap[`${seat.row}-${seat.col}`] = idx + 1;
+    });
+    
+    let html = '<div style="display:inline-block;">';
+    
+    if (room.hasPodium && room.podiumPos === 'top') {
+        html += '<div class="podium" style="margin-bottom:20px;">📚 讲台</div>';
+    }
+    
+    for (let r = 0; r < room.rows; r++) {
+        html += '<div class="seat-row">';
+        for (let c = 0; c < room.cols; c++) {
+            const seatNo = seatNoMap[`${r}-${c}`];
+            const student = seatMap[`${r}-${c}`];
+            const isDisabled = disabledSeats.includes(seatNo);
+            
+            if (isDisabled) {
+                html += `<div class="seat empty" title="禁用座位"><span class="seat-no">-</span></div>`;
+            } else if (student) {
+                html += `<div class="seat occupied" title="${student.name} - ${student.className}">
+                    <span class="seat-no">${seatNo}</span>
+                    <span class="name">${student.name}</span>
+                </div>`;
+            } else {
+                html += `<div class="seat empty"><span class="seat-no">${seatNo}</span></div>`;
+            }
+        }
+        html += '</div>';
+    }
+    
+    if (room.hasPodium && room.podiumPos === 'bottom') {
+        html += '<div class="podium" style="margin-top:20px;">📚 讲台</div>';
+    }
+    
+    html += '</div>';
+    container.innerHTML = html;
+}
+
+function renderResultDetail() {
+    const tbody = document.getElementById('resultTbody');
+    let data = getFilteredResult();
+    
+    tbody.innerHTML = data.map(a => `
+        <tr>
+            <td>${a.ticketNo}</td>
+            <td>${a.name}</td>
+            <td>${a.className}</td>
+            <td>${a.roomNo}</td>
+            <td>${a.seatNo}</td>
+            <td>${a.classRank || '-'}</td>
+        </tr>
+    `).join('');
+}
+
+function getFilteredResult() {
+    let data = [...appData.arrangements];
+    const filterType = document.getElementById('detailFilter').value;
+    const filterValue = document.getElementById('detailFilterValue').value;
+    
+    if (filterType === 'room' && filterValue) {
+        data = data.filter(a => a.roomNo === filterValue);
+    } else if (filterType === 'class' && filterValue) {
+        data = data.filter(a => a.className === filterValue);
+    }
+    
+    data.sort((a, b) => {
+        if (a.roomNo !== b.roomNo) return a.roomNo.localeCompare(b.roomNo);
+        return a.seatNo - b.seatNo;
+    });
+    
+    return data;
+}
+
+function filterResultDetail() {
+    const filterType = document.getElementById('detailFilter').value;
+    const select = document.getElementById('detailFilterValue');
+    
+    if (filterType === 'all') {
+        select.innerHTML = '<option value="">全部</option>';
+    } else if (filterType === 'room') {
+        const roomNos = [...new Set(appData.arrangements.map(a => a.roomNo))].sort();
+        select.innerHTML = '<option value="">全部考场</option>' + 
+            roomNos.map(n => `<option value="${n}">第${n}考场</option>`).join('');
+    } else if (filterType === 'class') {
+        const classes = [...new Set(appData.arrangements.map(a => a.className))].sort();
+        select.innerHTML = '<option value="">全部班级</option>' + 
+            classes.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+    
+    renderResultDetail();
+}
+
+// ==================== 打印中心 ====================
+function switchPrintTab(tab) {
+    document.querySelectorAll('#tab-print .tab').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    document.getElementById('print-desk').style.display = tab === 'desk' ? 'block' : 'none';
+    document.getElementById('print-info').style.display = tab === 'info' ? 'block' : 'none';
+    document.getElementById('print-seatMap').style.display = tab === 'seatMap' ? 'block' : 'none';
+}
+
+function updatePrintSelects() {
+    // 桌签打印
+    const roomNos = [...new Set(appData.arrangements.map(a => a.roomNo))].sort();
+    const classes = [...new Set(appData.arrangements.map(a => a.className))].sort();
+    
+    ['deskRoom', 'infoRoom', 'seatMapRoom'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.innerHTML = '<option value="">请选择</option>' + 
+                roomNos.map(n => `<option value="${n}">第${n}考场</option>`).join('');
+        }
+    });
+    
+    ['deskClass', 'infoClass'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.innerHTML = '<option value="">请选择</option>' + 
+                classes.map(c => `<option value="${c}">${c}</option>`).join('');
+        }
+    });
+}
+
+function updateDeskPrintOptions() {
+    const range = document.getElementById('deskPrintRange').value;
+    document.getElementById('deskRoomSelect').style.display = range === 'room' ? 'block' : 'none';
+    document.getElementById('deskClassSelect').style.display = range === 'class' ? 'block' : 'none';
+}
+
+function updateInfoPrintOptions() {
+    const range = document.getElementById('infoPrintRange').value;
+    document.getElementById('infoRoomSelect').style.display = range === 'room' ? 'block' : 'none';
+    document.getElementById('infoClassSelect').style.display = range === 'class' ? 'block' : 'none';
+}
+
+function getDeskPrintData() {
+    let data = [...appData.arrangements];
+    const range = document.getElementById('deskPrintRange').value;
+    
+    if (range === 'room') {
+        const room = document.getElementById('deskRoom').value;
+        if (room) data = data.filter(a => a.roomNo === room);
+    } else if (range === 'class') {
+        const cls = document.getElementById('deskClass').value;
+        if (cls) data = data.filter(a => a.className === cls);
+    }
+    
+    data.sort((a, b) => {
+        if (a.roomNo !== b.roomNo) return a.roomNo.localeCompare(b.roomNo);
+        return a.seatNo - b.seatNo;
+    });
+    
+    return data;
+}
+
+function previewDeskCards() {
+    const data = getDeskPrintData();
+    if (data.length === 0) {
+        alert('没有可打印的数据');
+        return;
+    }
+    
+    const showName = document.getElementById('deskShowName').checked;
+    const showTicket = document.getElementById('deskShowTicket').checked;
+    const showRoom = document.getElementById('deskShowRoom').checked;
+    const showSeat = document.getElementById('deskShowSeat').checked;
+    const showClass = document.getElementById('deskShowClass').checked;
+    const nameSize = document.getElementById('deskNameSize').value;
+    const width = document.getElementById('deskWidth').value;
+    const height = document.getElementById('deskHeight').value;
+    const borderColor = document.getElementById('deskBorderColor').value;
+    const perRow = document.getElementById('deskPerRow').value;
+    
+    let html = `<div style="display: flex; flex-wrap: wrap; gap: 10px;">`;
+    
+    data.forEach(a => {
+        let info = [];
+        if (showTicket) info.push(`准考证: ${a.ticketNo}`);
+        if (showRoom) info.push(`考场: ${a.roomNo}`);
+        if (showSeat) info.push(`座号: ${a.seatNo}`);
+        if (showClass) info.push(a.className);
+        
+        html += `
+            <div class="desk-card" style="width: ${width}px; height: ${height}px; border-color: ${borderColor};">
+                ${showName ? `<div class="name" style="font-size: ${nameSize}px;">${a.name}</div>` : ''}
+                <div class="info">${info.join(' | ')}</div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    document.getElementById('printPreviewArea').innerHTML = html;
+}
+
+function printDeskCards() {
+    previewDeskCards();
+    const printContent = document.getElementById('printPreviewArea').innerHTML;
+    const printArea = document.getElementById('printArea');
+    printArea.innerHTML = printContent;
+    window.print();
+}
+
+function getInfoPrintData() {
+    let data = [...appData.arrangements];
+    const range = document.getElementById('infoPrintRange').value;
+    
+    if (range === 'room') {
+        const room = document.getElementById('infoRoom').value;
+        if (room) data = data.filter(a => a.roomNo === room);
+    } else if (range === 'class') {
+        const cls = document.getElementById('infoClass').value;
+        if (cls) data = data.filter(a => a.className === cls);
+    }
+    
+    data.sort((a, b) => {
+        if (a.roomNo !== b.roomNo) return a.roomNo.localeCompare(b.roomNo);
+        return a.seatNo - b.seatNo;
+    });
+    
+    return data;
+}
+
+function previewInfoTable() {
+    const data = getInfoPrintData();
+    if (data.length === 0) {
+        alert('没有可打印的数据');
+        return;
+    }
+    
+    const cols = {
+        ticket: document.getElementById('infoColTicket').checked,
+        name: document.getElementById('infoColName').checked,
+        class: document.getElementById('infoColClass').checked,
+        room: document.getElementById('infoColRoom').checked,
+        seat: document.getElementById('infoColSeat').checked,
+        rank: document.getElementById('infoColRank').checked
+    };
+    
+    let html = `<h2 style="text-align:center; margin-bottom:20px;">${appData.settings.examName} - 考生信息表</h2>`;
+    html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+    html += '<thead><tr style="background:#f5f5f5;">';
+    if (cols.ticket) html += '<th style="border:1px solid #ccc; padding:8px;">准考证号</th>';
+    if (cols.name) html += '<th style="border:1px solid #ccc; padding:8px;">姓名</th>';
+    if (cols.class) html += '<th style="border:1px solid #ccc; padding:8px;">班级</th>';
+    if (cols.room) html += '<th style="border:1px solid #ccc; padding:8px;">考场号</th>';
+    if (cols.seat) html += '<th style="border:1px solid #ccc; padding:8px;">座位号</th>';
+    if (cols.rank) html += '<th style="border:1px solid #ccc; padding:8px;">班级排名</th>';
+    html += '</tr></thead><tbody>';
+    
+    data.forEach(a => {
+        html += '<tr>';
+        if (cols.ticket) html += `<td style="border:1px solid #ccc; padding:8px;">${a.ticketNo}</td>`;
+        if (cols.name) html += `<td style="border:1px solid #ccc; padding:8px;">${a.name}</td>`;
+        if (cols.class) html += `<td style="border:1px solid #ccc; padding:8px;">${a.className}</td>`;
+        if (cols.room) html += `<td style="border:1px solid #ccc; padding:8px;">${a.roomNo}</td>`;
+        if (cols.seat) html += `<td style="border:1px solid #ccc; padding:8px;">${a.seatNo}</td>`;
+        if (cols.rank) html += `<td style="border:1px solid #ccc; padding:8px;">${a.classRank || '-'}</td>`;
+        html += '</tr>';
+    });
+    
+    html += '</tbody></table>';
+    html += `<p style="margin-top:20px; text-align:right; font-size:12px; color:#666;">共 ${data.length} 人</p>`;
+    
+    document.getElementById('printPreviewArea').innerHTML = html;
+}
+
+function printInfoTable() {
+    previewInfoTable();
+    const printContent = document.getElementById('printPreviewArea').innerHTML;
+    const printArea = document.getElementById('printArea');
+    printArea.innerHTML = printContent;
+    window.print();
+}
+
+function previewSeatMapPrint() {
+    const roomNo = document.getElementById('seatMapRoom').value;
+    if (!roomNo) {
+        alert('请选择考场');
+        return;
+    }
+    
+    const room = appData.rooms.find(r => r.roomNo === roomNo);
+    if (!room) return;
+    
+    const showName = document.getElementById('seatMapShowName').checked;
+    const showTicket = document.getElementById('seatMapShowTicket').checked;
+    
+    const roomArrangements = appData.arrangements.filter(a => a.roomNo === roomNo);
+    
+    const seatMap = {};
+    roomArrangements.forEach(a => {
+        seatMap[`${a.row}-${a.col}`] = a;
+    });
+    
+    const disabledSeats = room.disabledSeats || [];
+    const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos);
+    const seatNoMap = {};
+    seatOrder.forEach((seat, idx) => {
+        seatNoMap[`${seat.row}-${seat.col}`] = idx + 1;
+    });
+    
+    let html = `<h2 style="text-align:center; margin-bottom:20px;">${room.roomName || '第' + roomNo + '考场'} 座位表</h2>`;
+    html += `<p style="text-align:center; margin-bottom:15px; color:#666;">${appData.settings.examName}</p>`;
+    html += '<div style="display:inline-block; width:100%; text-align:center;">';
+    
+    if (room.hasPodium && room.podiumPos === 'top') {
+        html += '<div style="background:#f0f0f0; padding:12px; text-align:center; margin-bottom:20px; border-radius:6px; font-size:14px;">讲台</div>';
+    }
+    
+    html += '<table style="margin:0 auto; border-collapse:separate; border-spacing:8px;">';
+    for (let r = 0; r < room.rows; r++) {
+        html += '<tr>';
+        for (let c = 0; c < room.cols; c++) {
+            const seatNo = seatNoMap[`${r}-${c}`];
+            const student = seatMap[`${r}-${c}`];
+            const isDisabled = disabledSeats.includes(seatNo);
+            
+            if (isDisabled) {
+                html += `<td style="width:80px; height:60px; border:1px dashed #ccc; border-radius:6px; text-align:center; vertical-align:middle; background:#fafafa; color:#bbb; font-size:12px;">禁用</td>`;
+            } else if (student) {
+                let content = `<div style="font-weight:bold; font-size:14px; color:#1890ff;">${seatNo}</div>`;
+                if (showName) content += `<div style="font-size:12px; margin-top:4px;">${student.name}</div>`;
+                if (showTicket) content += `<div style="font-size:10px; color:#666; margin-top:2px;">${student.ticketNo}</div>`;
+                html += `<td style="width:80px; height:60px; border:2px solid #91d5ff; border-radius:6px; text-align:center; vertical-align:middle; background:#e6f7ff;">${content}</td>`;
+            } else {
+                html += `<td style="width:80px; height:60px; border:1px solid #e8e8e8; border-radius:6px; text-align:center; vertical-align:middle; background:#fafafa; color:#bfbfbf; font-size:14px;">${seatNo}</td>`;
+            }
+        }
+        html += '</tr>';
+    }
+    html += '</table>';
+    
+    if (room.hasPodium && room.podiumPos === 'bottom') {
+        html += '<div style="background:#f0f0f0; padding:12px; text-align:center; margin-top:20px; border-radius:6px; font-size:14px;">讲台</div>';
+    }
+    
+    html += '</div>';
+    html += `<p style="margin-top:20px; text-align:right; font-size:12px; color:#666;">监考老师：${room.invigilator || '-'} &nbsp;&nbsp; 共 ${roomArrangements.length} 人</p>`;
+    
+    document.getElementById('printPreviewArea').innerHTML = html;
+}
+
+function printSeatMap() {
+    previewSeatMapPrint();
+    const printContent = document.getElementById('printPreviewArea').innerHTML;
+    const printArea = document.getElementById('printArea');
+    printArea.innerHTML = printContent;
+    window.print();
+}
+
+// ==================== 数据导出 ====================
+function updateExportOptions() {
+    const type = document.getElementById('exportType').value;
+    document.getElementById('exportRoomOptions').style.display = (type === 'byRoom') ? 'block' : 'none';
+    document.getElementById('exportClassOptions').style.display = (type === 'byClass') ? 'block' : 'none';
+}
+
+function updateExportCheckboxes() {
+    const roomContainer = document.getElementById('exportRoomCheckboxes');
+    const classContainer = document.getElementById('exportClassCheckboxes');
+    
+    const roomNos = [...new Set(appData.arrangements.map(a => a.roomNo))].sort();
+    roomContainer.innerHTML = roomNos.map(n => `
+        <label class="checkbox-item" style="margin-bottom:8px;">
+            <input type="checkbox" class="export-room" value="${n}" checked>
+            第${n}考场
+        </label>
+    `).join('');
+    
+    const classes = [...new Set(appData.students.map(s => s.className))].sort();
+    classContainer.innerHTML = classes.map(c => `
+        <label class="checkbox-item" style="margin-bottom:8px;">
+            <input type="checkbox" class="export-class" value="${c}" checked>
+            ${c}
+        </label>
+    `).join('');
+}
+
+function doExport() {
+    const type = document.getElementById('exportType').value;
+    const format = document.getElementById('exportFormat').value;
+    const fileName = document.getElementById('exportFileName').value || '考场编排';
+    
+    const fields = [];
+    document.querySelectorAll('.export-field:checked').forEach(cb => {
+        fields.push(cb.value);
+    });
+    
+    if (fields.length === 0) {
+        alert('请至少选择一个导出字段');
+        return;
+    }
+    
+    const fieldLabels = {
+        ticketNo: '准考证号',
+        name: '姓名',
+        className: '班级',
+        classCode: '班级代码',
+        roomNo: '考场号',
+        seatNo: '座位号',
+        classRank: '班级排名',
+        studentId: '学号',
+        gender: '性别'
+    };
+    
+    if (type === 'all' || type === 'byRoom' || type === 'byClass') {
+        if (appData.arrangements.length === 0) {
+            alert('暂无编排数据，请先排考');
+            return;
+        }
+    }
+    
+    if (type === 'all') {
+        // 全部考生信息总表
+        const data = [fields.map(f => fieldLabels[f])];
+        const sorted = [...appData.arrangements].sort((a, b) => {
+            if (a.roomNo !== b.roomNo) return a.roomNo.localeCompare(b.roomNo);
+            return a.seatNo - b.seatNo;
+        });
+        sorted.forEach(a => {
+            data.push(fields.map(f => a[f] || ''));
+        });
+        exportToExcel([{ name: '总表', data: data }], fileName + '_总表.' + format, format);
+        
+    } else if (type === 'byRoom') {
+        // 按考场分批
+        const selectedRooms = [];
+        document.querySelectorAll('.export-room:checked').forEach(cb => {
+            selectedRooms.push(cb.value);
+        });
+        if (selectedRooms.length === 0) { alert('请至少选择一个考场'); return; }
+        
+        const sheets = [];
+        selectedRooms.forEach(roomNo => {
+            const roomData = appData.arrangements.filter(a => a.roomNo === roomNo)
+                .sort((a, b) => a.seatNo - b.seatNo);
+            const data = [fields.map(f => fieldLabels[f])];
+            roomData.forEach(a => {
+                data.push(fields.map(f => a[f] || ''));
+            });
+            sheets.push({ name: '第' + roomNo + '考场', data: data });
+        });
+        exportToExcel(sheets, fileName + '_按考场.' + format, format);
+        
+    } else if (type === 'byClass') {
+        // 按班级分批
+        const selectedClasses = [];
+        document.querySelectorAll('.export-class:checked').forEach(cb => {
+            selectedClasses.push(cb.value);
+        });
+        if (selectedClasses.length === 0) { alert('请至少选择一个班级'); return; }
+        
+        const sheets = [];
+        selectedClasses.forEach(cls => {
+            const classData = appData.arrangements.filter(a => a.className === cls)
+                .sort((a, b) => {
+                    if (a.roomNo !== b.roomNo) return a.roomNo.localeCompare(b.roomNo);
+                    return a.seatNo - b.seatNo;
+                });
+            const data = [fields.map(f => fieldLabels[f])];
+            classData.forEach(a => {
+                data.push(fields.map(f => a[f] || ''));
+            });
+            sheets.push({ name: cls.replace(/[\\/?*\[\]:]/g, '_'), data: data });
+        });
+        exportToExcel(sheets, fileName + '_按班级.' + format, format);
+        
+    } else if (type === 'studentsOnly') {
+        // 仅考生名单
+        const data = [['姓名', '班级', '班级代码', '班级排名', '学号', '性别', '备注']];
+        appData.students.forEach(s => {
+            data.push([s.name, s.className, s.classCode, s.classRank, s.studentId, s.gender, s.remark]);
+        });
+        exportToExcel([{ name: '考生名单', data: data }], fileName + '_考生名单.' + format, format);
+        
+    } else if (type === 'roomsOnly') {
+        // 仅考场信息
+        const data = [['考场号', '考场名称', '位置', '监考老师', '行数', '列数', '排列方向', '起始位置', '座位数']];
+        appData.rooms.forEach(r => {
+            data.push([
+                r.roomNo, r.roomName, r.location, r.invigilator,
+                r.rows, r.cols, getDirectionText(r.direction),
+                getStartPosText(r.startPos), r.rows * r.cols
+            ]);
+        });
+        exportToExcel([{ name: '考场信息', data: data }], fileName + '_考场信息.' + format, format);
+    }
+}
+
+function exportToExcel(sheets, filename, format) {
+    const wb = XLSX.utils.book_new();
+    sheets.forEach(sheet => {
+        const ws = XLSX.utils.aoa_to_sheet(sheet.data);
+        // 设置列宽
+        ws['!cols'] = sheet.data[0].map(() => ({ wch: 15 }));
+        XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
+    });
+    
+    XLSX.writeFile(wb, filename, { bookType: format === 'csv' ? 'csv' : format });
+    alert('导出成功！');
+}
+
+// ==================== 系统设置 ====================
+function updateThemeColor(color) {
+    document.documentElement.style.setProperty('--theme-color', color);
+    appData.settings.themeColor = color;
+    autoSave();
+}
+
+function saveSettings() {
+    appData.settings.examName = document.getElementById('settingExamName').value;
+    appData.settings.schoolName = document.getElementById('settingSchoolName').value;
+    appData.settings.themeColor = document.getElementById('settingThemeColor').value;
+    appData.settings.seatDigits = parseInt(document.getElementById('settingSeatDigits').value) || 2;
+    appData.settings.classCodeDigits = parseInt(document.getElementById('settingClassCodeDigits').value) || 2;
+    appData.settings.autoSave = document.getElementById('settingAutoSave').checked;
+    appData.settings.confirmDelete = document.getElementById('settingConfirmDelete').checked;
+    autoSave();
+}
+
+function exportAllData() {
+    const dataStr = JSON.stringify(appData, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '排考场系统数据备份.json';
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function importAllData(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+            if (confirm('导入后将覆盖当前所有数据，确定继续吗？')) {
+                appData = data;
+                if (!appData.settings) appData.settings = {};
+                renderStudents();
+                renderRooms();
+                updateRoomSelections();
+                updateFilterOptions();
+                updateDashboard();
+                alert('导入成功！');
+                autoSave();
+            }
+        } catch (err) {
+            alert('导入失败：文件格式不正确');
+        }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+}
+
+function resetAllData() {
+    if (!confirm('确定重置所有数据吗？此操作不可恢复！')) return;
+    if (!confirm('再次确认：真的要清空所有数据吗？')) return;
+    
+    appData = {
+        students: [],
+        rooms: [],
+        arrangements: [],
+        settings: {
+            examName: '期末考试',
+            schoolName: '示例中学',
+            themeColor: '#1890ff',
+            seatDigits: 2,
+            classCodeDigits: 2,
+            autoSave: true,
+            confirmDelete: true
+        }
+    };
+    renderStudents();
+    renderRooms();
+    updateRoomSelections();
+    updateFilterOptions();
+    updateDashboard();
+    localStorage.removeItem('examArrangementData');
+    alert('已重置所有数据');
+}
+
+// ==================== 模态框 ====================
+function showModal(id) {
+    document.getElementById(id).classList.add('show');
+}
+
+function closeModal(id) {
+    document.getElementById(id).classList.remove('show');
+}
+
+function showHelp() {
+    showModal('helpModal');
+}
+
+// 点击模态框外部关闭
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+    overlay.addEventListener('click', function(e) {
+        if (e.target === this) {
+            this.classList.remove('show');
+        }
+    });
+});
+
+// ==================== 数据持久化 ====================
+function autoSave() {
+    if (appData.settings && appData.settings.autoSave) {
+        saveToLocal();
+    }
+}
+
+// ==================== 接收教务端导入数据 ====================
+// 由父页面通过 postMessage 推送，或通过 localStorage('eduExamArrangementImport') 同步
+function applyEduImport(payload) {
+    if (!payload || !Array.isArray(payload.students)) return 0;
+    const mode = payload.mode || 'append';
+    const list = payload.students.filter((s) => s && (s.name || s.studentName));
+
+    if (mode === 'replace') {
+        appData.students = list.map(normalizeImportedStudent);
+    } else {
+        // 追加：按 className+name 去重
+        const existed = new Set(
+            appData.students.map((s) => `${s.className || ''}|${s.name || ''}`)
+        );
+        list.forEach((raw) => {
+            const s = normalizeImportedStudent(raw);
+            const key = `${s.className || ''}|${s.name || ''}`;
+            if (!existed.has(key)) {
+                appData.students.push(s);
+                existed.add(key);
+            }
+        });
+    }
+
+    // 同步考试名
+    if (payload.examName) {
+        appData.settings.examName = payload.examName;
+    }
+
+    renderStudents();
+    updateFilterOptions();
+    updateDashboard();
+    autoSave();
+
+    // 切换到考生管理页，便于查看导入结果
+    try { switchTab('students'); } catch (e) {}
+
+    showImportToast(`已从教务端导入 ${list.length} 名考生${payload.examName ? '（' + payload.examName + '）' : ''}`, 'success');
+    return list.length;
+}
+
+function normalizeImportedStudent(raw) {
+    return {
+        name: (raw.name || raw.studentName || '').toString().trim(),
+        studentId: (raw.studentId || '').toString().trim(),
+        className: (raw.className || raw.classNo || '').toString().trim(),
+        classCode: (raw.classCode || '').toString().trim() || deriveClassCode(raw.className || raw.classNo || ''),
+        classRank: parseInt(raw.classRank) || 0,
+        gender: (raw.gender || '').toString().trim(),
+        remark: (raw.remark || '').toString().trim()
+    };
+}
+
+function deriveClassCode(classNo) {
+    const m = String(classNo).match(/(\d+)/);
+    const n = parseInt(m ? m[1] : '1') || 1;
+    return String(n).padStart(2, '0');
+}
+
+function showImportToast(text, type) {
+    // 简单的顶部提示条，2.5s 自动消失
+    let bar = document.getElementById('eduImportToast');
+    if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'eduImportToast';
+        bar.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.15);transition:opacity .25s';
+        document.body.appendChild(bar);
+    }
+    bar.style.background = type === 'success' ? '#f6ffed' : '#e6f7ff';
+    bar.style.color = type === 'success' ? '#389e0d' : '#0050b3';
+    bar.style.border = type === 'success' ? '1px solid #b7eb8f' : '1px solid #91d5ff';
+    bar.textContent = (type === 'success' ? '✅ ' : 'ℹ️ ') + text;
+    bar.style.opacity = '1';
+    clearTimeout(bar._timer);
+    bar._timer = setTimeout(() => { bar.style.opacity = '0'; }, 2500);
+}
+
+// 监听父页面 postMessage
+window.addEventListener('message', function (e) {
+    const data = e.data;
+    if (!data || typeof data !== 'object') return;
+    if (data.type === 'eduImportStudents') {
+        applyEduImport(data);
+    }
+});
+
+// 新窗口打开场景：从 localStorage 读取一次性导入包
+(function consumeEduImportFromStorage() {
+    function tryConsume() {
+        try {
+            const raw = localStorage.getItem('eduExamArrangementImport');
+            if (!raw) return;
+            const payload = JSON.parse(raw);
+            // 同一页面会话内只消费一次（10 分钟内）
+            if (!payload || !payload.ts || (Date.now() - payload.ts) > 10 * 60 * 1000) {
+                localStorage.removeItem('eduExamArrangementImport');
+                return;
+            }
+            // 用 sessionStorage 标记，避免重复弹
+            if (sessionStorage.getItem('eduExamArrangementImportConsumed') === String(payload.ts)) {
+                return;
+            }
+            sessionStorage.setItem('eduExamArrangementImportConsumed', String(payload.ts));
+            localStorage.removeItem('eduExamArrangementImport');
+            // 稍延迟，等页面初始化完成
+            setTimeout(() => applyEduImport(payload), 200);
+        } catch (err) { /* ignore */ }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(tryConsume, 100));
+    } else {
+        setTimeout(tryConsume, 100);
+    }
+})();
+
+function saveToLocal() {
+    try {
+        localStorage.setItem('examArrangementData', JSON.stringify(appData));
+    } catch (e) {
+        console.warn('本地存储失败', e);
+    }
+}
+
+function loadFromLocal() {
+    try {
+        const data = localStorage.getItem('examArrangementData');
+        if (data) {
+            const parsed = JSON.parse(data);
+            if (parsed.students) appData.students = parsed.students;
+            if (parsed.rooms) appData.rooms = parsed.rooms;
+            if (parsed.arrangements) appData.arrangements = parsed.arrangements;
+            if (parsed.settings) appData.settings = { ...appData.settings, ...parsed.settings };
+            
+            // 更新设置界面
+            document.getElementById('settingExamName').value = appData.settings.examName;
+            document.getElementById('settingSchoolName').value = appData.settings.schoolName;
+            document.getElementById('settingThemeColor').value = appData.settings.themeColor;
+            document.getElementById('settingSeatDigits').value = appData.settings.seatDigits;
+            document.getElementById('settingClassCodeDigits').value = appData.settings.classCodeDigits;
+            document.getElementById('settingAutoSave').checked = appData.settings.autoSave;
+            document.getElementById('settingConfirmDelete').checked = appData.settings.confirmDelete;
+        }
+    } catch (e) {
+        console.warn('读取本地数据失败', e);
+    }
+}
+
+function saveData() {
+    saveToLocal();
+    alert('数据已保存到本地');
+}
+
+function loadData() {
+    loadFromLocal();
+    renderStudents();
+    renderRooms();
+    updateRoomSelections();
+    updateFilterOptions();
+    updateDashboard();
+    alert('数据已加载');
+}
+
+// 设置页面输入变化时自动保存设置
+['settingExamName', 'settingSchoolName', 'settingSeatDigits', 'settingClassCodeDigits', 'settingAutoSave', 'settingConfirmDelete'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener('change', saveSettings);
+        el.addEventListener('input', saveSettings);
+    }
+});
+</script>
+
+</body>
+</html>
