@@ -345,9 +345,6 @@
                 <div class="nav-item" :class="{active: activeMain === 'timetable'}" @click="setMainMenu('timetable')">
                     <span>📅</span> 课表生成
                 </div>
-                <div class="nav-item" :class="{active: activeMain === 'classTimetable'}" @click="setMainMenu('classTimetable')">
-                    <span>🏫</span> 班级课表
-                </div>
             </div>
             <div class="footer-btns">
                 <button class="btn-outline-light" @click="exportProject">📦 导出工程文件</button>
@@ -363,7 +360,10 @@
                 <div class="card-panel">
                     <div class="section-title">👩‍🏫 教师管理</div>
                     <div class="flex-between">
-                        <div><button class="btn-primary" @click="addTeacher">+ 添加教师</button></div>
+                        <div>
+                            <button class="btn-primary" @click="addTeacher">+ 添加教师</button>
+                            <button class="btn-secondary" style="margin-left:10px;" @click="syncTeachersFromEdu">🔄 从教务平台同步</button>
+                        </div>
                         <button class="btn-success" @click="saveTeachersSettings">💾 保存设置</button>
                     </div>
                     <table style="margin-top: 16px;">
@@ -549,45 +549,6 @@
                     <div v-if="lastConflictMsg" class="badge" style="margin-top:16px; background:#fee2e2; color:#b91c1c; padding:8px;">⚠️ {{ lastConflictMsg }}</div>
                 </div>
             </div>
-
-            <!-- 班级课表 -->
-            <div v-if="activeMain === 'classTimetable'">
-                <div class="card-panel">
-                    <div class="section-title">🏫 班级课表查看</div>
-                    <div class="flex-between">
-                        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-                            <span><strong>选择班级：</strong></span>
-                            <select v-model="currentClassView" style="padding:6px 12px; font-size:0.9rem;">
-                                <option v-for="cls in classList" :key="cls" :value="cls">{{ cls }}</option>
-                            </select>
-                            <button class="btn-primary" @click="exportClassTimetableExcel">📎 导出当前班级课表</button>
-                            <button class="btn-success" @click="exportAllClassesExcel">📦 批量导出全部班级</button>
-                        </div>
-                    </div>
-                    <div style="overflow-x:auto; margin-top:20px;">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style="width:80px;">节次</th>
-                                    <th v-for="w in weekdays" :key="w">{{ w }}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="(p, pIdx) in periods" :key="pIdx">
-                                    <td style="background:#fef9e3; font-weight:bold;">{{ p.name }}</td>
-                                    <td v-for="(w, wIdx) in weekdays" :key="wIdx" class="timetable-cell">
-                                        <div v-if="getClassCellTeacher(wIdx, pIdx)" class="cell-content">
-                                            <div class="cell-subject">{{ getClassCellTeacher(wIdx, pIdx).subject }}</div>
-                                            <div class="cell-teacher">{{ getClassCellTeacher(wIdx, pIdx).name }}</div>
-                                        </div>
-                                        <div v-else class="cell-empty">⚡未排</div>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -623,7 +584,6 @@
             const timetableData = ref({});
             const lastConflictMsg = ref('');
             const showManualDialog = ref(false);
-            const currentClassView = ref('');
             let manualWeekIdx = 0, manualPeriodIdx = 0, manualClass = '';
             const selectedTeacherId = ref(null);
 
@@ -645,11 +605,63 @@
                 alert('课表框架已保存到本地！');
             }
             // 加载保存的教师和课表框架（初始化时调用）
-            function loadSavedData() {
-                const savedTeachers = localStorage.getItem('zhijiao_teachers');
-                if (savedTeachers) {
-                    try { teachers.value = JSON.parse(savedTeachers); } catch(e) {}
+            function loadTeachersFromEduPlatform() {
+                const eduDBKey = 'smart_edu_platform_db_v1';
+                const eduDB = localStorage.getItem(eduDBKey);
+                if (!eduDB) return null;
+                try {
+                    const db = JSON.parse(eduDB);
+                    if (!db.users || !Array.isArray(db.users)) return null;
+                    const eduTeachers = db.users.filter(u => u.role === 'teacher' || u.role === 'headteacher');
+                    if (eduTeachers.length === 0) return null;
+                    
+                    const gradeClasses = {};
+                    if (db.studentRoster) {
+                        Object.keys(db.studentRoster).forEach(grade => {
+                            gradeClasses[grade] = Object.keys(db.studentRoster[grade]);
+                        });
+                    }
+                    
+                    return eduTeachers.map((u, idx) => {
+                        const subject = (u.subjects && u.subjects.length > 0) ? u.subjects[0] : '科目';
+                        const isHomeroom = u.role === 'headteacher';
+                        const homeroomClass = isHomeroom ? u.classNo : '';
+                        
+                        let classes = [];
+                        if (gradeClasses[u.grade]) {
+                            classes = gradeClasses[u.grade];
+                        } else {
+                            classes = classList.value;
+                        }
+                        
+                        return {
+                            id: Date.now() + idx,
+                            name: u.name || u.username,
+                            subject: subject,
+                            classes: classes,
+                            weeklyHours: u.role === 'headteacher' ? 12 : 10,
+                            isHomeroomTeacher: isHomeroom,
+                            homeroomClass: homeroomClass
+                        };
+                    });
+                } catch (e) {
+                    console.error('从教务平台加载教师数据失败:', e);
+                    return null;
                 }
+            }
+
+            function loadSavedData() {
+                const eduTeachers = loadTeachersFromEduPlatform();
+                if (eduTeachers && eduTeachers.length > 0) {
+                    teachers.value = eduTeachers;
+                    console.log('已从教务平台同步教师数据:', eduTeachers.length, '人');
+                } else {
+                    const savedTeachers = localStorage.getItem('zhijiao_teachers');
+                    if (savedTeachers) {
+                        try { teachers.value = JSON.parse(savedTeachers); } catch(e) {}
+                    }
+                }
+                
                 const savedFrame = localStorage.getItem('zhijiao_schedule_frame');
                 if (savedFrame) {
                     try {
@@ -679,13 +691,7 @@
                 alert(`${category} 规则已保存！`); 
                 localStorage.setItem('zhijiao_rules', JSON.stringify(rules.value));
             }
-            function setMainMenu(menu) {
-                activeMain.value = menu;
-                if (menu !== 'rules') showRulesSub.value = false;
-                if (menu === 'classTimetable' && !currentClassView.value && classList.value.length > 0) {
-                    currentClassView.value = classList.value[0];
-                }
-            }
+            function setMainMenu(menu) { activeMain.value = menu; if (menu !== 'rules') showRulesSub.value = false; }
             function toggleRulesSub() { if (activeMain.value !== 'rules') activeMain.value = 'rules'; showRulesSub.value = !showRulesSub.value; }
             function setRuleSubMenu(sub) { activeMain.value = 'rules'; showRulesSub.value = true; activeSubRule.value = sub; }
 
@@ -771,10 +777,6 @@
                 const tid = timetableData.value[key];
                 if (!tid) return null;
                 return teachers.value.find(t => t.id == tid) || null;
-            }
-            function getClassCellTeacher(weekIdx, periodIdx) {
-                if (!currentClassView.value) return null;
-                return getTeacherByCell(weekIdx, periodIdx, currentClassView.value);
             }
             function getTeacherCurrentHours(teacherId) {
                 let count = 0;
@@ -1094,44 +1096,6 @@
                 XLSX.utils.book_append_sheet(wb, ws, '排课表');
                 XLSX.writeFile(wb, `智教课表_${new Date().toISOString().slice(0,19)}.xlsx`);
             }
-            function exportClassTimetableExcel() {
-                const cls = currentClassView.value;
-                if (!cls) { alert('请先选择班级'); return; }
-                let sheetData = [['节次', ...weekdays.value]];
-                for (let pi = 0; pi < periods.value.length; pi++) {
-                    let row = [periods.value[pi].name];
-                    for (let wi = 0; wi < weekdays.value.length; wi++) {
-                        const teacher = getTeacherByCell(wi, pi, cls);
-                        row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
-                    }
-                    sheetData.push(row);
-                }
-                const ws = XLSX.utils.aoa_to_sheet(sheetData);
-                if(!ws['!cols']) ws['!cols'] = [];
-                for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, cls);
-                XLSX.writeFile(wb, `${cls}_课表_${new Date().toISOString().slice(0,19)}.xlsx`);
-            }
-            function exportAllClassesExcel() {
-                const wb = XLSX.utils.book_new();
-                for (let cls of classList.value) {
-                    let sheetData = [['节次', ...weekdays.value]];
-                    for (let pi = 0; pi < periods.value.length; pi++) {
-                        let row = [periods.value[pi].name];
-                        for (let wi = 0; wi < weekdays.value.length; wi++) {
-                            const teacher = getTeacherByCell(wi, pi, cls);
-                            row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
-                        }
-                        sheetData.push(row);
-                    }
-                    const ws = XLSX.utils.aoa_to_sheet(sheetData);
-                    if(!ws['!cols']) ws['!cols'] = [];
-                    for(let i=0;i<sheetData[0].length;i++) ws['!cols'][i] = {wch:15};
-                    XLSX.utils.book_append_sheet(wb, ws, cls);
-                }
-                XLSX.writeFile(wb, `全部班级课表_${new Date().toISOString().slice(0,19)}.xlsx`);
-            }
             function exportProject() {
                 const data = { teachers: teachers.value, rules: rules.value, weekdays: weekdays.value, periods: periods.value, classList: classList.value, timetableData: timetableData.value };
                 const a = document.createElement('a');
@@ -1159,6 +1123,15 @@
                 reader.readAsText(file);
             }
             function addTeacher() { teachers.value.push({ id: Date.now(), name: '新教师', subject: '科目', classes: [], weeklyHours: 10, isHomeroomTeacher: false, homeroomClass: '' }); }
+            function syncTeachersFromEdu() {
+                const eduTeachers = loadTeachersFromEduPlatform();
+                if (eduTeachers && eduTeachers.length > 0) {
+                    teachers.value = eduTeachers;
+                    alert(`✅ 成功从教务平台同步 ${eduTeachers.length} 名教师数据！`);
+                } else {
+                    alert('⚠️ 教务平台暂无教师数据，请先在教务平台添加教师。');
+                }
+            }
             function deleteTeacher(idx) { teachers.value.splice(idx,1); }
             function addPeriod() { periods.value.push({ name: `第${periods.value.length+1}节` }); }
             function removePeriod(idx) { if(periods.value.length>1) periods.value.splice(idx,1); else alert("至少保留一节"); }
@@ -1166,42 +1139,14 @@
             function removeClass(idx) { if(classList.value.length>1) classList.value.splice(idx,1); else alert("至少保留一班"); }
             
             function initMockData() {
-                // 如果是独立打开页面（非iframe），直接使用模拟数据
-                var isInIframe = (window.parent !== window);
-                if (!isInIframe) {
-                    teachers.value = [
-                        { id: 1, name: '张明', subject: '数学', classes: ['1班','2班','3班','4班'], weeklyHours: 12, isHomeroomTeacher: true, homeroomClass: '1班' },
-                        { id: 2, name: '李芳', subject: '语文', classes: ['1班','2班','3班','4班','5班'], weeklyHours: 14, isHomeroomTeacher: true, homeroomClass: '2班' },
-                        { id: 3, name: '王磊', subject: '英语', classes: ['1班','2班','3班','5班','6班','7班'], weeklyHours: 12, isHomeroomTeacher: false, homeroomClass: '' },
-                        { id: 4, name: '陈丽', subject: '物理', classes: ['4班','5班','6班','7班','8班'], weeklyHours: 10, isHomeroomTeacher: true, homeroomClass: '3班' },
-                        { id: 5, name: '赵阳', subject: '体育', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 8, isHomeroomTeacher: false, homeroomClass: '' },
-                        { id: 6, name: '刘强', subject: '课后服务', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 0, isHomeroomTeacher: false, homeroomClass: '' }
-                    ];
-                } else {
-                    // 在iframe中：从父页面（教务平台）获取教师数据
-                    window.addEventListener('message', function(event) {
-                        if (event.data && event.data.type === 'teachersData' && event.data.data) {
-                            if (event.data.data.length > 0) {
-                                teachers.value = event.data.data;
-                            }
-                        }
-                    });
-                    // 向父页面请求教师数据
-                    window.parent.postMessage({ type: 'getTeachers' }, '*');
-                    // 3秒内没收到响应则用模拟数据
-                    setTimeout(function() {
-                        if (teachers.value.length === 0) {
-                            teachers.value = [
-                                { id: 1, name: '张明', subject: '数学', classes: ['1班','2班','3班','4班'], weeklyHours: 12, isHomeroomTeacher: true, homeroomClass: '1班' },
-                                { id: 2, name: '李芳', subject: '语文', classes: ['1班','2班','3班','4班','5班'], weeklyHours: 14, isHomeroomTeacher: true, homeroomClass: '2班' },
-                                { id: 3, name: '王磊', subject: '英语', classes: ['1班','2班','3班','5班','6班','7班'], weeklyHours: 12, isHomeroomTeacher: false, homeroomClass: '' },
-                                { id: 4, name: '陈丽', subject: '物理', classes: ['4班','5班','6班','7班','8班'], weeklyHours: 10, isHomeroomTeacher: true, homeroomClass: '3班' },
-                                { id: 5, name: '赵阳', subject: '体育', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 8, isHomeroomTeacher: false, homeroomClass: '' },
-                                { id: 6, name: '刘强', subject: '课后服务', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 0, isHomeroomTeacher: false, homeroomClass: '' }
-                            ];
-                        }
-                    }, 3000);
-                }
+                teachers.value = [
+                    { id: 1, name: '张明', subject: '数学', classes: ['1班','2班','3班','4班'], weeklyHours: 12, isHomeroomTeacher: true, homeroomClass: '1班' },
+                    { id: 2, name: '李芳', subject: '语文', classes: ['1班','2班','3班','4班','5班'], weeklyHours: 14, isHomeroomTeacher: true, homeroomClass: '2班' },
+                    { id: 3, name: '王磊', subject: '英语', classes: ['1班','2班','3班','5班','6班','7班'], weeklyHours: 12, isHomeroomTeacher: false, homeroomClass: '' },
+                    { id: 4, name: '陈丽', subject: '物理', classes: ['4班','5班','6班','7班','8班'], weeklyHours: 10, isHomeroomTeacher: true, homeroomClass: '3班' },
+                    { id: 5, name: '赵阳', subject: '体育', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 8, isHomeroomTeacher: false, homeroomClass: '' },
+                    { id: 6, name: '刘强', subject: '课后服务', classes: ['1班','2班','3班','4班','5班','6班','7班','8班','9班','10班'], weeklyHours: 0, isHomeroomTeacher: false, homeroomClass: '' }
+                ];
                 rules.value = [
                     { id: 11, type: 'forbid', teacherId: 1, weekdayIdx: 0, periodIdx: 0 },
                     { id: 12, type: 'priority', subject: '数学', priorityVal: 9 },
@@ -1222,12 +1167,12 @@
 
             return {
                 activeMain, showRulesSub, activeSubRule, weekdays, periods, classList, teachers, rules, timetableData, lastConflictMsg,
-                showManualDialog, manualWeekIdx, manualPeriodIdx, manualClass, selectedTeacherId, currentClassView,
+                showManualDialog, manualWeekIdx, manualPeriodIdx, manualClass, selectedTeacherId,
                 rulesByType, addTypedRule, deleteRuleById, saveRulesToast, setMainMenu, toggleRulesSub, setRuleSubMenu,
                 saveTeachersSettings, saveScheduleSettings,
-                getTeacherByCell, getClassCellTeacher, isConflictCell, autoGenerateTimetable, refreshTimetableView,
-                openManualAdjust, closeManualDialog, applyManualAdjust, exportToExcel, exportClassTimetableExcel, exportAllClassesExcel, exportProject, importProject,
-                addTeacher, deleteTeacher, addPeriod, removePeriod, addClass, removeClass
+                getTeacherByCell, isConflictCell, autoGenerateTimetable, refreshTimetableView,
+                openManualAdjust, closeManualDialog, applyManualAdjust, exportToExcel, exportProject, importProject,
+                addTeacher, syncTeachersFromEdu, deleteTeacher, addPeriod, removePeriod, addClass, removeClass
             };
         }
     }).mount('#app');

@@ -295,29 +295,5 @@
 </button>
 
 <script src="app.js?v=20250629"></script>
-<script>
-// 排课系统 iframe 通信：共享教师数据
-window.addEventListener("message", function(event) {
-  if (event.data && event.data.type === "getTeachers") {
-    // 响应排课系统的教师数据请求
-    if (typeof DB !== "undefined" && DB.users) {
-      var teachers = DB.users
-        .filter(function(u) { return u.role === "teacher" || u.role === "headteacher"; })
-        .map(function(u) {
-          return {
-            id: u.id,
-            name: u.name,
-            subject: (u.subjects && u.subjects.length > 0) ? u.subjects[0] : "",
-            classes: u.classNo ? [u.classNo] : [],
-            weeklyHours: u.weeklyHours || 12,
-            isHomeroomTeacher: u.role === "headteacher",
-            homeroomClass: u.classNo || ""
-          };
-        });
-      event.source.postMessage({ type: "teachersData", data: teachers }, event.origin);
-    }
-  }
-});
-</script>
 </body>
 </html>

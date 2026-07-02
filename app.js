@@ -267,11 +267,6 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "排课管理", icon: "📅", items: [
-        { id: "schedule_system", icon: "📅", text: "排课系统" }
-      ]
-    },
-    {
       group: "个人中心", icon: "👤", items: [
         { id: "account_profile", icon: "🔐", text: "修改我的密码" }
       ]
@@ -311,13 +306,13 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "全年组通知", icon: "🔔", items: [
-        { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
+      group: "排课管理", icon: "📅", items: [
+        { id: "schedule", icon: "📆", text: "智能排课系统" }
       ]
     },
     {
-      group: "排课管理", icon: "📅", items: [
-        { id: "schedule_system", icon: "📅", text: "排课系统" }
+      group: "全年组通知", icon: "🔔", items: [
+        { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
       ]
     },
     {
@@ -849,15 +844,6 @@ async function navigate(pageId) {
   setTimeout(() => { checkGradeNotifications(); }, 400);
 }
 
-// ========== 排课系统 ==========
-function renderScheduleSystem() {
-  $("pageContent").innerHTML = `
-    <div style="height: calc(100vh - 120px); border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
-      <iframe src="智教排课.html" style="width: 100%; height: 100%; border: none;" id="scheduleIframe"></iframe>
-    </div>
-  `;
-}
-
 // ========== 个人中心：修改密码 ==========
 function renderAccountProfile() {
   const u = currentUser;
@@ -949,6 +935,26 @@ function renderAccountProfile() {
   };
 }
 
+// ========== 智能排课系统 ==========
+function renderSchedule() {
+  $("pageContent").innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:linear-gradient(135deg,#3b82f6,#60a5fa);color:#fff">
+        <div>
+          <div style="font-size:18px;font-weight:600">📅 智能排课系统</div>
+          <div style="font-size:13px;opacity:0.9;margin-top:4px">教师名单自动从教务平台同步，支持规则设置、自动排课、手动调课</div>
+        </div>
+        <button class="btn btn-light" onclick="window.open('智教排课.html', '_blank')" style="background:#fff;color:#3b82f6;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
+          🚀 新窗口打开
+        </button>
+      </div>
+      <div style="padding:0">
+        <iframe src="智教排课.html" style="width:100%;height:calc(100vh - 220px);border:none;display:block"></iframe>
+      </div>
+    </div>
+  `;
+}
+
 // ========== 公告 ==========
 function renderAnnouncement() {
   const list = DB.announcements.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 3);
@@ -987,7 +993,6 @@ const PAGE_RENDERERS = {
   academic_analysis: renderAcademicAnalysis,
   score_review: renderScoreReview,
   student_roster: renderStudentRoster,
-  schedule_system: renderScheduleSystem,
   upload_scores: renderUploadScores,
   my_class_scores: renderMyClassScores,
   download_scores: renderDownloadScores,
@@ -999,7 +1004,8 @@ const PAGE_RENDERERS = {
   group_manage: renderGroupManage,
   group_scores: renderGroupScores,
   custom_analysis: renderCustomAnalysis,
-  account_profile: renderAccountProfile
+  account_profile: renderAccountProfile,
+  schedule: renderSchedule
 };
 
 // ========== 平台概览 ==========
