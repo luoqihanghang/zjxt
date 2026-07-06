@@ -35,10 +35,13 @@ const GitHubService = {
   FILE_LIMIT: 280,         // 接近 300 时触发归档
 
   init() {
-    const token = localStorage.getItem("gh_token");
+    let token = localStorage.getItem("gh_token");
     const configGistId = localStorage.getItem("gh_config_gist_id");
     let dataGistIds = [];
     try { dataGistIds = JSON.parse(localStorage.getItem("gh_data_gist_ids") || "[]"); } catch(e) {}
+
+    // 清理所有非 ISO-8859-1 字符（只保留 ASCII 可见字符：!-~ 及空格）
+    token = token ? String(token).replace(/[^\x20-\x7E]/g, "") : "";
 
     this.config = {
       token: token || null,
@@ -145,7 +148,13 @@ const GitHubService = {
       this._setStatus("info", "未导入", "请先上传配置文件");
       return false;
     }
-    const { token, configGistId, dataGistIds } = this._pendingConfig;
+    let { token, configGistId, dataGistIds } = this._pendingConfig;
+    // 只保留 ASCII 可见字符，彻底避免请求头含非 ISO-8859-1 字符
+    token = token ? String(token).replace(/[^\x20-\x7E]/g, "") : "";
+    configGistId = configGistId ? String(configGistId).replace(/[^\x20-\x7E]/g, "").trim() : "";
+    if (!Array.isArray(dataGistIds)) dataGistIds = [];
+    dataGistIds = dataGistIds.map(id => String(id).replace(/[^\x20-\x7E]/g, "").trim()).filter(Boolean);
+
     // 全部写入 localStorage（仅本地浏览器存储）
     localStorage.setItem("gh_token", token);
     localStorage.setItem("gh_config_gist_id", configGistId);
@@ -180,6 +189,7 @@ const GitHubService = {
 
   saveGistConfig(token, configGistId, dataGistId) {
     if (token) {
+      token = String(token).replace(/[^\x20-\x7E]/g, "");
       localStorage.setItem("gh_token", token);
       this.config.token = token;
     }
@@ -197,12 +207,15 @@ const GitHubService = {
   // ========= 通用 Gist API =========
   async api(method, gistId, body = null) {
     if (!this.config.token) throw new Error("未配置 Token");
+    // 兜底清理：确保 Authorization 头只含 ASCII 可见字符
+    const token = String(this.config.token).replace(/[^\x20-\x7E]/g, "");
+    if (!token) throw new Error("Token 为空");
     const githubUrl = `https://api.github.com/gists/${gistId || ""}`;
     const url = this.useProxy ? `${this.CORS_PROXY}${encodeURIComponent(githubUrl)}` : githubUrl;
     const opts = {
       method,
       headers: {
-        "Authorization": `Bearer ${this.config.token}`,
+        "Authorization": `Bearer ${token}`,
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28"
