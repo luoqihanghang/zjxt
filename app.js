@@ -1,6 +1,6 @@
 // ========== 网络智慧教务平台 - 主应用 ==========
 // 所有数据存储在 localStorage 中，便于本地演示和持久化
-// 版本: 20260706 - Gist 配置改为 JSON 上传导入 + 各功能模块添加使用帮助
+// 版本: 20260706 - Gist 配置改为 JSON 上传导入 + 各功能模块添加使用帮助 + 操作日志
 console.log("[智慧教务平台] v20260706 已加载");
 
 // ========== 工具函数 ==========
@@ -9,19 +9,90 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).substr(2,
 const fmt = (n, d = 2) => (isFinite(n) ? Number(n).toFixed(d) : "-");
 const fmtPct = (n) => (isFinite(n) ? (n * 100).toFixed(2) + "%" : "-");
 
+// ========== 操作日志 ==========
+// 日志分类
+const LOG_CATEGORIES = {
+  auth: "登录认证",
+  user: "用户管理",
+  exam: "考试管理",
+  score: "成绩管理",
+  subject: "学科设置",
+  roster: "学生名单",
+  announcement: "公告通知",
+  permission: "权限管理",
+  system: "系统设置"
+};
+
+// 日志操作类型
+const LOG_ACTIONS = {
+  login: "登录系统",
+  logout: "退出登录",
+  user_add: "添加用户",
+  user_edit: "编辑用户",
+  user_delete: "删除用户",
+  user_import: "批量导入用户",
+  password_change: "修改密码",
+  exam_create: "创建考试",
+  exam_edit: "编辑考试",
+  exam_delete: "删除考试",
+  score_upload: "上传成绩",
+  score_confirm: "审核成绩",
+  score_reject: "退回成绩",
+  score_clear: "清空成绩",
+  subject_add: "添加学科",
+  subject_edit: "编辑学科",
+  subject_delete: "删除学科",
+  subject_import: "批量导入学科",
+  roster_upload: "上传学生名单",
+  roster_edit: "编辑学生名单",
+  roster_clear: "清空学生名单",
+  announcement_publish: "发布公告",
+  announcement_delete: "删除公告",
+  notification_publish: "发布年级通知",
+  notification_close: "关闭通知",
+  permission_change: "修改权限",
+  grade_add: "添加年级",
+  grade_delete: "删除年级",
+  data_export: "导出数据",
+  data_import: "导入数据"
+};
+
+// 记录操作日志
+function logAction(action, category, detail = "", target = "") {
+  if (!DB.logs) DB.logs = [];
+  const log = {
+    id: uid(),
+    action,
+    actionText: LOG_ACTIONS[action] || action,
+    category,
+    categoryText: LOG_CATEGORIES[category] || category,
+    userId: currentUser ? currentUser.id : null,
+    userName: currentUser ? currentUser.name : "未知用户",
+    role: currentUser ? currentUser.role : null,
+    grade: currentUser ? currentUser.grade : null,
+    target,
+    detail,
+    createdAt: Date.now()
+  };
+  DB.logs.push(log);
+  // 只保留最近1000条日志
+  if (DB.logs.length > 1000) {
+    DB.logs = DB.logs.slice(-1000);
+  }
+  saveDB(DB);
+}
+
 // HTML 转义，防止特殊字符破坏页面结构
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-// 根据用户角色过滤记录：学术用户可见所有记录，班主任可见本班所有记录，任课教师仅可见已确认记录
+// 根据用户角色过滤记录：超级管理员和学术用户可见所有记录，班主任可见本班所有记录，任课教师仅可见已确认记录
 const getVisibleRecords = (records) => {
-  if (!currentUser || currentUser.role === "academic") return records;
-  // 班主任：可以看到自己班级的所有记录（包括待审核和已确认）
+  if (!currentUser || currentUser.role === "academic" || currentUser.role === "admin") return records;
   if (currentUser.role === "headteacher") {
     const filtered = records.filter((r) => classNoEquals(r.classNo, currentUser.classNo));
     console.log("[getVisibleRecords] 班主任过滤", { role: currentUser.role, classNo: currentUser.classNo, inputRecords: records.length, outputRecords: filtered.length });
     return filtered;
   }
-  // 任课教师：只能看到已确认的记录
   return records.filter((r) => r.status === "confirmed");
 };
 
@@ -226,7 +297,8 @@ function initDefaultDB() {
     },  // 学号格式设置
     scoreReviews: [],   // 成绩审核记录
     gradeNotifications: [],  // 全年组通知弹窗 [{id, grade, title, content, level, createdBy, createdAt, readBy: {userId: true}}]
-    dismissedNotifications: {}   // 用户已关闭的通知 {userId: {notifId: true}}
+    dismissedNotifications: {},   // 用户已关闭的通知 {userId: {notifId: true}}
+    logs: []  // 操作日志 [{id, action, category, userId, userName, role, grade, target, detail, createdAt}]
   };
 }
 
@@ -258,12 +330,20 @@ const NAV_MENUS = {
     {
       group: "教学设置", icon: "🎓", items: [
         { id: "grades", icon: "🏫", text: "年级设置" },
-        { id: "exams", icon: "📝", text: "考试管理" }
+        { id: "subjects", icon: "📚", text: "学科/分值设置" },
+        { id: "exams", icon: "📝", text: "考试管理" },
+        { id: "student_roster", icon: "📋", text: "学生名单管理" }
       ]
     },
     {
       group: "公告消息", icon: "📢", items: [
-        { id: "announcements_all", icon: "📢", text: "公告管理" }
+        { id: "announcements_all", icon: "📢", text: "公告管理" },
+        { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
+      ]
+    },
+    {
+      group: "系统管理", icon: "⚙️", items: [
+        { id: "logs", icon: "📜", text: "操作日志" }
       ]
     },
     {
@@ -306,12 +386,8 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "排课管理", icon: "📅", items: [
-        { id: "schedule", icon: "📆", text: "智能排课系统" }
-      ]
-    },
-    {
-      group: "考务管理", icon: "🏛️", items: [
+      group: "课程与考务", icon: "📅", items: [
+        { id: "schedule", icon: "📆", text: "智能排课系统" },
         { id: "exam_arrangement", icon: "📋", text: "排考场系统" }
       ]
     },
@@ -472,10 +548,17 @@ async function doLogin() {
     localStorage.removeItem("saved_user");
   }
 
+  // 记录登录日志
+  logAction("login", "auth", `角色：${ROLE_NAMES[user.role]}`, user.name);
+
   enterApp();
 }
 
 function doLogout() {
+  // 记录登出日志
+  if (currentUser) {
+    logAction("logout", "auth", `角色：${ROLE_NAMES[currentUser.role]}`, currentUser.name);
+  }
   currentUser = null;
   sessionStorage.removeItem("current_user_id");
   $("mainApp").classList.add("hidden");
@@ -762,8 +845,33 @@ function renderUserInfo() {
 }
 
 function renderNavMenu() {
-  const groups = NAV_MENUS[currentUser.role] || [];
-  // 平铺所有 items，便于 navigate 查找
+  let groups = NAV_MENUS[currentUser.role] || [];
+
+  if (currentUser.role === "admin" && DB && DB.subjects) {
+    const gradeGroups = Object.keys(DB.subjects).sort().map(grade => ({
+      group: grade,
+      icon: "🏫",
+      items: [
+        { id: "class_ranking", icon: "🏆", text: "学生排名" },
+        { id: "teacher_ranking", icon: "🎖️", text: "教师排名" },
+        { id: "grade_summary", icon: "📊", text: "成绩汇总" },
+        { id: "academic_analysis", icon: "🔍", text: "数据分析" },
+        { id: "exam_compare", icon: "🔄", text: "考试对比" }
+      ]
+    }));
+
+    const teachingSettingsIndex = groups.findIndex(g => g.group === "教学设置");
+    if (teachingSettingsIndex >= 0) {
+      groups = [
+        ...groups.slice(0, teachingSettingsIndex + 1),
+        ...gradeGroups,
+        ...groups.slice(teachingSettingsIndex + 1)
+      ];
+    } else {
+      groups = [...groups, ...gradeGroups];
+    }
+  }
+
   const allItems = groups.flatMap((g) => g.items);
 
   let html = `<div class="nav-group-title">功能导航</div>`;
@@ -784,15 +892,22 @@ function renderNavMenu() {
   });
   $("navMenu").innerHTML = html;
 
-  // 展开/折叠分组
   $("navMenu").querySelectorAll(".nav-group-header").forEach((el) => {
     el.onclick = () => el.parentElement.classList.toggle("open");
   });
-  // 点击菜单项
   $("navMenu").querySelectorAll(".nav-item").forEach((el) => {
-    el.onclick = () => navigate(el.dataset.id);
+    el.onclick = () => {
+      const groupHeader = el.closest(".nav-group").querySelector(".nav-group-header");
+      if (groupHeader) {
+        const groupName = groupHeader.querySelector(".ng-name").textContent.trim();
+        const gradeKeys = Object.keys(DB.subjects || {});
+        if (gradeKeys.includes(groupName)) {
+          currentUser.grade = groupName;
+        }
+      }
+      navigate(el.dataset.id);
+    };
   });
-  // 高亮当前页
   if (currentPage) {
     const active = $("navMenu").querySelector(`.nav-item[data-id="${currentPage}"]`);
     if (active) {
@@ -808,10 +923,27 @@ async function navigate(pageId) {
   $("navMenu").querySelectorAll(".nav-item").forEach((el) => {
     el.classList.toggle("active", el.dataset.id === pageId);
   });
-  const groups = NAV_MENUS[currentUser.role] || [];
-  const allItems = groups.flatMap((g) => g.items);
-  const menu = allItems.find((m) => m.id === pageId);
-  $("pageTitle").textContent = menu ? menu.text : "页面";
+
+  let menuText = "页面";
+  const activeItem = $("navMenu").querySelector(`.nav-item[data-id="${pageId}"]`);
+  if (activeItem) {
+    const navText = activeItem.querySelector(".nav-text");
+    if (navText) menuText = navText.textContent;
+    const groupHeader = activeItem.closest(".nav-group").querySelector(".nav-group-header");
+    if (groupHeader) {
+      const groupName = groupHeader.querySelector(".ng-name").textContent.trim();
+      const gradeKeys = Object.keys(DB.subjects || {});
+      if (gradeKeys.includes(groupName)) {
+        menuText = `${groupName} - ${menuText}`;
+      }
+    }
+  } else {
+    const groups = NAV_MENUS[currentUser.role] || [];
+    const allItems = groups.flatMap((g) => g.items);
+    const menu = allItems.find((m) => m.id === pageId);
+    if (menu) menuText = menu.text;
+  }
+  $("pageTitle").textContent = menuText;
 
   // 切换页面时自动刷新最新数据（优先从 GitHub 拉取，保证多端数据同步）
   if (GitHubService.isConfigured()) {
@@ -848,6 +980,159 @@ async function navigate(pageId) {
   // 每次导航后检查并弹出全年组通知
   setTimeout(() => { checkGradeNotifications(); }, 400);
 }
+
+// ========== 操作日志查看 ==========
+function renderLogs() {
+  if (currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+
+  // 初始化日志数组
+  if (!DB.logs) DB.logs = [];
+
+  // 获取所有日志并按时间倒序排列
+  let logs = DB.logs.slice().reverse();
+
+  // 过滤条件
+  const categoryFilter = $("log_category_filter") ? $("log_category_filter").value : "";
+  const userFilter = $("log_user_filter") ? $("log_user_filter").value : "";
+  const actionFilter = $("log_action_filter") ? $("log_action_filter").value : "";
+
+  if (categoryFilter) logs = logs.filter(l => l.category === categoryFilter);
+  if (userFilter) logs = logs.filter(l => l.userId === userFilter);
+  if (actionFilter) logs = logs.filter(l => l.action === actionFilter);
+
+  // 生成分类选项
+  const categoryOptions = Object.entries(LOG_CATEGORIES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  // 生成用户选项
+  const userOptions = DB.users.map(u => `<option value="${u.id}">${esc(u.name)} (${ROLE_NAMES[u.role]})</option>`).join("");
+  // 生成操作选项
+  const actionOptions = Object.entries(LOG_ACTIONS).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+
+  // 格式化日志表格
+  const rows = logs.slice(0, 200).map(l => `
+    <tr>
+      <td style="white-space:nowrap">${new Date(l.createdAt).toLocaleString()}</td>
+      <td><span style="background:var(--bg-light);padding:2px 6px;border-radius:4px">${esc(l.categoryText)}</span></td>
+      <td>${esc(l.actionText)}</td>
+      <td>${esc(l.userName)}</td>
+      <td>${esc(l.target)}</td>
+      <td style="color:var(--text-light)">${esc(l.detail)}</td>
+    </tr>
+  `).join("");
+
+  $("pageContent").innerHTML = `
+    <div class="card">
+      <div class="card-title">
+        <span>📜 操作日志</span>
+        <span class="ct-actions">
+          <button class="btn btn-info" onclick="exportLogs()">📥 导出日志</button>
+          <button class="btn btn-danger" onclick="clearLogs()">🗑️ 清空日志</button>
+        </span>
+      </div>
+      <p style="color:var(--text-light);margin-bottom:16px;">
+        记录系统关键操作，最多保留1000条。可按分类、用户、操作类型筛选。
+      </p>
+      <div class="form-row" style="margin-bottom:16px">
+        <div class="form-group" style="width:180px">
+          <label>操作分类</label>
+          <select id="log_category_filter" onchange="renderLogs()">
+            <option value="">全部分类</option>
+            ${categoryOptions}
+          </select>
+        </div>
+        <div class="form-group" style="width:200px">
+          <label>操作用户</label>
+          <select id="log_user_filter" onchange="renderLogs()">
+            <option value="">全部用户</option>
+            ${userOptions}
+          </select>
+        </div>
+        <div class="form-group" style="width:180px">
+          <label>操作类型</label>
+          <select id="log_action_filter" onchange="renderLogs()">
+            <option value="">全部操作</option>
+            ${actionOptions}
+          </select>
+        </div>
+        <div class="form-group" style="flex:1;text-align:right">
+          <label style="visibility:hidden">统计</label>
+          <span style="color:var(--text-light)">共 ${DB.logs.length} 条日志，显示前 200 条</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>分类</th>
+              <th>操作</th>
+              <th>用户</th>
+              <th>对象</th>
+              <th>详情</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || `<tr><td colspan="6"><div class="empty-state"><div class="es-tip">暂无日志记录</div></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // 恢复筛选条件
+  if (categoryFilter) $("log_category_filter").value = categoryFilter;
+  if (userFilter) $("log_user_filter").value = userFilter;
+  if (actionFilter) $("log_action_filter").value = actionFilter;
+}
+
+// 导出日志
+window.exportLogs = function() {
+  if (!DB.logs || DB.logs.length === 0) {
+    showToast("暂无日志数据", "info");
+    return;
+  }
+
+  const headers = ["时间", "分类", "操作", "用户", "角色", "年级", "对象", "详情"];
+  const rows = DB.logs.map(l => [
+    new Date(l.createdAt).toLocaleString(),
+    l.categoryText,
+    l.actionText,
+    l.userName,
+    ROLE_NAMES[l.role] || "",
+    l.grade || "",
+    l.target,
+    l.detail
+  ]);
+
+  const csvContent = [headers, ...rows].map(row => row.map(cell => `"${(cell || "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob(["\ufeff" + csvContent], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `操作日志_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  logAction("data_export", "system", `${DB.logs.length}条日志`);
+  showToast("日志导出成功", "success");
+};
+
+// 清空日志
+window.clearLogs = function() {
+  if (!DB.logs || DB.logs.length === 0) {
+    showToast("暂无日志数据", "info");
+    return;
+  }
+
+  showModal("⚠️ 清空操作日志", `<div>
+    <p>将清空所有 <b style="color:#c0392b">${DB.logs.length}</b> 条操作日志记录。</p>
+    <p style="color:#c0392b;margin-top:8px">⚠️ 清空后不可恢复，请谨慎操作。</p>
+  </div>`, "🗑️ 确认清空", () => {
+    const count = DB.logs.length;
+    DB.logs = [];
+    saveDB(DB);
+    showToast(`已清空 ${count} 条日志`, "success");
+    renderLogs();
+  });
+};
 
 // ========== 个人中心：修改密码 ==========
 function renderAccountProfile() {
@@ -1432,7 +1717,8 @@ const PAGE_RENDERERS = {
   custom_analysis: renderCustomAnalysis,
   account_profile: renderAccountProfile,
   schedule: renderSchedule,
-  exam_arrangement: renderExamArrangement
+  exam_arrangement: renderExamArrangement,
+  logs: renderLogs
 };
 
 // ========== 各功能模块使用帮助 ==========
@@ -2018,6 +2304,38 @@ const PAGE_HELPS = {
           </ol>
         </div>
         <div class="help-note">💡 提示：使用前请先在「学生名单管理」中建立学生数据，或确保已有考试成绩可供导入。</div>
+      </div>`
+  },
+  logs: {
+    title: "操作日志",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>操作日志记录系统中的关键操作，包括用户登录、成绩管理、考试设置等，帮助管理员追踪系统使用情况。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>日志默认按时间倒序排列，最新操作在最前面。</li>
+            <li>可通过「操作分类」「操作用户」「操作类型」筛选日志。</li>
+            <li>点击「导出日志」可将日志导出为CSV文件。</li>
+            <li>点击「清空日志」可清空所有历史日志（需确认）。</li>
+          </ol>
+        </div>
+        <div class="help-section">
+          <h4>📝 日志分类</h4>
+          <ul>
+            <li><b>登录认证</b>：用户登录、登出操作</li>
+            <li><b>用户管理</b>：添加、编辑、删除用户</li>
+            <li><b>考试管理</b>：创建、删除考试</li>
+            <li><b>成绩管理</b>：上传、审核、清空成绩</li>
+            <li><b>学科设置</b>：学科相关操作</li>
+            <li><b>学生名单</b>：学生名单管理操作</li>
+            <li><b>系统设置</b>：数据导出等系统操作</li>
+          </ul>
+        </div>
+        <div class="help-note">💡 提示：系统最多保留1000条日志，超出后自动清理旧记录。</div>
       </div>`
   }
 };
@@ -2755,8 +3073,10 @@ window.editUser = function (id) {
     if (u) {
       u.name = name; u.role = role; u.grade = grade; u.classNo = classNo; u.subjects = subjects;
       if (password) u.password = password;
+      logAction("user_edit", "user", `角色：${ROLE_NAMES[role]}，年级：${grade || "无"}，班级：${classNo || "无"}`, name);
     } else {
       DB.users.push({ id: uid(), username, password: password || "123456", name, role, grade, classNo, subjects, createdAt: Date.now() });
+      logAction("user_add", "user", `账号：${username}，角色：${ROLE_NAMES[role]}，年级：${grade || "无"}`, name);
     }
     const syncResult = await saveDB(DB);
     if (syncResult === true) {
@@ -2777,6 +3097,7 @@ window.resetPwd = async function (id) {
   if (isAcademic && u.grade !== currentUser.grade) { showToast("无权限操作此教师", "error"); return; }
   if (!confirm(`确认将 ${u.name} 的密码重置为 123456？`)) return;
   u.password = "123456";
+  logAction("password_change", "user", "密码重置为123456", u.name);
   const syncResult = await saveDB(DB);
   if (syncResult) {
     showToast(`✅ ${u.name} 的密码已重置为 123456`, "success");
@@ -2791,6 +3112,7 @@ window.delUser = async function (id) {
   const isAcademic = currentUser.role === "academic";
   if (isAcademic && (u.grade !== currentUser.grade || u.role === "academic")) { showToast("无权限删除此教师", "error"); return; }
   if (!confirm(`确认删除教师「${u.name}」？此操作不可恢复。`)) return;
+  logAction("user_delete", "user", `账号：${u.username}，角色：${ROLE_NAMES[u.role]}`, u.name);
   DB.users = DB.users.filter((x) => x.id !== id);
   const syncResult = await saveDB(DB);
   if (syncResult) {
@@ -2833,16 +3155,23 @@ window.addGrade = function () {
     const g = $("m_grade").value.trim();
     if (!g) { showToast("请输入年级名称", "error"); return false; }
     if (DB.subjects[g]) { showToast("年级已存在", "error"); return false; }
-    DB.subjects[g] = []; saveDB(DB); showToast(`已添加：${g}`, "success"); renderGrades();
+    DB.subjects[g] = []; saveDB(DB);
+    logAction("grade_add", "system", "", g);
+    showToast(`已添加：${g}`, "success"); renderGrades();
+    if (currentUser.role === "admin") renderNavMenu();
   });
 };
 
 window.delGrade = function (g) {
   if (!confirm(`确认删除年级【${g}】？相关学科、考试、成绩也将一并删除。`)) return;
+  const examCount = DB.exams.filter((e) => e.grade === g).length;
+  const recordCount = DB.records.filter((r) => r.grade === g).length;
+  logAction("grade_delete", "system", `${examCount}个考试，${recordCount}条成绩`, g);
   delete DB.subjects[g];
   DB.exams = DB.exams.filter((e) => e.grade !== g);
   DB.records = DB.records.filter((r) => r.grade !== g);
   saveDB(DB); showToast("已删除", "success"); renderGrades();
+  if (currentUser.role === "admin") renderNavMenu();
 };
 
 // ========== 管理员：权限管理 ==========
@@ -2912,6 +3241,7 @@ window.addExam = function () {
     const date = $("m_exam_date").value;
     if (!name || !grade || !date) { showToast("请完整填写信息", "error"); return false; }
     DB.exams.push({ id: uid(), name, grade, date, createdAt: Date.now(), subjects: [] }); saveDB(DB);
+    logAction("exam_create", "exam", `日期：${date}`, `${grade} ${name}`);
     showToast("考试创建成功，请设置考试科目", "success"); renderExams();
   });
 };
@@ -2966,18 +3296,32 @@ window.editExamSubjects = function (examId) {
 };
 
 window.delExam = function (id) {
+  const exam = DB.exams.find((e) => e.id === id);
+  if (!exam) return;
   if (!confirm("确认删除此考试及其所有成绩数据？")) return;
+  logAction("exam_delete", "exam", `删除${DB.records.filter(r => r.examId === id).length}条成绩记录`, `${exam.grade} ${exam.name}`);
   DB.exams = DB.exams.filter((e) => e.id !== id);
   DB.records = DB.records.filter((r) => r.examId !== id);
   saveDB(DB); showToast("已删除", "success"); renderExams();
 };
 
-// ========== 教务老师：学科与分值设置 ==========
+// ========== 教务老师/管理员：学科与分值设置 ==========
 function renderSubjects() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade || Object.keys(DB.subjects)[0];
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   if (!DB.subjects[grade]) DB.subjects[grade] = [];
   const list = DB.subjects[grade];
+
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+    <div class="form-group" style="margin-bottom:16px;">
+      <label>选择年级</label>
+      <select id="subjects_grade_select" style="padding:6px 12px;border:1px solid var(--border);border-radius:4px;">
+        ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+      </select>
+    </div>
+  ` : "";
 
   const rows = list.map((s, idx) => `
     <tr>
@@ -3002,6 +3346,7 @@ function renderSubjects() {
           <button class="btn btn-success" onclick="addSubject('${grade}')">+ 添加学科</button>
         </span>
       </div>
+      ${gradeSelector}
       <p style="color:var(--text-light); margin-bottom:14px;">💡 直接在表格中修改数值，系统自动保存。</p>
       <div class="table-wrap"><table class="data-table">
         <thead><tr><th>学科</th><th>满分</th><th>优秀线</th><th>良好线</th><th>及格线</th><th>低分线</th><th>操作</th></tr></thead>
@@ -3009,10 +3354,15 @@ function renderSubjects() {
       </table></div>
     </div>
   `;
+
+  const gs = $("subjects_grade_select");
+  if (gs) gs.onchange = () => { currentUser.grade = gs.value; renderSubjects(); };
 }
 
 window.updateSubjectField = function (grade, idx, field, val) {
+  const subj = DB.subjects[grade][idx];
   DB.subjects[grade][idx][field] = val; saveDB(DB);
+  logAction("subject_edit", "subject", `${field}=${val}`, `${grade} ${subj.name}`);
 };
 
 window.addSubject = function (grade) {
@@ -3036,12 +3386,17 @@ window.addSubject = function (grade) {
       pass: +$("m_ps").value || 60,
       low: +$("m_lw").value || 40
     });
-    saveDB(DB); showToast("已添加", "success"); renderSubjects();
+    saveDB(DB);
+    logAction("subject_add", "subject", `满分${$("m_fs").value || 100}`, `${grade} ${name}`);
+    showToast("已添加", "success"); renderSubjects();
   });
 };
 
 window.delSubject = function (grade, idx) {
+  const subj = DB.subjects[grade][idx];
+  if (!subj) return;
   if (!confirm("确认删除此学科？")) return;
+  logAction("subject_delete", "subject", "", `${grade} ${subj.name}`);
   DB.subjects[grade].splice(idx, 1); saveDB(DB); showToast("已删除", "success"); renderSubjects();
 };
 
@@ -3720,10 +4075,12 @@ function calculateTotal(scores, subjects) {
   return total;
 }
 
-// ========== 教务：上传全年级成绩（所有班级） ==========
+// ========== 教务/管理员：上传全年级成绩（所有班级） ==========
 function renderAcademicUploadScores() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade);
   const subjects = DB.subjects[grade] || [];
 
@@ -3788,10 +4145,18 @@ function renderAcademicUploadScores() {
     </div>`;
   };
 
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+      <div class="form-group" style="width:160px"><label>选择年级</label>
+        <select id="a_grade" onchange="window.onAcademicGradeChange()">
+          ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+        </select>
+      </div>` : "";
+
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">📥 上传 ${grade} 全年级成绩</div>
       <div class="form-row">
+        ${gradeSelector}
         <div class="form-group" style="flex:1"><label>选择考试</label>
           <select id="a_exam" onchange="window.onAcademicExamChange()">
             ${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}
@@ -3874,6 +4239,11 @@ function renderAcademicUploadScores() {
   window.onAcademicExamChange = function () {
     renderAcademicSubjectProgress();
     renderAcademicSubjectButtons();
+  };
+
+  window.onAcademicGradeChange = function () {
+    currentUser.grade = $("a_grade").value;
+    renderAcademicUploadScores();
   };
 
   // 模式切换
@@ -4395,16 +4765,26 @@ function aggregateStats(records, subjects) {
   return stats;
 }
 
-// ========== 教务：年级成绩汇总 ==========
+// ========== 教务/管理员：年级成绩汇总 ==========
 function renderGradeSummary() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
+
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+    <div class="form-group" style="width:160px"><label>选择年级</label>
+      <select id="s_grade" onchange="window.onSummaryGradeChange()">
+        ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+      </select>
+    </div>` : "";
 
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">📈 ${grade} 成绩汇总</div>
       <div class="form-row">
+        ${gradeSelector}
         <div class="form-group"><label>选择考试</label><select id="s_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select></div>
       </div>
       <div id="summary_result"></div>
@@ -4413,6 +4793,11 @@ function renderGradeSummary() {
   const s = $("s_exam");
   if (s) s.onchange = () => drawSummary(s.value, grade);
   if (exams.length) drawSummary(exams[0].id, grade);
+
+  window.onSummaryGradeChange = function () {
+    currentUser.grade = $("s_grade").value;
+    renderGradeSummary();
+  };
 }
 
 function drawSummary(examId, grade) {
@@ -4505,14 +4890,25 @@ function exportSummaryExcel(examId, grade) {
 function renderClassRanking() {
   const isHeadteacher = currentUser.role === "headteacher";
   const isAcademic = currentUser.role === "academic";
-  const grade = currentUser.grade;
+  const isAdmin = currentUser.role === "admin";
+  const myGrade = isAcademic || isHeadteacher ? currentUser.grade : null;
+  const grades = isAdmin ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
 
   const hasClassFilter = !isHeadteacher;
+  const gradeSelector = isAdmin && grades.length > 0 ? `
+    <div class="form-group" style="width:160px"><label>选择年级</label>
+      <select id="r_grade" onchange="window.onClassRankingGradeChange()">
+        ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+      </select>
+    </div>` : "";
+
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">🏆 ${isHeadteacher ? "本班成绩排名" : "全年级成绩排名"} - ${grade}</div>
       <div class="form-row">
+        ${gradeSelector}
         <div class="form-group"><label>选择考试</label><select id="r_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select></div>
         ${hasClassFilter ? `<div class="form-group"><label>筛选班级</label><select id="r_class"><option value="">全部班级</option></select></div>` : ""}
       </div>
@@ -5081,9 +5477,19 @@ function computeTeacherRanking(examId, grade) {
 }
 
 function renderTeacherRanking() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
+
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+    <div class="form-group" style="width:160px"><label>选择年级</label>
+      <select id="tr_grade" onchange="window.onTeacherRankingGradeChange()">
+        ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+      </select>
+    </div>` : "";
+
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">
@@ -5094,6 +5500,7 @@ function renderTeacherRanking() {
         </span>
       </div>
       <div class="form-row">
+        ${gradeSelector}
         <div class="form-group"><label>选择考试</label><select id="tr_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select></div>
         <div class="form-group"><label>筛选学科</label><select id="tr_subject"><option value="">全部学科</option></select></div>
       </div>
@@ -5107,6 +5514,11 @@ function renderTeacherRanking() {
   const refresh = () => drawTeacherRanking(tr_exam.value, grade, tr_subject.value);
   tr_exam.onchange = refresh; tr_subject.onchange = refresh;
   if (exams.length) refresh();
+
+  window.onTeacherRankingGradeChange = function () {
+    currentUser.grade = $("tr_grade").value;
+    renderTeacherRanking();
+  };
 }
 
 // 诊断报告：逐个班级×学科显示实际匹配到的教师
@@ -5251,8 +5663,10 @@ window.downloadTeacherRanking = function (examId, grade) {
 // ========== 教务：发送班级成绩 ==========
 // ========== 教务：成绩审核（发送通知改为直接审核） ==========
 function renderSendScores() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
 
   // 各考试审核状态
@@ -5373,6 +5787,7 @@ window.ssConfirmCurrentExam = function () {
     const now = Date.now();
     targets.forEach((r) => { r.status = "confirmed"; r.confirmedAt = now; r.confirmedBy = currentUser.id; });
     saveDB(DB);
+    logAction("score_confirm", "score", `${targets.length}条成绩`, exam.name);
     showToast(`已审核通过 ${targets.length} 条成绩，班主任和任课教师端已可查看`, "success");
     renderSendScores();
   });
@@ -5391,6 +5806,7 @@ window.ssConfirmAllPending = function () {
     const now = Date.now();
     targets.forEach((r) => { r.status = "confirmed"; r.confirmedAt = now; r.confirmedBy = currentUser.id; });
     saveDB(DB);
+    logAction("score_confirm", "score", `${targets.length}条成绩（全部考试）`, grade);
     showToast(`已审核通过 ${targets.length} 条成绩，全员可见`, "success");
     renderSendScores();
   });
@@ -5408,15 +5824,25 @@ document.head.appendChild(reviewStatusStyle);
 
 // ========== 教务：发送教师排行 ==========
 function renderSendRank() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
+
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+    <div class="form-group" style="width:160px"><label>选择年级</label>
+      <select id="sr_grade" onchange="window.onSendRankGradeChange()">
+        ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+      </select>
+    </div>` : "";
 
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">📤 推送教师排行榜给相关教师</div>
       <p style="color:var(--text-light); margin-bottom:16px;">选择考试后一键推送，所有参与的任课教师（含班主任）将在"我的排行信息"中查看到对应排行。</p>
       <div class="form-row">
+        ${gradeSelector}
         <div class="form-group"><label>选择考试</label><select id="sr_exam">${exams.map((e) => `<option value="${e.id}">${e.name}</option>`).join("")}${exams.length === 0 ? `<option>暂无考试</option>` : ""}</select></div>
       </div>
       <div style="text-align:right; margin-top:16px;"><button class="btn btn-success" id="sr_send">📤 推送教师排行</button></div>
@@ -5435,6 +5861,11 @@ function renderSendRank() {
     DB.rankSends.push({ id: uid(), examId, examName: exam.name, sentBy: currentUser.name, createdAt: Date.now() });
     saveDB(DB);
     showToast("已推送，教师可在『我的排行信息』中查看", "success");
+  };
+
+  window.onSendRankGradeChange = function () {
+    currentUser.grade = $("sr_grade").value;
+    renderSendRank();
   };
 }
 
@@ -5470,6 +5901,7 @@ function renderAnnouncementMgr() {
       if (!title || !content) { showToast("请填写标题和内容", "error"); return; }
       DB.announcements.push({ id: uid(), title, content, createdBy: currentUser.name, createdAt: Date.now() });
       saveDB(DB);
+      logAction("announcement_publish", "announcement", `标题：${title}`, currentUser.name);
       showToast("播报已发布", "success");
       renderAnnouncement();
       renderAnnouncementMgr();
@@ -5478,7 +5910,10 @@ function renderAnnouncementMgr() {
 }
 
 window.delAnnouncement = function (id) {
+  const ann = DB.announcements.find((a) => a.id === id);
+  if (!ann) return;
   if (!confirm("确认删除此公告？")) return;
+  logAction("announcement_delete", "announcement", `标题：${ann.title}`, currentUser.name);
   DB.announcements = DB.announcements.filter((a) => a.id !== id);
   saveDB(DB); showToast("已删除", "success");
   renderAnnouncement();
@@ -5487,26 +5922,34 @@ window.delAnnouncement = function (id) {
 
 // ========== 全年组通知弹窗（教务端可发布，全年级自动弹窗 ==========
 function renderGradeNotifications() {
-  // 只有教务和同年级教师可见
   const isAcademic = currentUser.role === "academic";
-  const grade = currentUser.grade;
+  const isAdmin = currentUser.role === "admin";
+  const myGrade = isAcademic ? currentUser.grade : null;
+  const grades = isAdmin ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
 
-  // 所有通知（同年级）
   const notifs = (DB.gradeNotifications || []).filter((n) => n.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
   const pendingCount = notifs.length;
 
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">🔔 全年组通知弹窗</div>
+      ${isAdmin && grades.length > 0 ? `
+        <div class="form-group" style="width:160px;margin-bottom:12px;">
+          <label>选择年级</label>
+          <select id="gn_grade" onchange="window.onGradeNotificationGradeChange()">
+            ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+          </select>
+        </div>` : ""}
       <p style="color:var(--text-light);margin-bottom:12px;">
-        ${isAcademic
+        ${isAcademic || isAdmin
           ? `在这里发布同年级通知。发布后，该年级所有教师（班主任、任课教师）登录或刷新页面时将自动<b style="color:#dc3545">弹窗提醒</b>，直到手动关闭。`
           : `以下是教务为${esc(grade)}发布的重要通知。您可在此查看所有历史通知，未关闭的通知将在登录/刷新时自动弹窗提醒。`
         }
       </p>
     </div>
 
-    ${isAcademic ? `
+    ${isAcademic || isAdmin ? `
     <div class="card" style="margin-top:16px">
       <div class="card-title">📣 发布新通知</div>
       <div class="form-row" style="margin-top:12px">
@@ -5575,6 +6018,7 @@ function renderGradeNotifications() {
       // 清除所有用户对该年级的 dismissed 记录，确保所有人都能看到新通知
       DB.dismissedNotifications = DB.dismissedNotifications || {};
       saveDB(DB);
+      logAction("notification_publish", "announcement", `${grade} - ${title}`, currentUser.name);
       showToast("✅ 通知已发布！全年级教师将收到弹窗提醒", "success");
       $("gn_title").value = "";
       $("gn_content").value = "";
@@ -5716,8 +6160,10 @@ function drawChart(canvasId, type, labels, datasets) {
 let _aaActiveStudentTab = "partial";
 
 function renderAcademicAnalysis() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = getSortedExams(grade);
   if (exams.length === 0) { $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📊</div><div class="es-title">暂无考试数据</div><div class="es-tip">请先创建考试并上传成绩</div></div></div>`; return; }
 
@@ -5729,6 +6175,7 @@ function renderAcademicAnalysis() {
       <div class="card-title">
         <span>🔍 全年级智能成绩分析</span>
         <span class="ct-actions">
+          ${gradeSelector}
           <select id="aa_exam_select" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;margin-right:10px">${examOptions}</select>
           <button class="btn btn-primary" onclick="downloadAcademicAnalysis()">📥 下载完整分析报告</button>
         </span>
@@ -8562,7 +9009,9 @@ window.downloadTeacherAnalysis = function () {
 
 // ========== 多次考试对比分析（重新设计） ==========
 function renderExamCompare() {
-  const grade = currentUser.grade;
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = getSortedExams(grade);
   if (exams.length < 2) {
     $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">📊</div><div class="es-title">至少需要 2 次考试才能对比</div><div class="es-tip">请先创建多次考试并上传成绩</div></div></div>`;
@@ -8575,6 +9024,11 @@ function renderExamCompare() {
   const isHeadteacher = role === "headteacher";
   const classNo = isHeadteacher ? currentUser.classNo : null;
   const showStudentId = hasRoster(grade);
+
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+    <select id="cmp_grade_select" style="padding:6px 12px;border:1px solid #ddd;border-radius:6px;margin-right:10px" onchange="window.onCompareGradeChange()">
+      ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+    </select>` : "";
 
   // 考试选择（支持拖拽排序）
   const examChips = exams.map((e, i) => `
@@ -8599,6 +9053,7 @@ function renderExamCompare() {
       <div class="compare-toolbar">
         <div class="compare-exams">
           <div class="toolbar-label">📋 选择考试（拖拽调整顺序，至少选2次）：</div>
+          ${gradeSelector}
           <div class="exam-chips" id="exam_chips_container">${examChips}</div>
           <button class="btn btn-sm btn-outline" onclick="cmpSelectRecent()">选最近3次</button>
           <button class="btn btn-sm btn-outline" onclick="cmpToggleSort()">🔄 切换顺序</button>
@@ -10079,8 +10534,10 @@ window.openStudentIdFormatSettings = function () {
 
 // ========== 教务端：学生名单管理 ==========
 function renderStudentRoster() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   if (!DB.studentRoster) DB.studentRoster = {};
   if (!DB.studentRoster[grade]) DB.studentRoster[grade] = {};
 
@@ -10098,9 +10555,18 @@ function renderStudentRoster() {
     ? `<span style="color:#1a7f37">✓ 已启用</span> - 格式：${idFormat.pattern}` 
     : `<span style="color:var(--text-light)">未启用（使用默认格式）</span>`;
 
+  const gradeSelector = currentUser.role === "admin" && grades.length > 0 ? `
+    <div class="form-group" style="width:160px;margin-bottom:16px;">
+      <label>选择年级</label>
+      <select id="roster_grade" onchange="window.onRosterGradeChange()">
+        ${grades.map(g => `<option value="${g}" ${g === grade ? "selected" : ""}>${g}</option>`).join("")}
+      </select>
+    </div>` : "";
+
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">📋 ${grade} 学生名单管理</div>
+      ${gradeSelector}
       <div style="margin-bottom:16px;padding:12px;background:var(--bg-light);border-radius:6px">
         <div style="display:flex;gap:20px;flex-wrap:wrap">
           <div>✅ <b>批量上传</b>：Excel 包含 学号、姓名、班级 三列，自动识别多班级</div>
@@ -10454,6 +10920,7 @@ function confirmRosterUpload() {
 
     saveDB(DB);
     window._pendingRosterData = null;
+    logAction("roster_upload", "roster", `${validClasses.length}个班级，${totalStudents}名学生，${modeText}`, grade);
     showToast(`成功保存 ${totalStudents} 名学生（${modeText}）`, "success");
     renderStudentRoster();
   }, "取消");
@@ -10645,8 +11112,10 @@ function deleteRosterClass(classNo) {
 
 // ========== 教务端：成绩审核 ==========
 function renderScoreReview() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
+  if (currentUser.role !== "academic" && currentUser.role !== "admin") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
+  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
+  const grades = currentUser.role === "admin" ? Object.keys(DB.subjects) : (myGrade ? [myGrade] : []);
+  const grade = myGrade || Object.keys(DB.subjects)[0];
   const exams = DB.exams.filter((e) => e.grade === grade).sort((a, b) => b.createdAt - a.createdAt);
 
   // 各考试统计
@@ -10896,6 +11365,7 @@ window.confirmAllScores = function() {
       r.confirmedBy = currentUser.id;
     });
     saveDB(DB);
+    logAction("score_confirm", "score", `${targets.length}条成绩`, grade);
     showToast(`已确认 ${targets.length} 条成绩`, "success");
     renderScoreReview();
   });
@@ -10917,6 +11387,7 @@ window.rejectAllPendingScores = function() {
   </div>`, "🗑️ 确认退回", () => {
     DB.records = DB.records.filter(r => !(r.grade === grade && r.status === "pending"));
     saveDB(DB);
+    logAction("score_reject", "score", `${targets.length}条成绩`, grade);
     showToast(`已退回 ${targets.length} 条记录`, "success");
     renderScoreReview();
   });
@@ -10939,6 +11410,7 @@ window.clearAllScores = function() {
   </div>`, "⚠️ 确认清空", () => {
     DB.records = DB.records.filter(r => r.grade !== grade);
     saveDB(DB);
+    logAction("score_clear", "score", `${targets.length}条成绩记录`, grade);
     showToast(`已清空 ${targets.length} 条成绩记录`, "success");
     renderScoreReview();
   });
@@ -12485,6 +12957,32 @@ window.addEventListener("storage", (e) => {
     }
   }
 });
+
+// 管理员年级切换事件处理函数
+window.onAcademicAnalysisGradeChange = function() {
+  currentUser.grade = $("aa_grade_select").value;
+  renderAcademicAnalysis();
+};
+
+window.onCompareGradeChange = function() {
+  currentUser.grade = $("cmp_grade_select").value;
+  renderExamCompare();
+};
+
+window.onRosterGradeChange = function() {
+  currentUser.grade = $("roster_grade").value;
+  renderStudentRoster();
+};
+
+window.onGradeNotificationGradeChange = function() {
+  currentUser.grade = $("gn_grade").value;
+  renderGradeNotifications();
+};
+
+window.onClassRankingGradeChange = function() {
+  currentUser.grade = $("r_grade").value;
+  renderClassRanking();
+};
 
 // 定时刷新数据（每30秒自动从 localStorage 刷新一次，确保数据最新）
 setInterval(() => {
