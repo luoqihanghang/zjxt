@@ -1,7 +1,7 @@
 // ========== 网络智慧教务平台 - 主应用 ==========
 // 所有数据存储在 localStorage 中，便于本地演示和持久化
-// 版本: 20250629 - 修复教务端上传成绩分数解析 + Gist 同步增强
-console.log("[智慧教务平台] v20250629 已加载");
+// 版本: 20260706 - Gist 配置改为 JSON 上传导入 + 各功能模块添加使用帮助
+console.log("[智慧教务平台] v20260706 已加载");
 
 // ========== 工具函数 ==========
 const $ = (id) => document.getElementById(id);
@@ -617,7 +617,7 @@ function renderGithubData() {
     <div class="card">
       <div class="card-title">🔗 Gist 数据存储配置</div>
       <div class="form-row">
-        <div class="form-group"><label>GitHub Token</label><input type="password" id="gd_token" value="${cfg.token || ""}" placeholder="ghp_xxxxx" /></div>
+        <div class="form-group"><label>GitHub Token</label><input type="password" id="gd_token" value="${cfg.token || ""}" placeholder="在此粘贴 Token" /></div>
         <div class="form-group"><label>主 Gist ID（配置存储，永久不变）</label><input id="gd_config_id" value="${cfg.configGistId || ""}" placeholder="a1b2c3d4e5f6…" /></div>
       </div>
       <div class="form-row">
@@ -1434,6 +1434,615 @@ const PAGE_RENDERERS = {
   schedule: renderSchedule,
   exam_arrangement: renderExamArrangement
 };
+
+// ========== 各功能模块使用帮助 ==========
+// 每个页面对应一段帮助文字，点击顶部栏「?」按钮查看
+const PAGE_HELPS = {
+  dashboard: {
+    title: "平台概览 / 工作首页",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>平台概览是登录后的默认页面，集中展示当前平台的整体数据情况，包括教师总数、考试次数、成绩记录数、公告数量等核心指标，并展示近期活跃数据。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ul>
+            <li>登录后自动进入此页面，无需额外操作。</li>
+            <li>查看顶部统计卡片，了解平台数据规模。</li>
+            <li>点击左侧导航菜单中的任意功能项，进入对应模块。</li>
+            <li>页面会显示最近 30 天的活跃考试与成绩记录。</li>
+          </ul>
+        </div>
+        <div class="help-note">💡 提示：不同角色（管理员 / 教务 / 任课教师 / 班主任）看到的概览内容会根据权限自动调整。</div>
+      </div>`
+  },
+  users: {
+    title: "教师名单管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理员/教务可在此添加、编辑、删除教师账号，设置教师的角色、所属年级、班级、任教学科等信息。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「添加教师」按钮，填写教师姓名、登录账号、密码、角色（管理员/教务/任课教师/班主任）。</li>
+            <li>为任课教师选择所属年级与任教学科；为班主任指定所带班级。</li>
+            <li>在教师列表中点击「编辑」可修改信息，点击「删除」可移除账号。</li>
+            <li>所有修改会自动同步到 Gist 云端（若已配置）。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：教师账号是登录系统的凭证，账号名不可重复；删除后无法恢复，请谨慎操作。</div>
+      </div>`
+  },
+  grades: {
+    title: "年级设置",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理员可在此新增、重命名或删除年级（如"高一年级"、"高二年级"），年级是学科、考试、学生名单的归属维度。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「新增年级」输入年级名称即可添加。</li>
+            <li>点击年级右侧的「重命名」可修改名称。</li>
+            <li>点击「删除」可移除空年级（已有考试/学生数据的年级建议先清理再删除）。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：年级名称需保持唯一；删除年级前请确认该年级下没有正在使用的考试或学生名单。</div>
+      </div>`
+  },
+  permissions: {
+    title: "权限管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>查看系统四种角色（管理员、教务老师、任课教师、班主任）的权限范围说明，了解各角色可访问的功能模块。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ul>
+            <li>页面以表格形式列出每个角色可使用的功能。</li>
+            <li>管理员拥有全部权限；教务老师负责成绩汇总与审核；任课教师只能查看自己班级的已确认成绩；班主任可管理本班成绩。</li>
+          </ul>
+        </div>
+        <div class="help-note">💡 提示：如需调整某教师的角色，请到「教师名单管理」页面修改。</div>
+      </div>`
+  },
+  exams: {
+    title: "考试管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>创建、编辑、删除考试信息。每场考试归属于某个年级，包含考试名称、考试日期等，是成绩录入与分析的基础。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「新增考试」，选择年级、填写考试名称（如"2025学年第一学期期中考试"）和考试日期。</li>
+            <li>在考试列表中可编辑或删除已有考试。</li>
+            <li>考试创建后，班主任和教务即可在「上传成绩」中选择该考试录入分数。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：已录入成绩的考试删除后，对应成绩也会被清除，请谨慎操作。</div>
+      </div>`
+  },
+  subjects: {
+    title: "学科 / 分值设置",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务老师为每个年级设置学科列表，包括学科名称、满分、优秀线、良好线、及格线、低分线，用于成绩统计与分析。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择年级后，下方显示该年级的学科列表。</li>
+            <li>点击「新增学科」填写学科名称（如"语文"）和分值线（如满分 150、优秀 120、及格 90）。</li>
+            <li>点击学科行的「编辑」可调整分值线，「删除」可移除学科。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分值线决定成绩分析中的优秀率、及格率等统计口径，请按学校标准准确设置。</div>
+      </div>`
+  },
+  academic_upload_scores: {
+    title: "上传全年级成绩（教务）",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务老师通过 Excel 批量上传全年级所有班级、所有科目的成绩，上传后成绩自动进入审核流程。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择目标考试和年级。</li>
+            <li>下载 Excel 模板，按模板格式填写班级、姓名、各科分数。</li>
+            <li>点击「上传 Excel」选择文件，系统自动解析并预览。</li>
+            <li>确认无误后点击「提交」，成绩进入待审核状态。</li>
+            <li>班主任和任课教师可在「成绩审核」中复核。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：Excel 表头需与学科名称完全一致；分数留空视为缺考；上传会覆盖该考试的原有成绩。</div>
+      </div>`
+  },
+  grade_summary: {
+    title: "成绩汇总",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>按考试、年级、班级、学科等维度汇总成绩，展示均分、最高分、最低分、及格率、优秀率等统计指标。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>在顶部筛选条件中选择考试、年级、班级、学科。</li>
+            <li>系统自动计算并展示统计表格与图表。</li>
+            <li>可切换不同维度对比查看。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：统计仅基于已确认的成绩，待审核成绩不计入。</div>
+      </div>`
+  },
+  class_ranking: {
+    title: "排名统计",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>按考试生成班级排名或全年级排名，包含总分排名、单科排名，并支持按班级筛选查看。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和年级。</li>
+            <li>选择查看范围：全年级或指定班级。</li>
+            <li>系统按总分降序生成排名表，可切换查看单科排名。</li>
+            <li>支持导出 Excel 排名表。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：班主任只能查看本班排名；教务可查看全年级排名。</div>
+      </div>`
+  },
+  teacher_ranking: {
+    title: "教师排行榜",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>按考试、学科统计各任课教师所带班级的成绩表现，生成教师教学效果排行榜，便于教学评估。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和年级。</li>
+            <li>系统自动按学科分组，展示每位教师所带班级的均分、及格率、优秀率等指标。</li>
+            <li>按均分或综合指标排序，查看教师排名。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：排行榜仅供参考，教学效果评估应结合多方因素综合考量。</div>
+      </div>`
+  },
+  grade_notifications: {
+    title: "全年组通知",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务/管理员可向指定年级发布通知弹窗，所有该年级用户登录后会看到醒目通知；任课教师和班主任可查看历史通知。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「发布通知」，选择年级、填写标题、内容、级别（普通/重要/紧急）。</li>
+            <li>发布后，该年级用户登录时自动弹出通知。</li>
+            <li>在通知列表中可查看历史通知、删除已过期通知。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：用户关闭通知后不再弹出，但可在「全年组通知」菜单中随时查看历史。</div>
+      </div>`
+  },
+  announcement: {
+    title: "公告管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理员/教务发布平台公告，所有用户登录后会在顶部看到滚动播报；可管理历史公告。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「发布公告」，输入标题和内容。</li>
+            <li>公告发布后，所有用户顶部栏会滚动显示最新公告。</li>
+            <li>在公告列表中可编辑、删除公告。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：公告数量较多时，建议定期清理过期公告，保持顶部播报简洁。</div>
+      </div>`
+  },
+  announcements_all: {
+    title: "公告管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理员/教务发布平台公告，所有用户登录后会在顶部看到滚动播报；可管理历史公告。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「发布公告」，输入标题和内容。</li>
+            <li>公告发布后，所有用户顶部栏会滚动显示最新公告。</li>
+            <li>在公告列表中可编辑、删除公告。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：公告数量较多时，建议定期清理过期公告，保持顶部播报简洁。</div>
+      </div>`
+  },
+  academic_analysis: {
+    title: "全平台智能分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务端的全平台智能分析，自动识别成绩异常、学科短板、班级差距，提供数据洞察与改进建议。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和年级。</li>
+            <li>系统自动生成多维分析报告：学科对比、班级对比、分数段分布、问题学生预警等。</li>
+            <li>可点击各分析卡片查看详细数据。</li>
+            <li>支持导出分析报告。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分析基于已确认成绩，若数据不完整可能影响分析准确性。</div>
+      </div>`
+  },
+  score_review: {
+    title: "成绩审核",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务老师对班主任/任课教师提交的成绩进行复审，支持一键确认全部或逐条审核，确认后成绩才正式生效。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试，查看待审核的成绩提交记录。</li>
+            <li>可逐条查看明细、退回修改，或点击「一键确认」批量通过。</li>
+            <li>确认后的成绩才会在排名、分析等模块中显示。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：退回的成绩，原提交人需重新上传；确认后不可撤销。</div>
+      </div>`
+  },
+  student_roster: {
+    title: "学生名单管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务老师维护各年级、各班级的学生名单，包括学号、姓名、班级，是成绩录入和排名的基础数据。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择年级和班级。</li>
+            <li>点击「新增学生」填写学号、姓名；或通过 Excel 批量导入。</li>
+            <li>可编辑、删除学生信息。</li>
+            <li>学号格式可在系统设置中配置（如年份前缀+班级+序号）。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：学生名单建立后，成绩录入时系统会自动匹配学号，避免重名混淆。</div>
+      </div>`
+  },
+  upload_scores: {
+    title: "上传班级成绩",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>班主任上传本班某场考试的各科成绩，上传后进入审核流程，审核通过后正式生效。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和自己所带班级。</li>
+            <li>下载 Excel 模板，填写学生姓名及各科分数。</li>
+            <li>上传 Excel，系统自动解析预览。</li>
+            <li>确认后提交，等待教务审核。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分数留空视为缺考；上传前请核对班级和学生姓名是否与名单一致。</div>
+      </div>`
+  },
+  my_class_scores: {
+    title: "本班考试成绩",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>班主任查看本班历次考试的成绩明细、统计汇总，了解本班学生表现。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试，查看本班所有学生的各科成绩。</li>
+            <li>可按学科筛选、按分数排序。</li>
+            <li>查看班级均分、及格率、优秀率等统计。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：仅显示已审核确认的成绩，待审核成绩不在此显示。</div>
+      </div>`
+  },
+  download_scores: {
+    title: "下载 Excel 成绩",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>班主任将本班考试成绩导出为 Excel 文件，便于存档、打印或线下分析。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和班级。</li>
+            <li>点击「下载 Excel」，浏览器自动下载文件。</li>
+            <li>文件包含学生姓名、各科分数、总分、班级排名等信息。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：导出数据与平台显示一致，仅含已确认成绩。</div>
+      </div>`
+  },
+  headteacher_analysis: {
+    title: "本班智能对比分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>班主任专用的本班成绩深度分析，对比本班与年级均分、识别优势学科与短板学科、追踪学生进退步情况。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和班级。</li>
+            <li>系统生成本班 vs 年级对比、学科强弱分析、学生进退步榜。</li>
+            <li>点击各分析项查看详细数据。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分析结果可帮助班主任针对性辅导，关注预警学生。</div>
+      </div>`
+  },
+  my_scores: {
+    title: "我的班级成绩",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>任课教师查看自己任教的班级、学科的历次考试成绩，了解教学效果。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试，查看所任教班级的该学科成绩。</li>
+            <li>可查看分数分布、均分、及格率等统计。</li>
+            <li>支持多次考试对比，观察成绩变化趋势。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：仅显示已确认成绩；任教班级由管理员在教师信息中设置。</div>
+      </div>`
+  },
+  my_ranking: {
+    title: "我的排行信息",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>任课教师查看自己所带班级在年级中的学科排名，了解教学相对位置。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和学科。</li>
+            <li>查看所带班级在年级所有班级中的均分排名、及格率排名等。</li>
+            <li>对比同年级其他班级的表现。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：排名仅供参考，教学评估应综合多维度数据。</div>
+      </div>`
+  },
+  teacher_analysis: {
+    title: "学科对比分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>任课教师对自己所教学科进行多维度分析，对比不同班级、不同考试的学科表现，发现教学问题。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试、学科、班级。</li>
+            <li>系统生成分数段分布、题型分析、班级对比图。</li>
+            <li>可切换不同考试查看趋势变化。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分析可帮助教师针对性调整教学重点。</div>
+      </div>`
+  },
+  exam_compare: {
+    title: "多次考试对比分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>选择两场或多场考试进行对比，观察班级、学科、学生的成绩变化趋势，识别进退步情况。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择 2 场或以上考试。</li>
+            <li>选择对比维度：班级、学科、学生。</li>
+            <li>系统生成对比图表，展示均分变化、排名变化、进退步学生名单。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：对比分析适合在期中、期末后使用，评估教学效果与学生成长。</div>
+      </div>`
+  },
+  group_manage: {
+    title: "学习小组管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>班主任为本班学生划分学习小组，便于按小组开展成绩分析与互助学习。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择班级。</li>
+            <li>点击「新建小组」，输入小组名称。</li>
+            <li>将学生拖拽或选择加入对应小组。</li>
+            <li>可调整小组成员、删除小组。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分组后可在「小组成绩分析」中按组对比成绩。</div>
+      </div>`
+  },
+  group_scores: {
+    title: "小组成绩分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>按学习小组维度分析成绩，对比各小组均分、及格率，识别小组间差距与优秀小组。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试和班级。</li>
+            <li>系统按小组分组展示成绩统计。</li>
+            <li>可查看小组内学生明细、小组间对比图表。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：使用前请先在「学习小组管理」中完成分组。</div>
+      </div>`
+  },
+  custom_analysis: {
+    title: "自定义分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>任课教师可自定义分析维度和筛选条件，按需生成个性化成绩分析报表。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择考试、年级、班级、学科。</li>
+            <li>设置筛选条件（如分数段、班级、学生范围）。</li>
+            <li>选择统计指标（均分、及格率、优秀率等）。</li>
+            <li>点击「生成分析」查看结果。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：自定义分析适合回答特定教学问题，如"本班数学 90 分以下学生的语文表现"。</div>
+      </div>`
+  },
+  account_profile: {
+    title: "修改我的密码",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>查看个人账号信息并修改登录密码，修改后密码自动同步到 Gist 云端，其他设备登录时使用新密码。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>输入当前密码进行验证。</li>
+            <li>输入新密码（至少 4 位）并确认。</li>
+            <li>点击「保存新密码」，密码立即生效。</li>
+            <li>若浏览器记住密码，本地缓存也会同步更新。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：建议定期更换密码，不要使用过于简单的密码（如 123456）。</div>
+      </div>`
+  },
+  schedule: {
+    title: "智能排课系统",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>内置智能排课系统，自动从教务平台同步教师名单，支持排课规则设置、自动排课、手动调课，并可在新窗口全屏使用。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>页面内嵌排课系统，可直接操作；或点击「🚀 新窗口打开」全屏使用。</li>
+            <li>教师名单自动从教务平台同步，无需重复录入。</li>
+            <li>设置排课规则（如不连续上课、不跨楼层等）。</li>
+            <li>点击「自动排课」生成课表，可手动调整。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：排课前请先在「教师名单管理」中完善教师信息与任课安排。</div>
+      </div>`
+  },
+  exam_arrangement: {
+    title: "排考场系统",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>排考场系统支持调取教务端考试数据与学生名单，便捷导入考生与考场信息，生成考场安排表；可在新窗口全屏使用。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>页面顶部显示当前年级、已建班级、学生总数、关联考试等概览数据。</li>
+            <li>点击「📥 便捷导入」可调取教务端的考试数据与学生名单。</li>
+            <li>点击「🚀 新窗口打开」全屏使用排考场系统。</li>
+            <li>在排考场系统中设置考场、座位数，自动分配考生。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：使用前请先在「学生名单管理」中建立学生数据，或确保已有考试成绩可供导入。</div>
+      </div>`
+  }
+};
+
+// 显示当前页面的帮助弹窗
+function showPageHelp() {
+  const help = PAGE_HELPS[currentPage];
+  if (!help) {
+    showModal("使用帮助", `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📭 暂无专属帮助</h4>
+          <p>当前页面暂未配置详细帮助说明。如需协助，请联系管理员或参考其他功能页面的帮助。</p>
+        </div>
+        <div class="help-note">💡 提示：点击顶部栏的「?」按钮可随时查看当前功能页面的使用帮助。</div>
+      </div>`, "知道了");
+    return;
+  }
+  showModal(`❓ ${help.title} · 使用帮助`, help.html, "我知道了");
+}
+
+// 绑定顶部栏帮助按钮
+if ($("pageHelpBtn")) {
+  $("pageHelpBtn").onclick = showPageHelp;
+}
 
 // ========== 平台概览 ==========
 function renderDashboard() {

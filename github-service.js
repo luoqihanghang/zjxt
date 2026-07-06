@@ -9,8 +9,19 @@
 //   自动归档：当前活跃 Gist 文件数 >= 280 时，创建新 Gist 继续写入
 //
 // Token：共用一个具备 gist 权限的 GitHub Token
+//
+// 配置方式（v2）：登录页"⚙️ 设置"面板支持 JSON 上传导入，
+// 配置信息仅保存在本地浏览器 localStorage，不会上传到任何服务器。
+// 安全说明：Token 等凭据绝不硬编码在源码中，仅通过用户上传 JSON 文件导入。
 
 const GitHubService = {
+  // 默认配置模板（仅作占位，不含真实凭据；实际凭据由用户通过 JSON 文件导入）
+  DEFAULT_CONFIG: {
+    token: "",
+    configGistId: "",
+    dataGistIds: []
+  },
+
   config: {
     token: null,
     configGistId: null,    // 主 Gist
@@ -42,63 +53,112 @@ const GitHubService = {
     return !!this.config.token && !!this.config.configGistId;
   },
 
-  // ========= 登录页翻转面板 =========
+  // ========= 登录页翻转面板（JSON 上传导入模式，不显示明文） =========
+  // 待保存的配置（仅在内存中暂存，不写入界面元素）
+  _pendingConfig: null,
+
+  // 更新状态显示区（不暴露任何凭据明文）
+  _setStatus(state, text, sub) {
+    const area = document.getElementById("gistStatusArea");
+    const icon = document.getElementById("gistStatusIcon");
+    const txt = document.getElementById("gistStatusText");
+    const subEl = document.getElementById("gistStatusSub");
+    if (area) {
+      area.classList.remove("is-empty", "is-success", "is-error", "is-info");
+      if (state) area.classList.add("is-" + state);
+    }
+    if (icon) icon.textContent = {
+      empty: "🗂️", success: "✅", error: "❌", info: "ℹ️"
+    }[state] || "🗂️";
+    if (txt) txt.textContent = text || "";
+    if (subEl) subEl.textContent = sub || "";
+  },
+
   showLoginSetup() {
     document.getElementById("flipCard").classList.add("flipped");
-    document.getElementById("gist_token").value = this.config.token || "";
-    document.getElementById("gist_config_id").value = this.config.configGistId || "";
-    // 填充多行业务 Gist ID（最多 5 个槽位）
-    for (let i = 1; i <= 5; i++) {
-      const el = document.getElementById("gist_data_id_" + i);
-      if (el) {
-        el.value = this.config.dataGistIds[i - 1] || "";
+    // 重置待保存配置，初始状态不显示任何明文
+    this._pendingConfig = null;
+    // 若本地已有配置，提示「已配置」，但不显示具体内容
+    if (this.isConfigured()) {
+      this._setStatus("success", "已配置", "如需更换，重新上传即可");
+    } else {
+      this._setStatus("empty", "未导入", "请上传配置文件");
+    }
+    // 绑定上传按钮（仅绑定一次）
+    const uploadBtn = document.getElementById("gistUploadBtn");
+    const fileInput = document.getElementById("gist_json_file");
+    if (uploadBtn && !uploadBtn._bound) {
+      uploadBtn.addEventListener("click", () => fileInput && fileInput.click());
+      uploadBtn._bound = true;
+    }
+    if (fileInput && !fileInput._bound) {
+      fileInput.addEventListener("change", (e) => this._handleJsonFile(e));
+      fileInput._bound = true;
+    }
+  },
+
+  // 处理 JSON 文件上传：解析后仅在内存暂存，不在界面显示明文
+  _handleJsonFile(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = String(ev.target.result || "");
+      let cfg;
+      try {
+        cfg = JSON.parse(text);
+      } catch (e) {
+        this._pendingConfig = null;
+        this._setStatus("error", "JSON 格式有误", e.message);
+        return;
       }
-    }
-    // 默认展开业务 Gist 区
-    const body = document.getElementById("gistDataBody");
-    const arrow = document.getElementById("gistArrow");
-    if (body && arrow) {
-      body.classList.add("open");
-      arrow.textContent = "▴";
-    }
-    // 绑定展开/折叠点击
-    const header = document.getElementById("gistDataHeader");
-    if (header && !header._bound) {
-      header.addEventListener("click", () => {
-        body.classList.toggle("open");
-        arrow.textContent = body.classList.contains("open") ? "▴" : "▾";
-      });
-      header._bound = true;
-    }
+      const token = (cfg.token || "").trim();
+      const configGistId = (cfg.configGistId || "").trim();
+      const dataGistIds = Array.isArray(cfg.dataGistIds)
+        ? cfg.dataGistIds.map(s => String(s).trim()).filter(Boolean)
+        : [];
+      if (!token || !configGistId) {
+        this._pendingConfig = null;
+        this._setStatus("error", "缺少必填字段", "需包含 token 与 configGistId");
+        return;
+      }
+      // 仅在内存暂存，绝不写入界面元素
+      this._pendingConfig = { token, configGistId, dataGistIds };
+      this._setStatus("success", "上传成功", "点击「保存并返回」生效");
+    };
+    reader.onerror = () => {
+      this._pendingConfig = null;
+      this._setStatus("error", "读取失败", "请重试");
+    };
+    reader.readAsText(file, "utf-8");
+    // 重置 input，便于重复选择同一文件
+    event.target.value = "";
   },
 
   flipBackToLogin() {
     document.getElementById("flipCard").classList.remove("flipped");
   },
 
-  // 保存配置（登录页的"设置"面板）
+  // 保存配置（登录页的"设置"面板 - 仅从内存中的 _pendingConfig 读取）
   applyLoginSetup() {
-    const token = document.getElementById("gist_token").value.trim();
-    const configGistId = document.getElementById("gist_config_id").value.trim();
-    // 收集 5 个业务 Gist ID，按顺序保存（第一行为当前活跃）
-    const dataGistIds = [];
-    for (let i = 1; i <= 5; i++) {
-      const el = document.getElementById("gist_data_id_" + i);
-      if (el && el.value.trim()) {
-        dataGistIds.push(el.value.trim());
-      }
+    if (!this._pendingConfig) {
+      this._setStatus("info", "未导入", "请先上传配置文件");
+      return false;
     }
-
-    if (!token) { this._flash("请输入 Token", "error"); return false; }
-    if (!configGistId) { this._flash("请输入主 Gist ID（固定存放系统配置）", "error"); return false; }
-
-    this.saveGistConfig(token, configGistId, null);  // token + 主 Gist 正常保存
-    this.config.dataGistIds = dataGistIds;
+    const { token, configGistId, dataGistIds } = this._pendingConfig;
+    // 全部写入 localStorage（仅本地浏览器存储）
+    localStorage.setItem("gh_token", token);
+    localStorage.setItem("gh_config_gist_id", configGistId);
     localStorage.setItem("gh_data_gist_ids", JSON.stringify(dataGistIds));
 
-    const n = dataGistIds.length;
-    this._flash(`已保存 · Token + 主 Gist ID + ${n} 个业务 Gist ID`, "success");
-    this.flipBackToLogin();
+    this.config.token = token;
+    this.config.configGistId = configGistId;
+    this.config.dataGistIds = dataGistIds;
+    // 清理内存暂存
+    this._pendingConfig = null;
+
+    this._setStatus("success", "保存成功", "正在返回登录页...");
+    setTimeout(() => this.flipBackToLogin(), 700);
     return true;
   },
 
@@ -108,12 +168,14 @@ const GitHubService = {
       el = document.createElement("div");
       el.id = "gistSetupHint";
       el.style.cssText = "padding:8px 12px;margin:8px 0;border-radius:6px;font-size:12px;text-align:center;";
-      document.getElementById("gistSetupBox").insertBefore(el, document.getElementById("gistSaveBtn"));
+      const box = document.getElementById("gistSetupBox");
+      const saveBtn = document.getElementById("gistSaveBtn");
+      if (box && saveBtn) box.insertBefore(el, saveBtn);
     }
     el.style.background = type === "error" ? "#fee" : "#e6f7ea";
     el.style.color = type === "error" ? "#c00" : "#1a7f37";
     el.textContent = msg;
-    setTimeout(() => { el.textContent = ""; el.style.background = "transparent"; }, 3000);
+    setTimeout(() => { el.textContent = ""; el.style.background = "transparent"; }, 3500);
   },
 
   saveGistConfig(token, configGistId, dataGistId) {

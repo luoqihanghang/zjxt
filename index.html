@@ -4,11 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>网络智慧教务平台</title>
-<link rel="stylesheet" href="styles.css?v=20250629" />
+<link rel="stylesheet" href="styles.css?v=20260706" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="config.js?v=20250629"></script>
-<script src="github-service.js?v=20250629"></script>
+<script src="config.js?v=20260706"></script>
+<script src="github-service.js?v=20260706"></script>
 </head>
 <body>
 
@@ -96,70 +96,31 @@
           </div>
         </div>
 
-        <!-- 反面：Gist 数据存储配置 -->
+        <!-- 反面：网络配置（JSON 上传导入，不显示明文） -->
         <div class="flip-card-back">
           <div class="login-box gist-box" id="gistSetupBox">
             <div class="login-brand-row">
               <div class="login-brand-icon">💾</div>
-              <span class="login-brand-text">Gist 数据存储配置</span>
+              <span class="login-brand-text">网络配置</span>
             </div>
 
-            <div class="login-form-title">后端数据面板</div>
-            <div class="login-form-desc">
-              主 Gist 存放账号、科目、公告等配置；业务 Gist 存放考试成绩；接近上限时自动创建新的业务 Gist。
-            </div>
+            <div class="login-form-title">配置导入</div>
 
             <div class="login-fields">
-              <div class="field-group">
-                <span class="field-icon">🔑</span>
-                <input type="password" id="gist_token" placeholder="GitHub Token（需勾选 gist 权限）" autocomplete="off" />
-              </div>
-              <div class="field-group gist-field">
-                <span class="field-icon">🗂️</span>
-                <input type="text" id="gist_config_id" placeholder="主 Gist ID（固定存放系统配置，永久不动）" autocomplete="off" />
+              <div class="gist-upload-row">
+                <input type="file" id="gist_json_file" accept=".json,application/json" style="display:none" />
+                <button id="gistUploadBtn" class="gist-upload-btn" type="button" style="flex:1;width:100%">📂 上传 JSON 配置</button>
               </div>
 
-              <!-- 业务 Gist 展开区 -->
-              <div class="gist-expandable">
-                <div class="gist-expandable-header" id="gistDataHeader">
-                  <span class="field-icon">📚</span>
-                  <span class="gist-expandable-title">业务 Gist ID 列表（系统按顺序自动切换归档）</span>
-                  <span class="gist-arrow" id="gistArrow">▾</span>
-                </div>
-                <div class="gist-expandable-body" id="gistDataBody">
-                  <div class="gist-data-row">
-                    <span class="gist-data-slot badge-slot-active">① 当前活跃</span>
-                    <input type="text" class="gist-data-input" id="gist_data_id_1" placeholder="留空则自动创建" autocomplete="off" />
-                  </div>
-                  <div class="gist-data-row">
-                    <span class="gist-data-slot">② 归档 1</span>
-                    <input type="text" class="gist-data-input" id="gist_data_id_2" placeholder="自动切换时写入此 Gist" autocomplete="off" />
-                  </div>
-                  <div class="gist-data-row">
-                    <span class="gist-data-slot">③ 归档 2</span>
-                    <input type="text" class="gist-data-input" id="gist_data_id_3" placeholder="可选" autocomplete="off" />
-                  </div>
-                  <div class="gist-data-row">
-                    <span class="gist-data-slot">④ 归档 3</span>
-                    <input type="text" class="gist-data-input" id="gist_data_id_4" placeholder="可选" autocomplete="off" />
-                  </div>
-                  <div class="gist-data-row">
-                    <span class="gist-data-slot">⑤ 归档 4</span>
-                    <input type="text" class="gist-data-input" id="gist_data_id_5" placeholder="可选" autocomplete="off" />
-                  </div>
-                  <div class="gist-data-tip">
-                    💡 系统按 ① → ② → ③ 顺序使用；当前 Gist 文件数接近 300 上限时自动切到下一个空槽位。
-                  </div>
-                </div>
+              <div class="gist-status-area" id="gistStatusArea">
+                <div class="gist-status-icon" id="gistStatusIcon">🗂️</div>
+                <div class="gist-status-text" id="gistStatusText">未导入</div>
+                <div class="gist-status-sub" id="gistStatusSub">请上传配置文件</div>
               </div>
             </div>
 
-            <div class="gist-tip">
-              💡 主 Gist 保持不动；业务 Gist 文件数接近 300 上限时系统自动跳转新归档，全程无需手动切换 ID。
-            </div>
-
-            <button id="gistSaveBtn" class="login-btn">保存并返回登录</button>
-            <button id="gistBackBtn" class="link-btn gist-link-btn" type="button">← 返回登录（不保存）</button>
+            <button id="gistSaveBtn" class="login-btn">保存并返回</button>
+            <button id="gistBackBtn" class="link-btn gist-link-btn" type="button">← 返回登录</button>
 
             <div class="login-footer">© 2026 网络智慧教务平台 · 大一中</div>
           </div>
@@ -193,6 +154,7 @@
     <header class="topbar">
       <div class="topbar-left">
         <h2 id="pageTitle">首页</h2>
+        <button id="pageHelpBtn" class="page-help-btn" title="使用帮助" type="button">?<span class="phf-tip">帮助</span></button>
       </div>
       <div class="topbar-right">
         <div id="announcementBadge" class="announcement-badge hidden">
@@ -294,6 +256,6 @@
   <span class="eab-badge hidden" id="eaBadge"></span>
 </button>
 
-<script src="app.js?v=20250629"></script>
+<script src="app.js?v=20260706"></script>
 </body>
 </html>
