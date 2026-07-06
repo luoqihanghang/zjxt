@@ -246,6 +246,10 @@
             background: #fee2e2;
             box-shadow: inset 0 0 0 1px #ef4444;
         }
+        .warning-cell {
+            background: #fef3c7;
+            box-shadow: inset 0 0 0 1px #f59e0b;
+        }
         .cell-content {
             display: flex;
             flex-direction: column;
@@ -269,6 +273,104 @@
             font-style: italic;
             font-size: 0.8rem;
         }
+        /* 冲突报告分类卡片样式 */
+        .report-card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        .report-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .report-header.conflict { color: #dc2626; border-color: #fecaca; }
+        .report-header.warning { color: #d97706; border-color: #fde68a; }
+        .report-header.info { color: #0284c7; border-color: #bae6fd; }
+        .report-header.suggest { color: #059669; border-color: #a7f3d0; }
+        .report-badge {
+            background: #f3f4f6;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .report-item {
+            padding: 6px 12px;
+            border-radius: 6px;
+            margin: 4px 0;
+            font-size: 0.85rem;
+            background: #f9fafb;
+        }
+        .report-item.conflict { background: #fef2f2; color: #b91c1c; }
+        .report-item.warning { background: #fffbeb; color: #b45309; }
+        .report-item.info { background: #f0f9ff; color: #0369a1; }
+        /* 手动调课提示样式 */
+        .manual-tip {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+        }
+        .manual-tip.ok { background: #d1fae5; color: #065f46; }
+        .manual-tip.warn { background: #fef3c7; color: #92400e; }
+        .manual-tip.error { background: #fee2e2; color: #991b1b; }
+        .manual-tip-title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .teacher-option-conflict {
+            color: #dc2626;
+        }
+        .teacher-option-warn {
+            color: #d97706;
+        }
+        /* 冲突报告卡片 */
+        .report-card {
+            background: white;
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .report-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid;
+        }
+        .report-header.conflict { color: #dc2626; border-color: #fee2e2; background: linear-gradient(90deg, #fee2e2, transparent); }
+        .report-header.warning { color: #d97706; border-color: #fef3c7; background: linear-gradient(90deg, #fef3c7, transparent); }
+        .report-header.info { color: #0284c7; border-color: #bae6fd; background: linear-gradient(90deg, #bae6fd, transparent); }
+        .report-header.suggest { color: #059669; border-color: #d1fae5; background: linear-gradient(90deg, #d1fae5, transparent); }
+        .report-badge {
+            background: #f3f4f6;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: #6b7280;
+        }
+        .report-item {
+            padding: 6px 12px;
+            border-radius: 6px;
+            margin: 3px 0;
+            font-size: 0.85rem;
+        }
+        .report-item.conflict { background: #fef2f2; color: #b91c1c; border-left: 3px solid #ef4444; }
+        .report-item.warning { background: #fffbeb; color: #b45309; border-left: 3px solid #f59e0b; }
+        .report-item.info { background: #f0f9ff; color: #0369a1; border-left: 3px solid #0ea5e9; }
         .flex-between {
             display: flex;
             justify-content: space-between;
@@ -528,6 +630,14 @@
                             <button class="btn-secondary" style="margin-left:10px;" @click="exportToExcel">📎 导出Excel</button>
                             <span class="badge">💡 单击单元格手动调课</span>
                         </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-size:0.85rem; color:#666;">显示:</span>
+                            <select v-model="cellDisplayMode" style="padding:4px 8px; font-size:0.85rem;">
+                                <option value="both">科目+教师</option>
+                                <option value="subject">仅科目</option>
+                                <option value="teacher">仅教师</option>
+                            </select>
+                        </div>
                     </div>
                     <div style="overflow-x:auto; margin-top:20px;">
                         <table>
@@ -537,10 +647,10 @@
                                     <tr v-for="(p, pIdx) in periods" :key="`${wIdx}_${pIdx}`">
                                         <td v-if="pIdx === 0" :rowspan="periods.length" style="background:#fef9e3; font-weight:bold;">{{ week }}</td>
                                         <td>{{ p.name }}</td>
-                                        <td v-for="cls in classList" :key="cls" :class="{'timetable-cell': true, 'conflict-cell': isConflictCell(wIdx, pIdx, cls)}" @click="openManualAdjust(wIdx, pIdx, cls)">
+                                        <td v-for="cls in classList" :key="cls" :class="{'timetable-cell': true, 'conflict-cell': isConflictCell(wIdx, pIdx, cls), 'warning-cell': isWarningCell(wIdx, pIdx, cls)}" @click="openManualAdjust(wIdx, pIdx, cls)">
                                             <div v-if="getTeacherByCell(wIdx, pIdx, cls)" class="cell-content">
-                                                <div class="cell-subject">{{ getTeacherByCell(wIdx, pIdx, cls).subject }}</div>
-                                                <div class="cell-teacher">{{ getTeacherByCell(wIdx, pIdx, cls).name }}</div>
+                                                <div class="cell-subject" v-if="cellDisplayMode === 'both' || cellDisplayMode === 'subject'">{{ getTeacherByCell(wIdx, pIdx, cls).subject }}</div>
+                                                <div class="cell-teacher" v-if="cellDisplayMode === 'both' || cellDisplayMode === 'teacher'">{{ getTeacherByCell(wIdx, pIdx, cls).name }}</div>
                                             </div>
                                             <div v-else class="cell-empty">⚡未排</div>
                                         </td>
@@ -549,7 +659,47 @@
                             </tbody>
                         </table>
                     </div>
-                    <div v-if="lastConflictMsg" class="badge" style="margin-top:16px; background:#fee2e2; color:#b91c1c; padding:12px; white-space:pre-wrap; text-align:left; max-height:300px; overflow-y:auto;">{{ lastConflictMsg }}</div>
+                    <!-- 分类冲突报告显示 -->
+                    <div v-if="conflictReport.conflicts.length || conflictReport.warnings.length || conflictReport.infos.length || conflictReport.suggestions.length" style="margin-top:16px;">
+                        <!-- 严重冲突 -->
+                        <div v-if="conflictReport.conflicts.length" class="report-card">
+                            <div class="report-header conflict">
+                                <span>🔴 严重冲突</span>
+                                <span class="report-badge">{{ conflictReport.conflicts.length }}项</span>
+                            </div>
+                            <div class="report-item conflict" v-for="(item, idx) in conflictReport.conflicts.slice(0, 10)" :key="'c'+idx">{{ item }}</div>
+                            <div v-if="conflictReport.conflicts.length > 10" style="color:#6b7280; font-size:0.8rem; margin-top:4px;">还有 {{ conflictReport.conflicts.length - 10 }} 项冲突...</div>
+                        </div>
+                        <!-- 警告 -->
+                        <div v-if="conflictReport.warnings.length" class="report-card">
+                            <div class="report-header warning">
+                                <span>🟡 警告提示</span>
+                                <span class="report-badge">{{ conflictReport.warnings.length }}项</span>
+                            </div>
+                            <div class="report-item warning" v-for="(item, idx) in conflictReport.warnings.slice(0, 10)" :key="'w'+idx">{{ item }}</div>
+                            <div v-if="conflictReport.warnings.length > 10" style="color:#6b7280; font-size:0.8rem; margin-top:4px;">还有 {{ conflictReport.warnings.length - 10 }} 项警告...</div>
+                        </div>
+                        <!-- 统计信息 -->
+                        <div v-if="conflictReport.infos.length" class="report-card">
+                            <div class="report-header info">
+                                <span>📊 统计信息</span>
+                                <span class="report-badge">{{ conflictReport.infos.length }}项</span>
+                            </div>
+                            <div class="report-item info" v-for="(item, idx) in conflictReport.infos" :key="'i'+idx">{{ item }}</div>
+                        </div>
+                        <!-- 建议 -->
+                        <div v-if="conflictReport.suggestions.length" class="report-card">
+                            <div class="report-header suggest">
+                                <span>💡 排课建议</span>
+                                <span class="report-badge">{{ conflictReport.suggestions.length }}项</span>
+                            </div>
+                            <div class="report-item" style="background:#f0fdf4; color:#047857;" v-for="(item, idx) in conflictReport.suggestions" :key="'s'+idx">{{ item }}</div>
+                        </div>
+                    </div>
+                    <!-- 无冲突时显示 -->
+                    <div v-else-if="lastConflictMsg" class="badge" style="margin-top:16px; background:#d1fae5; color:#065f46; padding:12px;">
+                        ✅ {{ lastConflictMsg }}
+                    </div>
                 </div>
             </div>
 
@@ -575,14 +725,14 @@
                         <div class="card-panel" style="border:2px solid #3b82f6;">
                             <div style="font-size:1.3rem; font-weight:600; color:#3b82f6; margin-bottom:16px;">📚 {{ selectedClass }} 课表</div>
                             <table>
-                                <thead><tr><th>星期</th><th v-for="p in periods">{{ p.name }}</th></tr></thead>
+                                <thead><tr><th>节次</th><th v-for="week in weekdays">{{ week }}</th></tr></thead>
                                 <tbody>
-                                    <tr v-for="(week, wIdx) in weekdays" :key="wIdx">
-                                        <td style="background:#fef9e3; font-weight:bold;">{{ week }}</td>
-                                        <td v-for="(p, pIdx) in periods" :key="`${wIdx}_${pIdx}`" :class="{'timetable-cell': true}">
+                                    <tr v-for="(p, pIdx) in periods" :key="pIdx">
+                                        <td style="background:#fef9e3; font-weight:bold; width:80px;">{{ p.name }}</td>
+                                        <td v-for="(week, wIdx) in weekdays" :key="`${pIdx}_${wIdx}`" :class="{'timetable-cell': true, 'conflict-cell': isConflictCell(wIdx, pIdx, selectedClass), 'warning-cell': isWarningCell(wIdx, pIdx, selectedClass)}">
                                             <div v-if="getTeacherByCell(wIdx, pIdx, selectedClass)" class="cell-content">
-                                                <div class="cell-subject">{{ getTeacherByCell(wIdx, pIdx, selectedClass).subject }}</div>
-                                                <div class="cell-teacher">{{ getTeacherByCell(wIdx, pIdx, selectedClass).name }}</div>
+                                                <div class="cell-subject" v-if="cellDisplayMode === 'both' || cellDisplayMode === 'subject'">{{ getTeacherByCell(wIdx, pIdx, selectedClass).subject }}</div>
+                                                <div class="cell-teacher" v-if="cellDisplayMode === 'both' || cellDisplayMode === 'teacher'">{{ getTeacherByCell(wIdx, pIdx, selectedClass).name }}</div>
                                             </div>
                                             <div v-else class="cell-empty">⚡未排</div>
                                         </td>
@@ -599,14 +749,14 @@
                                 <button class="btn-sm" @click.stop="exportSingleClassSchedule(cls)">📄 下载</button>
                             </div>
                             <table style="font-size:0.8rem;">
-                                <thead><tr><th>星期</th><th v-for="p in periods">{{ p.name }}</th></tr></thead>
+                                <thead><tr><th>节次</th><th v-for="week in weekdays">{{ week }}</th></tr></thead>
                                 <tbody>
-                                    <tr v-for="(week, wIdx) in weekdays" :key="wIdx">
-                                        <td style="background:#f8fafc; font-weight:bold; width:60px;">{{ week }}</td>
-                                        <td v-for="(p, pIdx) in periods" :key="`${wIdx}_${pIdx}`">
+                                    <tr v-for="(p, pIdx) in periods" :key="pIdx">
+                                        <td style="background:#f8fafc; font-weight:bold; width:50px;">{{ p.name }}</td>
+                                        <td v-for="(week, wIdx) in weekdays" :key="`${pIdx}_${wIdx}`">
                                             <div v-if="getTeacherByCell(wIdx, pIdx, cls)" style="text-align:center;">
-                                                <div style="font-weight:600; color:#1e40af; font-size:0.75rem;">{{ getTeacherByCell(wIdx, pIdx, cls).subject }}</div>
-                                                <div style="font-size:0.65rem; color:#475569;">{{ getTeacherByCell(wIdx, pIdx, cls).name }}</div>
+                                                <div v-if="cellDisplayMode === 'both' || cellDisplayMode === 'subject'" style="font-weight:600; color:#1e40af; font-size:0.75rem;">{{ getTeacherByCell(wIdx, pIdx, cls).subject }}</div>
+                                                <div v-if="cellDisplayMode === 'both' || cellDisplayMode === 'teacher'" style="font-size:0.65rem; color:#475569;">{{ getTeacherByCell(wIdx, pIdx, cls).name }}</div>
                                             </div>
                                             <div v-else style="color:#9ca3af; font-size:0.65rem;">未排</div>
                                         </td>
@@ -622,23 +772,30 @@
 
     <!-- 手动调课弹窗 -->
     <div v-if="showManualDialog" class="modal-mask">
-        <div class="modal-card">
+        <div class="modal-card" style="width:480px;">
             <h3>✏️ 手动调课</h3>
             <p>班级: <strong>{{ manualClass }}</strong> &nbsp; {{ weekdays[manualWeekIdx] }} {{ periods[manualPeriodIdx]?.name }}</p>
             <select v-model="selectedTeacherId" style="width:100%; padding:8px; margin-top:12px;">
                 <option :value="null">-- 清空 / 未排 --</option>
-                <option v-for="t in teachers" :value="t.id">{{ t.name }} ({{ t.subject }}) 任教:{{ t.classes.join(',') }}</option>
+                <option v-for="t in teachers" :key="t.id" :value="t.id" :class="getTeacherOptionClass(t.id)">
+                    {{ t.name }} ({{ t.subject }}) 任教:{{ t.classes.join(',') }} {{ getTeacherOptionHint(t.id) }}
+                </option>
             </select>
+            <!-- 实时提示和建议 -->
+            <div v-if="manualTipMsg" :class="'manual-tip ' + manualTipType">
+                <div class="manual-tip-title">{{ manualTipTitle }}</div>
+                <div>{{ manualTipMsg }}</div>
+            </div>
             <div style="margin-top:24px; display:flex; gap:12px; justify-content:flex-end;">
                 <button class="btn-secondary" @click="closeManualDialog">取消</button>
-                <button class="btn-primary" @click="applyManualAdjust">确认调课</button>
+                <button class="btn-primary" @click="applyManualAdjust" :disabled="manualTipType === 'error'">确认调课</button>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    const { createApp, ref } = Vue;
+    const { createApp, ref, watch } = Vue;
     createApp({
         setup() {
             const activeMain = ref('teachers');
@@ -651,10 +808,20 @@
             const rules = ref([]);
             const timetableData = ref({});
             const lastConflictMsg = ref('');
+            // 冲突报告分类数据
+            const conflictReport = ref({ conflicts: [], warnings: [], infos: [], suggestions: [] });
+            // 课表显示设置
+            const cellDisplayMode = ref('both'); // 'both' | 'subject' | 'teacher'
+            // 手动调课提示
             const showManualDialog = ref(false);
-                let manualWeekIdx = 0, manualPeriodIdx = 0, manualClass = '';
-                const selectedTeacherId = ref(null);
-                const selectedClass = ref('');
+            const manualWeekIdx = ref(0);
+            const manualPeriodIdx = ref(0);
+            const manualClass = ref('');
+            const selectedTeacherId = ref(null);
+            const selectedClass = ref('');
+            const manualTipTitle = ref('');
+            const manualTipMsg = ref('');
+            const manualTipType = ref(''); // 'ok' | 'warn' | 'error'
 
             const rulesByType = (type) => rules.value.filter(r => r.type === type);
             
@@ -937,6 +1104,102 @@
                 return checkTeacherConflict(tid, weekIdx, periodIdx, className);
             }
 
+            // 判断单元格是否有警告（如违反规则、连续上课等）
+            function isWarningCell(weekIdx, periodIdx, className) {
+                const tid = timetableData.value[`${weekIdx}_${periodIdx}_${className}`];
+                if (!tid) return false;
+                const teacher = teachers.value.find(t => t.id == tid);
+                if (!teacher) return false;
+                // 检查禁止时段
+                if (isForbidden(tid, weekIdx, periodIdx)) return true;
+                // 检查非推荐时段
+                if (!isSubjectPeriodAllowed(teacher.subject, periodIdx)) return true;
+                // 检查连续上课（检查当天该班级是否连续）
+                let consecutive = 0;
+                for (let pi = 0; pi <= periodIdx; pi++) {
+                    const curTid = timetableData.value[`${weekIdx}_${pi}_${className}`];
+                    if (curTid === tid) {
+                        consecutive++;
+                    } else {
+                        consecutive = 0;
+                    }
+                }
+                if (consecutive >= 3) return true; // 连续3节及以上
+                return false;
+            }
+
+            // 获取教师选项在当前时段的状态（用于下拉选项显示）
+            function getTeacherOptionStatus(tid) {
+                if (!tid) return 'ok';
+                const teacher = teachers.value.find(t => t.id == tid);
+                if (!teacher) return 'ok';
+                if (!teacher.classes.includes(manualClass.value)) return 'error'; // 不任教该班级
+                if (isForbidden(tid, manualWeekIdx.value, manualPeriodIdx.value)) return 'error'; // 禁止时段
+                if (checkTeacherConflict(tid, manualWeekIdx.value, manualPeriodIdx.value, manualClass.value)) return 'error'; // 教师冲突
+                if (!checkTeacherDailyLimit(tid, manualWeekIdx.value)) return 'warn'; // 当天已达上限
+                if (!checkSubjectDailyLimit(manualClass.value, manualWeekIdx.value, teacher.subject)) return 'warn'; // 科目当天上限
+                if (!isSubjectPeriodAllowed(teacher.subject, manualPeriodIdx.value)) return 'warn'; // 非推荐时段
+                return 'ok';
+            }
+
+            function getTeacherOptionClass(tid) {
+                const status = getTeacherOptionStatus(tid);
+                if (status === 'error') return 'teacher-option-conflict';
+                if (status === 'warn') return 'teacher-option-warn';
+                return '';
+            }
+
+            function getTeacherOptionHint(tid) {
+                const status = getTeacherOptionStatus(tid);
+                if (status === 'error') return '⛔不可选';
+                if (status === 'warn') return '⚠️有风险';
+                return '';
+            }
+
+            // 更新手动调课提示
+            function updateManualTip() {
+                const tid = selectedTeacherId.value;
+                if (!tid) {
+                    manualTipTitle.value = '清空单元格';
+                    manualTipMsg.value = '将此单元格设置为空，不安排任何教师。';
+                    manualTipType.value = 'ok';
+                    return;
+                }
+                const teacher = teachers.value.find(t => t.id == tid);
+                if (!teacher) {
+                    manualTipTitle.value = '教师不存在';
+                    manualTipMsg.value = '未找到该教师信息，请重新选择。';
+                    manualTipType.value = 'error';
+                    return;
+                }
+                const status = getTeacherOptionStatus(tid);
+                if (status === 'error') {
+                    const reasons = [];
+                    if (!teacher.classes.includes(manualClass.value)) reasons.push('未任教该班级');
+                    if (isForbidden(tid, manualWeekIdx.value, manualPeriodIdx.value)) reasons.push('禁止时段');
+                    if (checkTeacherConflict(tid, manualWeekIdx.value, manualPeriodIdx.value, manualClass.value)) {
+                        // 找出冲突的班级
+                        const conflictClasses = classList.value.filter(cls => cls !== manualClass.value && timetableData.value[`${manualWeekIdx.value}_${manualPeriodIdx.value}_${cls}`] == tid);
+                        reasons.push(`同时段已在${conflictClasses.join('、')}上课`);
+                    }
+                    manualTipTitle.value = '❌ 存在冲突';
+                    manualTipMsg.value = reasons.join('，') + '。请更换教师或调整其他安排。';
+                    manualTipType.value = 'error';
+                } else if (status === 'warn') {
+                    const warnings = [];
+                    if (!checkTeacherDailyLimit(tid, manualWeekIdx.value)) warnings.push('当天课时已达上限');
+                    if (!checkSubjectDailyLimit(manualClass.value, manualWeekIdx.value, teacher.subject)) warnings.push('科目当天已达上限');
+                    if (!isSubjectPeriodAllowed(teacher.subject, manualPeriodIdx.value)) warnings.push('非推荐时段');
+                    manualTipTitle.value = '⚠️ 存在风险';
+                    manualTipMsg.value = warnings.join('，') + '。建议谨慎选择。';
+                    manualTipType.value = 'warn';
+                } else {
+                    manualTipTitle.value = '✅ 可正常安排';
+                    manualTipMsg.value = `${teacher.name}(${teacher.subject})可以在此时段为${manualClass.value}上课。`;
+                    manualTipType.value = 'ok';
+                }
+            }
+
             function autoGenerateTimetable() {
                 timetableData.value = {};
                 lastConflictMsg.value = '';
@@ -1215,24 +1478,27 @@
                     }
                 }
                 if (unassignedSubjects.size > 0) {
-                    suggestions.push(`💡 建议：以下科目存在未排满的情况：${[...unassignedSubjects].join('、')}，可在规则设置中调整排课策略或增加对应科目的教师。`);
+                    suggestions.push(`以下科目存在未排满的情况：${[...unassignedSubjects].join('、')}，可在规则设置中调整排课策略或增加对应科目的教师。`);
                 }
 
+                // 存入分类报告对象（去除表情符号）
+                conflictReport.value = {
+                    conflicts: conflictMsgs.map(s => s.replace(/🔴\s*/g, '').replace(/严重冲突：/g, '')),
+                    warnings: warnings.map(s => s.replace(/🟡\s*/g, '')),
+                    infos: infos.map(s => s.replace(/📊\s*/g, '').replace(/✅\s*/g, '')),
+                    suggestions: suggestions.map(s => s.replace(/💡\s*建议：/g, ''))
+                };
+
+                // 生成简要结果消息
                 let resultMsg = '';
                 if (conflictMsgs.length > 0) {
-                    resultMsg = `━━━ 🔴 严重冲突 (${conflictMsgs.length}个) ━━━\n` + conflictMsgs.join('\n');
-                }
-                if (warnings.length > 0) {
-                    resultMsg += (resultMsg ? '\n\n' : '') + `━━━ 🟡 警告 (${warnings.length}个) ━━━\n` + warnings.join('\n');
-                }
-                if (infos.length > 0) {
-                    resultMsg += (resultMsg ? '\n\n' : '') + `━━━ 📊 统计信息 ━━━\n` + infos.join('\n');
-                }
-                if (suggestions.length > 0) {
-                    resultMsg += (resultMsg ? '\n\n' : '') + `━━━ 💡 排课建议 ━━━\n` + suggestions.join('\n');
-                }
-                if (!conflictMsgs.length && !warnings.length && !suggestions.length) {
-                    resultMsg = '✅ 自动排课完成，状态良好，无冲突！';
+                    resultMsg = `发现 ${conflictMsgs.length} 项严重冲突，${warnings.length} 项警告`;
+                } else if (warnings.length > 0) {
+                    resultMsg = `排课完成，但有 ${warnings.length} 项警告需要注意`;
+                } else if (suggestions.length > 0) {
+                    resultMsg = `排课完成，共 ${suggestions.length} 条优化建议`;
+                } else {
+                    resultMsg = '排课完成，状态良好！';
                 }
                 
                 lastConflictMsg.value = resultMsg;
@@ -1240,15 +1506,21 @@
 
             function refreshTimetableView() { lastConflictMsg.value = lastConflictMsg.value || '已刷新'; }
             function openManualAdjust(weekIdx, periodIdx, className) {
-                manualWeekIdx = weekIdx; manualPeriodIdx = periodIdx; manualClass = className;
+                manualWeekIdx.value = weekIdx; manualPeriodIdx.value = periodIdx; manualClass.value = className;
                 selectedTeacherId.value = timetableData.value[`${weekIdx}_${periodIdx}_${className}`] || null;
                 showManualDialog.value = true;
+                updateManualTip(); // 初始化提示
             }
-            function closeManualDialog() { showManualDialog.value = false; }
+            function closeManualDialog() { 
+                showManualDialog.value = false;
+                manualTipTitle.value = '';
+                manualTipMsg.value = '';
+                manualTipType.value = '';
+            }
             function applyManualAdjust() {
                 const tid = selectedTeacherId.value;
-                const cls = manualClass;
-                const wIdx = manualWeekIdx, pIdx = manualPeriodIdx;
+                const cls = manualClass.value;
+                const wIdx = manualWeekIdx.value, pIdx = manualPeriodIdx.value;
                 const key = `${wIdx}_${pIdx}_${cls}`;
                 if (tid) {
                     const teacher = teachers.value.find(t=>t.id==tid);
@@ -1311,10 +1583,10 @@
             }
 
             function exportSingleClassSchedule(cls) {
-                let sheetData = [['星期', ...periods.value.map(p => p.name)]];
-                for (let wi = 0; wi < weekdays.value.length; wi++) {
-                    let row = [weekdays.value[wi]];
-                    for (let pi = 0; pi < periods.value.length; pi++) {
+                let sheetData = [['节次', ...weekdays.value]];
+                for (let pi = 0; pi < periods.value.length; pi++) {
+                    let row = [periods.value[pi].name];
+                    for (let wi = 0; wi < weekdays.value.length; wi++) {
                         const teacher = getTeacherByCell(wi, pi, cls);
                         row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
                     }
@@ -1339,10 +1611,10 @@
             function exportAllClassSchedules() {
                 const wb = XLSX.utils.book_new();
                 for (let cls of classList.value) {
-                    let sheetData = [['星期', ...periods.value.map(p => p.name)]];
-                    for (let wi = 0; wi < weekdays.value.length; wi++) {
-                        let row = [weekdays.value[wi]];
-                        for (let pi = 0; pi < periods.value.length; pi++) {
+                    let sheetData = [['节次', ...weekdays.value]];
+                    for (let pi = 0; pi < periods.value.length; pi++) {
+                        let row = [periods.value[pi].name];
+                        for (let wi = 0; wi < weekdays.value.length; wi++) {
                             const teacher = getTeacherByCell(wi, pi, cls);
                             row.push(teacher ? `${teacher.subject}\n${teacher.name}` : '未排');
                         }
@@ -1429,12 +1701,22 @@
             }
             initMockData();
 
+            // 监听教师选择变化，更新提示
+            watch(selectedTeacherId, () => {
+                if (showManualDialog.value) {
+                    updateManualTip();
+                }
+            });
+
             return {
                 activeMain, showRulesSub, activeSubRule, weekdays, periods, classList, teachers, rules, timetableData, lastConflictMsg,
+                conflictReport, cellDisplayMode,
                 showManualDialog, manualWeekIdx, manualPeriodIdx, manualClass, selectedTeacherId, selectedClass,
+                manualTipTitle, manualTipMsg, manualTipType,
                 rulesByType, addTypedRule, deleteRuleById, saveRulesToast, setMainMenu, toggleRulesSub, setRuleSubMenu,
                 saveTeachersSettings, saveScheduleSettings,
-                getTeacherByCell, isConflictCell, autoGenerateTimetable, refreshTimetableView,
+                getTeacherByCell, isConflictCell, isWarningCell, getTeacherOptionClass, getTeacherOptionHint, updateManualTip,
+                autoGenerateTimetable, refreshTimetableView,
                 openManualAdjust, closeManualDialog, applyManualAdjust, exportToExcel, exportProject, importProject,
                 addTeacher, syncTeachersFromEdu, deleteTeacher, addPeriod, removePeriod, addClass, removeClass,
                 exportSingleClassSchedule, exportCurrentClassSchedule, exportAllClassSchedules, viewAllClassSchedules

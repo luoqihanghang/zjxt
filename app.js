@@ -1021,26 +1021,118 @@ function renderExamArrangement() {
 function collectRosterStudentsForExam() {
   const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
   const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
+  
+  let scoreMap = {};
+  let classRankMap = {};
+  let gradeRankMap = {};
+  const examsForGrade = (DB.exams || []).filter((e) => e.grade === grade);
+  let targetExam = null;
+  
+  if (examsForGrade.length > 0) {
+    examsForGrade.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    targetExam = examsForGrade[0];
+    // 与教务端 drawRanking 一致：使用 r.total 字段，按 r.grade 过滤
+    const allRecords = (DB.records || []).filter((r) => r.examId === targetExam.id && r.grade === grade);
+    
+    // 全校排名（与 drawRanking 完全一致：按 total 降序，key 用 studentId_studentName）
+    const sortedAll = [...allRecords].sort((a, b) => (b.total || 0) - (a.total || 0));
+    const schoolRankMap = new Map();
+    sortedAll.forEach((r, idx) => {
+      const key = `${r.studentId}_${r.studentName}`;
+      if (!schoolRankMap.has(key)) schoolRankMap.set(key, idx + 1);
+    });
+    
+    // 班级排名（与 drawRanking 完全一致）
+    const classRecordsMap = {};
+    allRecords.forEach((r) => {
+      if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
+      classRecordsMap[r.classNo].push(r);
+    });
+    Object.keys(classRecordsMap).forEach((cls) => {
+      const classRecords = [...classRecordsMap[cls]].sort((a, b) => (b.total || 0) - (a.total || 0));
+      classRecords.forEach((r, idx) => {
+        const key = `${r.studentId}_${r.studentName}`;
+        if (!classRankMap[`${key}`]) classRankMap[`${key}`] = idx + 1;
+      });
+    });
+    
+    // 同时建立以 classNo|studentName 为 key 的映射，方便后续查找
+    allRecords.forEach((r) => {
+      const sKey = `${r.studentId}_${r.studentName}`;
+      const cKey = `${r.classNo}|${r.studentName}`;
+      scoreMap[cKey] = r.total || 0;
+      gradeRankMap[cKey] = schoolRankMap.get(sKey) || 0;
+      if (!classRankMap[cKey]) classRankMap[cKey] = classRankMap[sKey] || 0;
+    });
+  }
+  
   const students = [];
   const classNames = Object.keys(roster).sort((a, b) => {
     const na = parseInt(a) || 0, nb = parseInt(b) || 0;
     return na - nb;
   });
+  
+  const rosterEmpty = classNames.length === 0 || classNames.every((c) => (roster[c] || []).length === 0);
+  
+  if (rosterEmpty && targetExam) {
+    const examRecords = (DB.records || []).filter((r) => r.examId === targetExam.id);
+    const classStudentMap = {};
+    
+    examRecords.forEach((r) => {
+      const cls = r.classNo;
+      if (!classStudentMap[cls]) classStudentMap[cls] = new Map();
+      if (!classStudentMap[cls].has(r.studentName)) {
+        const classNumMatch = String(cls).match(/(\d+)/);
+        const classNum = classNumMatch ? classNumMatch[1] : "1";
+        const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
+        const totalScore = scoreMap[`${cls}|${r.studentName}`] || 0;
+        const classRank = classRankMap[`${cls}|${r.studentName}`] || 0;
+        const gradeRank = gradeRankMap[`${cls}|${r.studentName}`] || 0;
+        
+        classStudentMap[cls].set(r.studentName, {
+          name: r.studentName,
+          studentId: r.studentId || "",
+          className: cls,
+          classCode: classCode,
+          classRank: classRank,
+          gradeRank: gradeRank,
+          gender: "",
+          remark: totalScore > 0 ? `总分:${totalScore}` : ""
+        });
+      }
+    });
+    
+    const newClassNames = Object.keys(classStudentMap).sort((a, b) => {
+      const na = parseInt(a) || 0, nb = parseInt(b) || 0;
+      return na - nb;
+    });
+    
+    newClassNames.forEach((cls) => {
+      students.push(...classStudentMap[cls].values());
+    });
+    
+    return { grade, students, classNames: newClassNames };
+  }
+  
   classNames.forEach((classNo) => {
     const list = roster[classNo] || [];
-    // 班级代码：取班级数字
     const classNumMatch = String(classNo).match(/(\d+)/);
     const classNum = classNumMatch ? classNumMatch[1] : "1";
     const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
     list.forEach((s, idx) => {
+      const name = s.studentName || s.name || "";
+      const totalScore = scoreMap[`${classNo}|${name}`] || 0;
+      const classRank = classRankMap[`${classNo}|${name}`] || 0;
+      const gradeRank = gradeRankMap[`${classNo}|${name}`] || 0;
       students.push({
-        name: s.studentName || s.name || "",
+        name: name,
         studentId: s.studentId || "",
         className: classNo,
         classCode: classCode,
-        classRank: 0,
+        classRank: classRank,
+        gradeRank: gradeRank,
         gender: s.gender || "",
-        remark: ""
+        remark: totalScore > 0 ? `总分:${totalScore}` : ""
       });
     });
   });
@@ -1061,34 +1153,37 @@ function collectExamListForExamArrangement() {
 window.openExamImportPicker = function () {
   const { grade, students, classNames } = collectRosterStudentsForExam();
   const { exams } = collectExamListForExamArrangement();
-
+  
   if (students.length === 0) {
     showModal("暂无可导入的考生", `
       <div class="alert alert-warning">
-        当前年级 <b>${esc(grade)}</b> 还没有学生名单数据。<br>
-        请先在【学生名单管理】中导入名单，再使用排考场。
+        当前年级 <b>${esc(grade)}</b> 还没有学生名单数据，也没有考试记录。<br>
+        请先在【学生名单管理】或【考试管理】中导入数据，再使用排考场。
       </div>
     `, "我知道了");
     return;
   }
 
   const examOptions = exams.length > 0
-    ? `<div class="form-group"><label>关联考试（用于"成绩蛇形"等排序，可选）</label>
+    ? `<div class="form-group"><label>关联考试（从成绩汇总获取班级排名，支持"成绩蛇形"排考，可选）</label>
          <select id="imp_exam"><option value="">不关联</option>${exams.map((e) => `<option value="${esc(e.id)}">${esc(e.name)}（${esc(e.date || "")}）</option>`).join("")}</select>
        </div>`
     : "";
 
+  const dataSource = students.some(s => s.gender) ? "学生名单" : "考试记录";
+
   const body = `
     <div class="alert alert-info">
-      💡 将从教务端【学生名单管理】中读取 <b>${esc(grade)}</b> 的 <b>${students.length}</b> 名考生，
+      💡 将读取 <b>${esc(grade)}</b> 的 <b>${students.length}</b> 名考生，
       涵盖 <b>${classNames.length}</b> 个班级，一键导入到排考场系统。
+      <br><span style="font-size:12px;color:#666;">数据来源：${dataSource}。选择关联考试后，将自动计算班级排名。</span>
     </div>
     <div class="form-group">
       <label>选择要导入的班级（不选则导入全部）</label>
       <div class="checkbox-group" style="max-height:160px;overflow-y:auto;border:1px solid #f0f0f0;padding:8px;border-radius:6px">
         <label class="checkbox-item"><input type="checkbox" id="imp_all" checked /> <b>全选</b></label>
         ${classNames.map((c) => {
-          const cnt = (DB.studentRoster[grade][c] || []).length;
+          const cnt = students.filter((s) => s.className === c).length;
           return `<label class="checkbox-item"><input type="checkbox" class="imp_cls" value="${esc(c)}" checked /> ${esc(c)}（${cnt} 人）</label>`;
         }).join("")}
       </div>
@@ -1133,38 +1228,122 @@ window.openExamImportPicker = function () {
 function doImportRosterToExam({ grade, selectedClasses, mode, examId }) {
   const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
   const students = [];
-  const classNames = (selectedClasses && selectedClasses.length > 0) ? selectedClasses : Object.keys(roster);
+  let classNames = (selectedClasses && selectedClasses.length > 0) ? selectedClasses : Object.keys(roster);
 
-  // 如果选择了考试，则提取该考试的总分作为 classRank 依据（供"成绩蛇形"用）
+  // 提取考试总分作为 classRank 依据（供"成绩蛇形"用）
   let scoreMap = {};
-  if (examId) {
-    const exam = (DB.exams || []).find((e) => e.id === examId);
-    const subjects = (exam && exam.subjects) || [];
-    (DB.records || []).filter((r) => r.examId === examId).forEach((r) => {
-      let total = 0;
-      subjects.forEach((s) => { total += Number(r.scores && r.scores[s]) || 0; });
-      if (total > 0) scoreMap[`${r.classNo}|${r.studentName}`] = total;
+  let classRankMap = {};
+  let gradeRankMap = {};
+  
+  let targetExamId = examId;
+  if (!targetExamId) {
+    const examsForGrade = (DB.exams || []).filter((e) => e.grade === grade);
+    if (examsForGrade.length > 0) {
+      examsForGrade.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      targetExamId = examsForGrade[0].id;
+    }
+  }
+  
+  if (targetExamId) {
+    // 与教务端 drawRanking 一致：使用 r.total 字段，按 r.grade 过滤
+    const allRecords = (DB.records || []).filter((r) => r.examId === targetExamId && r.grade === grade);
+    
+    // 全校排名（与 drawRanking 完全一致：按 total 降序，key 用 studentId_studentName）
+    const sortedAll = [...allRecords].sort((a, b) => (b.total || 0) - (a.total || 0));
+    const schoolRankMap = new Map();
+    sortedAll.forEach((r, idx) => {
+      const key = `${r.studentId}_${r.studentName}`;
+      if (!schoolRankMap.has(key)) schoolRankMap.set(key, idx + 1);
+    });
+    
+    // 班级排名（与 drawRanking 完全一致）
+    const classRecordsMap = {};
+    allRecords.forEach((r) => {
+      if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
+      classRecordsMap[r.classNo].push(r);
+    });
+    const classRankBySKey = {};
+    Object.keys(classRecordsMap).forEach((cls) => {
+      const classRecords = [...classRecordsMap[cls]].sort((a, b) => (b.total || 0) - (a.total || 0));
+      classRecords.forEach((r, idx) => {
+        const key = `${r.studentId}_${r.studentName}`;
+        if (!classRankBySKey[key]) classRankBySKey[key] = idx + 1;
+      });
+    });
+    
+    // 同时建立以 classNo|studentName 为 key 的映射，方便后续查找
+    allRecords.forEach((r) => {
+      const sKey = `${r.studentId}_${r.studentName}`;
+      const cKey = `${r.classNo}|${r.studentName}`;
+      scoreMap[cKey] = r.total || 0;
+      gradeRankMap[cKey] = schoolRankMap.get(sKey) || 0;
+      if (!classRankMap[cKey]) classRankMap[cKey] = classRankBySKey[sKey] || 0;
     });
   }
 
-  classNames.forEach((classNo) => {
+  const rosterEmpty = Object.keys(roster).length === 0 || classNames.every((c) => (roster[c] || []).length === 0);
+  
+  if (rosterEmpty && targetExamId) {
+    const examRecords = (DB.records || []).filter((r) => r.examId === targetExamId);
+    if (examRecords.length > 0) {
+      const classStudentMap = {};
+      examRecords.forEach((r) => {
+        if (selectedClasses && selectedClasses.length > 0 && !selectedClasses.includes(r.classNo)) return;
+        const cls = r.classNo;
+        if (!classStudentMap[cls]) classStudentMap[cls] = new Map();
+        if (!classStudentMap[cls].has(r.studentName)) {
+          const classNumMatch = String(cls).match(/(\d+)/);
+          const classNum = classNumMatch ? classNumMatch[1] : "1";
+          const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
+          const totalScore = scoreMap[`${cls}|${r.studentName}`] || 0;
+          const classRank = classRankMap[`${cls}|${r.studentName}`] || 0;
+          const gradeRank = gradeRankMap[`${cls}|${r.studentName}`] || 0;
+          classStudentMap[cls].set(r.studentName, {
+            name: r.studentName,
+            studentId: r.studentId || "",
+            className: cls,
+            classCode: classCode,
+            classRank: classRank,
+            gradeRank: gradeRank,
+            gender: "",
+            remark: totalScore > 0 ? `总分:${totalScore}` : ""
+          });
+        }
+      });
+      if (!selectedClasses || selectedClasses.length === 0) {
+        classNames = Object.keys(classStudentMap).sort((a, b) => {
+          const na = parseInt(a) || 0, nb = parseInt(b) || 0;
+          return na - nb;
+        });
+      }
+      classNames.forEach((cls) => {
+        if (classStudentMap[cls]) students.push(...classStudentMap[cls].values());
+      });
+    }
+  } else {
+    classNames.forEach((classNo) => {
     const list = roster[classNo] || [];
     const classNumMatch = String(classNo).match(/(\d+)/);
     const classNum = classNumMatch ? classNumMatch[1] : "1";
     const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
     list.forEach((s) => {
-      const totalScore = scoreMap[`${classNo}|${s.studentName}`] || 0;
+      const name = s.studentName || s.name || "";
+      const totalScore = scoreMap[`${classNo}|${name}`] || 0;
+      const classRank = classRankMap[`${classNo}|${name}`] || 0;
+      const gradeRank = gradeRankMap[`${classNo}|${name}`] || 0;
       students.push({
-        name: s.studentName || s.name || "",
+        name: name,
         studentId: s.studentId || "",
         className: classNo,
         classCode: classCode,
-        classRank: 0,
+        classRank: classRank,
+        gradeRank: gradeRank,
         gender: s.gender || "",
-        remark: totalScore > 0 ? `成绩:${totalScore}` : ""
+        remark: totalScore > 0 ? `总分:${totalScore}` : ""
       });
     });
   });
+  } // end else
 
   // 关联考试名（写入 settings.examName 提示）
   let examName = "";
@@ -3761,6 +3940,21 @@ function drawRanking(examId, grade, classFilter = "") {
     if (!schoolRankMap.has(key)) schoolRankMap.set(key, idx + 1);
   });
 
+  // 计算班级排名映射
+  const classRecordsMap = {};
+  allRecords.forEach((r) => {
+    if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
+    classRecordsMap[r.classNo].push(r);
+  });
+  const classRankMap = new Map();
+  Object.keys(classRecordsMap).forEach((cls) => {
+    const classRecords = [...classRecordsMap[cls]].sort((a, b) => b.total - a.total);
+    classRecords.forEach((r, idx) => {
+      const key = `${r.studentId}_${r.studentName}`;
+      if (!classRankMap.has(key)) classRankMap.set(key, idx + 1);
+    });
+  });
+
   records.sort((a, b) => b.total - a.total);
   const stats = aggregateStats(records, subjects);
   const showStudentId = hasRoster(grade);
@@ -3773,10 +3967,10 @@ function drawRanking(examId, grade, classFilter = "") {
   const showReviewButtons = !isAcademic && currentUser.role !== "admin";
 
   const rows = records.map((r, idx) => {
-    const classRank = idx + 1;
     const key = `${r.studentId}_${r.studentName}`;
     const schoolRank = schoolRankMap.get(key) || "";
-    const badge = isClassView ? (classRank === 1 ? "🥇" : classRank === 2 ? "🥈" : classRank === 3 ? "🥉" : classRank) : (schoolRank === 1 ? "🥇" : schoolRank === 2 ? "🥈" : schoolRank === 3 ? "🥉" : schoolRank);
+    const classRank = classRankMap.get(key) || "";
+    const schoolBadge = schoolRank === 1 ? "🥇" : schoolRank === 2 ? "🥈" : schoolRank === 3 ? "🥉" : schoolRank;
     const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
     const isPending = r.status === "pending";
     const statusTag = isPending ? `<span class="tag tag-warning">⏳待审核</span>` : `<span class="tag tag-success">✓已确认</span>`;
@@ -3786,8 +3980,9 @@ function drawRanking(examId, grade, classFilter = "") {
         <button class="btn btn-sm btn-danger" onclick="rejectOneScore('${r.id}')">🗑️退回</button>
       </td>
     ` : showReviewButtons ? `<td><span style="color:#999">已确认</span></td>` : "";
-    return `<tr class="${(isClassView ? classRank : schoolRank) <= 3 ? "rank-top" : ""} ${isPending ? "row-pending" : ""}">
-      ${isClassView ? `<td><b>${badge}</b></td><td>${schoolRank}</td>` : `<td><b>${badge}</b></td>`}
+    return `<tr class="${schoolRank <= 3 ? "rank-top" : ""} ${isPending ? "row-pending" : ""}">
+      <td><b>${schoolBadge}</b></td>
+      <td>${classRank}</td>
       <td>${r.classNo}</td>
       ${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}
       <td>${r.studentName}</td>
@@ -3800,8 +3995,8 @@ function drawRanking(examId, grade, classFilter = "") {
 
   const summaryRows = subjects.map((s) => {
     const st = stats[s.name];
-    let colspan = showStudentId ? (isClassView ? 4 : 3) : (isClassView ? 3 : 2);
-    if (showReviewButtons) colspan += 2; // 状态列和操作列
+    let colspan = showStudentId ? 4 : 3;
+    if (showReviewButtons) colspan += 2;
     return `<tr class="summary-row">
       <td colspan="${colspan}" style="text-align:right"><b>${s.name} 统计</b></td>
       <td colspan="${subjects.length + 1 - (showReviewButtons ? 2 : 0)}">
@@ -3826,7 +4021,6 @@ function drawRanking(examId, grade, classFilter = "") {
   }
 
   const thStudentId = showStudentId ? "<th>学号</th>" : "";
-  const thExtraRank = isClassView ? "<th>全校排名</th>" : "";
   const thStatus = showReviewButtons ? "<th>状态</th>" : "";
   const thAction = showReviewButtons ? "<th>复审操作</th>" : "";
   const tbodyRows = rows + summaryRows;
@@ -3834,7 +4028,7 @@ function drawRanking(examId, grade, classFilter = "") {
   $("rank_result").innerHTML = `
     <h3 style="margin:10px 0 14px">按总分排名（共 ${records.length} 名学生）</h3>
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>${isClassView ? "班级排名" : "排名"}</th>${thExtraRank}<th>班级</th>${thStudentId}<th>姓名</th>${subjects.map((s) => `<th>${s.name}</th>`).join("")}<th>总分</th>${thStatus}${thAction}</tr></thead>
+      <thead><tr><th>全校排名</th><th>班级排名</th><th>班级</th>${thStudentId}<th>姓名</th>${subjects.map((s) => `<th>${s.name}</th>`).join("")}<th>总分</th>${thStatus}${thAction}</tr></thead>
       <tbody>${tbodyRows}</tbody>
     </table></div>
     <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
@@ -3856,11 +4050,28 @@ window.downloadAllRankingExcel = function (examId, grade) {
   const showStudentId = hasRoster(grade);
   const thId = showStudentId ? ["学号"] : [];
 
+  // 计算班级排名映射
+  const classRecordsMap = {};
+  records.forEach((r) => {
+    if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
+    classRecordsMap[r.classNo].push(r);
+  });
+  const classRankMap = new Map();
+  Object.keys(classRecordsMap).forEach((cls) => {
+    const classRecords = [...classRecordsMap[cls]].sort((a, b) => b.total - a.total);
+    classRecords.forEach((r, idx) => {
+      const key = `${r.studentId}_${r.studentName}`;
+      if (!classRankMap.has(key)) classRankMap.set(key, idx + 1);
+    });
+  });
+
   // Sheet 1: 全年级排名
-  const t1 = [["年级排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
+  const t1 = [["全校排名", "班级排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
   records.forEach((r, idx) => {
+    const key = `${r.studentId}_${r.studentName}`;
+    const classRank = classRankMap.get(key) || "";
     const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
-    t1.push([idx + 1, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
+    t1.push([idx + 1, classRank, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(t1), "全年级排名");
 
@@ -3959,23 +4170,33 @@ window.downloadRankingExcel = function (examId, grade, classFilter) {
     if (!schoolRankMap.has(key)) schoolRankMap.set(key, idx + 1);
   });
 
+  // 计算班级排名
+  const classRecordsMap = {};
+  allRecords.forEach((r) => {
+    if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
+    classRecordsMap[r.classNo].push(r);
+  });
+  const classRankMap = new Map();
+  Object.keys(classRecordsMap).forEach((cls) => {
+    const classRecords = [...classRecordsMap[cls]].sort((a, b) => b.total - a.total);
+    classRecords.forEach((r, idx) => {
+      const key = `${r.studentId}_${r.studentName}`;
+      if (!classRankMap.has(key)) classRankMap.set(key, idx + 1);
+    });
+  });
+
   records.sort((a, b) => b.total - a.total);
   const stats = aggregateStats(records, subjects);
   const showStudentId = hasRoster(grade);
   const thId = showStudentId ? ["学号"] : [];
-  const isClassView = classFilter !== "";
 
-  const t1 = [isClassView ? ["全校排名", "班级排名", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"] : ["排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
+  const t1 = [["全校排名", "班级排名", "班级", ...thId, "姓名", ...subjects.map((s) => s.name), "总分"]];
   records.forEach((r, idx) => {
     const key = `${r.studentId}_${r.studentName}`;
     const schoolRank = schoolRankMap.get(key) || "";
-    const classRank = idx + 1;
+    const classRank = classRankMap.get(key) || "";
     const rosterId = showStudentId ? getStudentIdFromRoster(grade, r.classNo, r.studentName) : "";
-    if (isClassView) {
-      t1.push([schoolRank, classRank, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
-    } else {
-      t1.push([idx + 1, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
-    }
+    t1.push([schoolRank, classRank, r.classNo, ...(showStudentId ? [rosterId] : []), r.studentName, ...subjects.map((s) => r.scores[s.name] ?? ""), r.total]);
   });
 
   const t2 = [["学科", "参考人数", "优秀人数", "优秀率", "良好人数", "良好率", "及格人数", "及格率", "低分人数", "低分率", "平均分", "最高分", "最高分人数", "最低分", "最低分人数"]];

@@ -297,6 +297,7 @@ input:checked + .slider:before { transform: translateX(22px); }
                                     <th>班级</th>
                                     <th>班级代码</th>
                                     <th>班级排名</th>
+                                    <th>全校排名</th>
                                     <th>学号</th>
                                     <th>性别</th>
                                     <th>备注</th>
@@ -390,13 +391,10 @@ input:checked + .slider:before { transform: translateX(22px); }
                                 <select class="form-select" id="arrangeMethod">
                                     <option value="random">随机排序</option>
                                     <option value="classRank">按班级排名</option>
-                                    <option value="scoreDesc">按成绩降序</option>
-                                    <option value="scoreAsc">按成绩升序</option>
+                                    <option value="gradeRank">按全校排名升序（第1名优先）</option>
+                                    <option value="gradeRankDesc">按全校排名降序（排名靠后优先）</option>
                                     <option value="className">按班级+姓名</option>
                                     <option value="studentId">按学号</option>
-                                    <option value="snakeClass">蛇形分班（不同班级错开）</option>
-                                    <option value="classInterleave">班级交叉排列</option>
-                                    <option value="scoreSnake">成绩蛇形（S形分班）</option>
                                 </select>
                             </div>
                             <div class="form-item">
@@ -471,6 +469,7 @@ input:checked + .slider:before { transform: translateX(22px); }
                                     <option value="">无</option>
                                     <option value="className">班级</option>
                                     <option value="classRank">班级排名</option>
+                                    <option value="gradeRank">年组排名</option>
                                     <option value="score">成绩</option>
                                     <option value="studentId">学号</option>
                                     <option value="name">姓名</option>
@@ -573,6 +572,8 @@ input:checked + .slider:before { transform: translateX(22px); }
                                                 <option value="scoreDesc">成绩降序</option>
                                                 <option value="scoreAsc">成绩升序</option>
                                                 <option value="classRank">班级排名</option>
+                                                <option value="gradeRank">全校排名升序</option>
+                                                <option value="gradeRankDesc">全校排名降序</option>
                                                 <option value="random">随机</option>
                                             </select>
                                         </div>
@@ -603,6 +604,8 @@ input:checked + .slider:before { transform: translateX(22px); }
                                                 <option value="random">随机</option>
                                                 <option value="className">按班级</option>
                                                 <option value="classRank">班级排名</option>
+                                                <option value="gradeRank">全校排名升序</option>
+                                                <option value="gradeRankDesc">全校排名降序</option>
                                                 <option value="scoreDesc">成绩降序</option>
                                             </select>
                                         </div>
@@ -694,11 +697,13 @@ input:checked + .slider:before { transform: translateX(22px); }
                         <thead>
                             <tr>
                                 <th>准考证号</th>
+                                <th>学号</th>
                                 <th>姓名</th>
                                 <th>班级</th>
                                 <th>考场号</th>
                                 <th>座位号</th>
                                 <th>班级排名</th>
+                                <th>全校排名</th>
                             </tr>
                         </thead>
                         <tbody id="resultTbody"></tbody>
@@ -829,11 +834,13 @@ input:checked + .slider:before { transform: translateX(22px); }
                                 <label class="form-label">显示列</label>
                                 <div class="checkbox-group">
                                     <label class="checkbox-item"><input type="checkbox" id="infoColTicket" checked> 准考证号</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColStudentId"> 学号</label>
                                     <label class="checkbox-item"><input type="checkbox" id="infoColName" checked> 姓名</label>
                                     <label class="checkbox-item"><input type="checkbox" id="infoColClass" checked> 班级</label>
                                     <label class="checkbox-item"><input type="checkbox" id="infoColRoom" checked> 考场号</label>
                                     <label class="checkbox-item"><input type="checkbox" id="infoColSeat" checked> 座位号</label>
                                     <label class="checkbox-item"><input type="checkbox" id="infoColRank"> 班级排名</label>
+                                    <label class="checkbox-item"><input type="checkbox" id="infoColGradeRank"> 全校排名</label>
                                 </div>
                             </div>
                         </div>
@@ -941,6 +948,7 @@ input:checked + .slider:before { transform: translateX(22px); }
                                 <label class="checkbox-item"><input type="checkbox" class="export-field" value="roomNo" checked> 考场号</label>
                                 <label class="checkbox-item"><input type="checkbox" class="export-field" value="seatNo" checked> 座位号</label>
                                 <label class="checkbox-item"><input type="checkbox" class="export-field" value="classRank"> 班级排名</label>
+                                <label class="checkbox-item"><input type="checkbox" class="export-field" value="gradeRank"> 全校排名</label>
                                 <label class="checkbox-item"><input type="checkbox" class="export-field" value="studentId"> 学号</label>
                                 <label class="checkbox-item"><input type="checkbox" class="export-field" value="gender"> 性别</label>
                             </div>
@@ -1076,6 +1084,10 @@ input:checked + .slider:before { transform: translateX(22px); }
                     <input type="number" class="form-input" id="studentClassRank" placeholder="班级内排名" min="1">
                 </div>
                 <div class="form-item">
+                    <label class="form-label">全校排名</label>
+                    <input type="number" class="form-input" id="studentGradeRank" placeholder="年级排名" min="1">
+                </div>
+                <div class="form-item">
                     <label class="form-label">性别</label>
                     <select class="form-select" id="studentGender">
                         <option value="">未设置</option>
@@ -1139,6 +1151,26 @@ input:checked + .slider:before { transform: translateX(22px); }
                     <label class="form-label">行数（纵排几个）*</label>
                     <input type="number" class="form-input" id="roomRows" value="6" min="1" max="20">
                 </div>
+            </div>
+
+            <div class="form-row" style="margin-bottom: 4px;">
+                <div class="form-item">
+                    <label class="form-label">
+                        <input type="checkbox" id="roomCustomLayout" style="vertical-align: middle; margin-right: 4px;">
+                        自定义每排座位数（不规则排列）
+                    </label>
+                    <div style="font-size: 12px; color: #8c8c8c; margin-top: 4px;">
+                        开启后可为每一排单独设置座位数，适用于横排/竖排人数不规整的考场
+                    </div>
+                </div>
+            </div>
+            <div id="customLayoutRow" style="display: none; margin-bottom: 14px;">
+                <div style="font-size: 13px; color: #595959; margin-bottom: 8px;">
+                    <span>每排座位数：</span>
+                    <button type="button" class="btn btn-sm" onclick="addCustomLayoutRow()">+ 增加一排</button>
+                    <button type="button" class="btn btn-sm" onclick="removeCustomLayoutRow()">− 减少一排</button>
+                </div>
+                <div id="customLayoutInputs" style="display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; background: #fafafa; border-radius: 6px; border: 1px dashed #d9d9d9;"></div>
             </div>
 
             <div class="form-row">
@@ -1270,12 +1302,97 @@ document.addEventListener('DOMContentLoaded', function() {
     initRoomPreview();
     
     // 考场预览实时更新
-    ['roomCols', 'roomRows', 'roomDirection', 'roomStartPos', 'roomDisabledSeats', 'roomHasPodium'].forEach(id => {
+    ['roomCols', 'roomRows', 'roomDirection', 'roomStartPos', 'roomDisabledSeats', 'roomHasPodium', 'roomCustomLayout'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('change', updateRoomPreview);
         if (el) el.addEventListener('input', updateRoomPreview);
     });
+    
+    // 自定义布局开关联动
+    const customLayoutChk = document.getElementById('roomCustomLayout');
+    if (customLayoutChk) {
+        customLayoutChk.addEventListener('change', function() {
+            toggleCustomLayout(this.checked);
+        });
+    }
 });
+
+// 切换自定义布局显示
+function toggleCustomLayout(show) {
+    const row = document.getElementById('customLayoutRow');
+    if (!row) return;
+    row.style.display = show ? 'block' : 'none';
+    if (show) {
+        renderCustomLayoutInputs();
+    }
+}
+
+// 渲染每排座位数输入框
+function renderCustomLayoutInputs() {
+    const container = document.getElementById('customLayoutInputs');
+    if (!container) return;
+    const rowSeats = getCurrentRowSeats();
+    container.innerHTML = rowSeats.map((n, i) => `
+        <div style="display:flex; align-items:center; gap:4px;">
+            <span style="font-size:12px; color:#595959; min-width:36px;">第${i+1}排</span>
+            <input type="number" class="form-input custom-row-seat" data-row="${i}" value="${n}" min="0" max="30" style="width:60px; padding:4px 6px; font-size:12px;">
+            <span style="font-size:12px; color:#8c8c8c;">座</span>
+        </div>
+    `).join('');
+    // 绑定事件
+    container.querySelectorAll('.custom-row-seat').forEach(input => {
+        input.addEventListener('input', function() {
+            syncRowsFromCustom();
+            updateRoomPreview();
+        });
+    });
+}
+
+function addCustomLayoutRow() {
+    const rowSeats = getCurrentRowSeats();
+    const last = rowSeats.length > 0 ? rowSeats[rowSeats.length - 1] : 6;
+    rowSeats.push(last);
+    document.getElementById('roomRows').value = rowSeats.length;
+    renderCustomLayoutInputs();
+    updateRoomPreview();
+}
+
+function removeCustomLayoutRow() {
+    const rowSeats = getCurrentRowSeats();
+    if (rowSeats.length <= 1) return;
+    rowSeats.pop();
+    document.getElementById('roomRows').value = rowSeats.length;
+    renderCustomLayoutInputs();
+    updateRoomPreview();
+}
+
+// 从自定义输入框同步到行数（行数输入框和 rowSeats 数组
+function getCurrentRowSeats() {
+    const container = document.getElementById('customLayoutInputs');
+    if (!container) return [];
+    const inputs = container.querySelectorAll('.custom-row-seat');
+    if (inputs.length > 0) {
+        return Array.from(inputs).map(i => parseInt(i.value) || 0);
+    }
+    // 初次：根据当前行数默认值生成
+    const rows = parseInt(document.getElementById('roomRows').value) || 6;
+    const cols = parseInt(document.getElementById('roomCols').value) || 6;
+    return new Array(rows).fill(cols);
+}
+
+// 当自定义布局开启时，将行列数输入变化时同步自定义输入
+function syncRowsFromCustom() {
+    const rowSeats = getCurrentRowSeats();
+    document.getElementById('roomRows').value = rowSeats.length;
+}
+
+// 计算考场总座位数（支持自定义布局
+function calcRoomSeats(room) {
+    if (room.customLayout && Array.isArray(room.rowSeats) && room.rowSeats.length > 0) {
+        return room.rowSeats.reduce((s, n) => s + (parseInt(n) || 0), 0);
+    }
+    return (room.rows || 0) * (room.cols || 0);
+}
 
 // ==================== 标签页切换 ====================
 function switchTab(tabName) {
@@ -1309,7 +1426,7 @@ function updateDashboard() {
     document.getElementById('stat-rooms').textContent = appData.rooms.length;
     let totalSeats = 0;
     appData.rooms.forEach(r => {
-        totalSeats += (r.rows * r.cols);
+        totalSeats += calcRoomSeats(r);
     });
     document.getElementById('stat-seats').textContent = totalSeats;
     document.getElementById('stat-arranged').textContent = appData.arrangements.length;
@@ -1353,7 +1470,8 @@ function renderStudents(filter = '') {
             <td>${s.name || '-'}</td>
             <td>${s.className || '-'}</td>
             <td>${s.classCode || '-'}</td>
-            <td>${s.classRank || '-'}</td>
+            <td>${s.classRank ? '第' + s.classRank + '名' : '-'}</td>
+            <td>${s.gradeRank ? '第' + s.gradeRank + '名' : '-'}</td>
             <td>${s.studentId || '-'}</td>
             <td>${s.gender || '-'}</td>
             <td>${s.remark || '-'}</td>
@@ -1384,6 +1502,7 @@ function showAddStudentModal() {
     document.getElementById('studentClass').value = '';
     document.getElementById('studentClassCode').value = '';
     document.getElementById('studentClassRank').value = '';
+    document.getElementById('studentGradeRank').value = '';
     document.getElementById('studentGender').value = '';
     document.getElementById('studentRemark').value = '';
     showModal('studentModal');
@@ -1398,6 +1517,7 @@ function editStudent(index) {
     document.getElementById('studentClass').value = s.className || '';
     document.getElementById('studentClassCode').value = s.classCode || '';
     document.getElementById('studentClassRank').value = s.classRank || '';
+    document.getElementById('studentGradeRank').value = s.gradeRank || '';
     document.getElementById('studentGender').value = s.gender || '';
     document.getElementById('studentRemark').value = s.remark || '';
     showModal('studentModal');
@@ -1411,6 +1531,7 @@ function saveStudent() {
         className: document.getElementById('studentClass').value.trim(),
         classCode: document.getElementById('studentClassCode').value.trim(),
         classRank: parseInt(document.getElementById('studentClassRank').value) || 0,
+        gradeRank: parseInt(document.getElementById('studentGradeRank').value) || 0,
         gender: document.getElementById('studentGender').value,
         remark: document.getElementById('studentRemark').value.trim()
     };
@@ -1481,8 +1602,8 @@ function batchAddStudents() {
 
 function downloadTemplate() {
     const data = [
-        ['姓名', '班级', '班级代码', '班级排名', '学号', '性别', '备注'],
-        ['张三', '高三(1)班', '01', '1', '2024001', '男', '']
+        ['姓名', '班级', '班级代码', '班级排名', '全校排名', '学号', '性别', '备注'],
+        ['张三', '高三(1)班', '01', '1', '1', '2024001', '男', '']
     ];
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -1509,6 +1630,7 @@ function importStudents(event) {
                     className: row['班级'] || row['className'] || '',
                     classCode: String(row['班级代码'] || row['classCode'] || ''),
                     classRank: parseInt(row['班级排名'] || row['classRank']) || 0,
+                    gradeRank: parseInt(row['全校排名'] || row['gradeRank']) || 0,
                     studentId: row['学号'] || row['studentId'] || '',
                     gender: row['性别'] || row['gender'] || '',
                     remark: row['备注'] || row['remark'] || ''
@@ -1549,7 +1671,7 @@ function renderRooms() {
             <div class="room-info">
                 <div>📍 位置：${r.location || '-'}</div>
                 <div>👨‍🏫 监考：${r.invigilator || '-'}</div>
-                <div>📐 ${r.rows}行 × ${r.cols}列 = ${r.rows * r.cols}座</div>
+                <div>📐 ${r.customLayout ? '自定义' : r.rows + '行 × ' + r.cols + '列'} = ${calcRoomSeats(r)}座</div>
                 <div>🔄 排列：${getDirectionText(r.direction)}</div>
                 <div>📍 起点：${getStartPosText(r.startPos)}</div>
             </div>
@@ -1595,6 +1717,8 @@ function showAddRoomModal() {
     document.getElementById('roomHasPodium').checked = true;
     document.getElementById('roomPodiumPos').value = 'top';
     document.getElementById('roomDisabledSeats').value = '';
+    document.getElementById('roomCustomLayout').checked = false;
+    document.getElementById('customLayoutRow').style.display = 'none';
     updateRoomPreview();
     showModal('roomModal');
 }
@@ -1614,6 +1738,28 @@ function editRoom(index) {
     document.getElementById('roomHasPodium').checked = r.hasPodium !== false;
     document.getElementById('roomPodiumPos').value = r.podiumPos || 'top';
     document.getElementById('roomDisabledSeats').value = (r.disabledSeats || []).join(',');
+    const customLayoutChk = document.getElementById('roomCustomLayout');
+    const customRow = document.getElementById('customLayoutRow');
+    const customLayout = !!r.customLayout && Array.isArray(r.rowSeats) && r.rowSeats.length > 0;
+    customLayoutChk.checked = customLayout;
+    customRow.style.display = customLayout ? 'block' : 'none';
+    if (customLayout) {
+        // 渲染自定义输入框并填入值
+        const container = document.getElementById('customLayoutInputs');
+        container.innerHTML = r.rowSeats.map((n, i) => `
+            <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:12px; color:#595959; min-width:36px;">第${i+1}排</span>
+                <input type="number" class="form-input custom-row-seat" data-row="${i}" value="${n}" min="0" max="30" style="width:60px; padding:4px 6px; font-size:12px;">
+                <span style="font-size:12px; color:#8c8c8c;">座</span>
+            </div>
+        `).join('');
+        container.querySelectorAll('.custom-row-seat').forEach(input => {
+            input.addEventListener('input', function() {
+                syncRowsFromCustom();
+                updateRoomPreview();
+            });
+        });
+    }
     updateRoomPreview();
     showModal('roomModal');
 }
@@ -1622,6 +1768,11 @@ function saveRoom() {
     const index = document.getElementById('editRoomIndex').value;
     const disabledStr = document.getElementById('roomDisabledSeats').value.trim();
     const disabledSeats = disabledStr ? disabledStr.split(/[,，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
+    const customLayout = document.getElementById('roomCustomLayout').checked;
+    let rowSeats = null;
+    if (customLayout) {
+        rowSeats = getCurrentRowSeats();
+    }
     
     const room = {
         roomNo: document.getElementById('roomNo').value.trim(),
@@ -1634,7 +1785,9 @@ function saveRoom() {
         startPos: document.getElementById('roomStartPos').value,
         hasPodium: document.getElementById('roomHasPodium').checked,
         podiumPos: document.getElementById('roomPodiumPos').value,
-        disabledSeats: disabledSeats
+        disabledSeats: disabledSeats,
+        customLayout: customLayout,
+        rowSeats: rowSeats
     };
     
     if (!room.roomNo) { alert('请输入考场号'); return; }
@@ -1712,12 +1865,18 @@ function updateRoomPreview() {
     const direction = document.getElementById('roomDirection').value;
     const startPos = document.getElementById('roomStartPos').value;
     const hasPodium = document.getElementById('roomHasPodium').checked;
+    const customLayoutChk = document.getElementById('roomCustomLayout');
+    const customLayout = customLayoutChk && customLayoutChk.checked;
+    let rowSeats = null;
+    if (customLayout) rowSeats = getCurrentRowSeats();
     
-    const seatOrder = generateSeatOrder(rows, cols, direction, startPos);
+    const seatOrder = generateSeatOrder(rows, cols, direction, startPos, rowSeats);
     const seatMap = {};
     seatOrder.forEach((seat, idx) => {
         seatMap[`${seat.row}-${seat.col}`] = idx + 1;
     });
+    
+    const actualRows = rowSeats ? rowSeats.length : rows;
     
     let html = '<div style="display: inline-block;">';
     
@@ -1725,9 +1884,10 @@ function updateRoomPreview() {
         html += '<div style="background:#f0f0f0; padding:8px; text-align:center; margin-bottom:10px; border-radius:4px; font-size:11px; color:#666;">讲台</div>';
     }
     
-    for (let r = 0; r < rows; r++) {
+    for (let r = 0; r < actualRows; r++) {
+        const rowCount = rowSeats ? (parseInt(rowSeats[r]) || 0) : cols;
         html += '<div style="display:flex; gap:4px; margin-bottom:4px; justify-content:center;">';
-        for (let c = 0; c < cols; c++) {
+        for (let c = 0; c < rowCount; c++) {
             const seatNo = seatMap[`${r}-${c}`];
             html += `<div style="width:36px; height:30px; border:1px solid #d9d9d9; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:11px; background:${seatNo ? '#e6f7ff' : '#fafafa'};">${seatNo || ''}</div>`;
         }
@@ -1739,56 +1899,55 @@ function updateRoomPreview() {
 }
 
 // 生成座位顺序数组
-function generateSeatOrder(rows, cols, direction, startPos) {
+// rowSeats: 可选数组，每排座位数（为 null/undefined 则用 cols 表示统一列数）
+function generateSeatOrder(rows, cols, direction, startPos, rowSeats) {
     const seats = [];
     
-    // 根据起始位置调整行列遍历顺序
+    const actualRows = rowSeats ? rowSeats.length : rows;
+    const maxCols = rowSeats ? Math.max(...rowSeats, 0) : cols;
+    
+    function getRowSeatCount(r) {
+        if (rowSeats && rowSeats[r] != null) return parseInt(rowSeats[r]) || 0;
+        return cols;
+    }
+    
     let rowStart, rowEnd, rowStep;
-    let colStart, colEnd, colStep;
-    
-    // 确定行方向
     if (startPos === 'tl' || startPos === 'tr') {
-        rowStart = 0; rowEnd = rows; rowStep = 1;
+        rowStart = 0; rowEnd = actualRows; rowStep = 1;
     } else {
-        rowStart = rows - 1; rowEnd = -1; rowStep = -1;
+        rowStart = actualRows - 1; rowEnd = -1; rowStep = -1;
     }
     
-    // 确定列方向
-    if (startPos === 'tl' || startPos === 'bl') {
-        colStart = 0; colEnd = cols; colStep = 1;
-    } else {
-        colStart = cols - 1; colEnd = -1; colStep = -1;
-    }
+    const colIsReverse = (startPos === 'tr' || startPos === 'br');
     
     if (direction === 'horizontal' || direction === 'snakeH') {
-        // 行优先
         let rowIdx = 0;
         for (let r = rowStart; r !== rowEnd; r += rowStep) {
-            if (direction === 'snakeH' && rowIdx % 2 === 1) {
-                // 蛇形：偶数行反向
-                for (let c = (colStep === 1 ? colEnd - 1 : colStart); c !== (colStep === 1 ? colStart - 1 : colEnd); c -= colStep) {
-                    seats.push({ row: r, col: c });
-                }
+            const seatCount = getRowSeatCount(r);
+            if (seatCount <= 0) { rowIdx++; continue; }
+            const isSnakeReverse = (direction === 'snakeH' && rowIdx % 2 === 1);
+            const reverse = colIsReverse ? !isSnakeReverse : isSnakeReverse;
+            if (reverse) {
+                for (let c = seatCount - 1; c >= 0; c--) seats.push({ row: r, col: c });
             } else {
-                for (let c = colStart; c !== colEnd; c += colStep) {
-                    seats.push({ row: r, col: c });
-                }
+                for (let c = 0; c < seatCount; c++) seats.push({ row: r, col: c });
             }
             rowIdx++;
         }
     } else {
-        // 列优先
         let colIdx = 0;
-        for (let c = colStart; c !== colEnd; c += colStep) {
-            if (direction === 'snakeV' && colIdx % 2 === 1) {
-                // 蛇形：偶数列反向
-                for (let r = (rowStep === 1 ? rowEnd - 1 : rowStart); r !== (rowStep === 1 ? rowStart - 1 : rowEnd); r -= rowStep) {
-                    seats.push({ row: r, col: c });
-                }
-            } else {
-                for (let r = rowStart; r !== rowEnd; r += rowStep) {
-                    seats.push({ row: r, col: c });
-                }
+        const cStart = colIsReverse ? maxCols - 1 : 0;
+        const cEnd = colIsReverse ? -1 : maxCols;
+        const cStep = colIsReverse ? -1 : 1;
+        
+        for (let c = cStart; c !== cEnd; c += cStep) {
+            const isSnakeReverse = (direction === 'snakeV' && colIdx % 2 === 1);
+            const rStart = isSnakeReverse ? (rowStep === 1 ? actualRows - 1 : 0) : rowStart;
+            const rEnd = isSnakeReverse ? (rowStep === 1 ? -1 : actualRows) : rowEnd;
+            const rStep = isSnakeReverse ? -rowStep : rowStep;
+            
+            for (let r = rStart; r !== rEnd; r += rStep) {
+                if (c < getRowSeatCount(r)) seats.push({ row: r, col: c });
             }
             colIdx++;
         }
@@ -1851,6 +2010,8 @@ function addLayer() {
                             <option value="scoreDesc">成绩降序</option>
                             <option value="scoreAsc">成绩升序</option>
                             <option value="classRank">班级排名</option>
+                            <option value="gradeRank">全校排名升序</option>
+                            <option value="gradeRankDesc">全校排名降序</option>
                             <option value="random">随机</option>
                             <option value="classInterleave">班级交叉</option>
                         </select>
@@ -1923,7 +2084,7 @@ function updateRoomSelections() {
     container.innerHTML = '<div class="checkbox-group">' + appData.rooms.map((r, i) => `
         <label class="checkbox-item">
             <input type="checkbox" class="room-select" value="${i}" checked>
-            ${r.roomName || '考场' + r.roomNo} (${r.rows * r.cols}座)
+            ${r.roomName || '考场' + r.roomNo} (${calcRoomSeats(r)}座)
         </label>
     `).join('') + '</div>';
 }
@@ -1971,7 +2132,7 @@ function doArrange() {
 function calcTotalSeats(rooms) {
     let total = 0;
     rooms.forEach(r => {
-        total += (r.rows * r.cols - (r.disabledSeats || []).length);
+        total += (calcRoomSeats(r) - (r.disabledSeats || []).length);
     });
     return total;
 }
@@ -2129,7 +2290,30 @@ function sortStudents(students, method) {
             return shuffleArray(result);
             
         case 'classRank':
-            result.sort((a, b) => (a.classRank || 0) - (b.classRank || 0));
+            result.sort((a, b) => {
+                const ra = a.classRank || 0, rb = b.classRank || 0;
+                if (ra === 0) return 1;
+                if (rb === 0) return -1;
+                return ra - rb;
+            });
+            return result;
+            
+        case 'gradeRank':
+            result.sort((a, b) => {
+                const ra = a.gradeRank || 0, rb = b.gradeRank || 0;
+                if (ra === 0) return 1;
+                if (rb === 0) return -1;
+                return ra - rb;
+            });
+            return result;
+            
+        case 'gradeRankDesc':
+            result.sort((a, b) => {
+                const ra = a.gradeRank || 0, rb = b.gradeRank || 0;
+                if (ra === 0) return 1;
+                if (rb === 0) return -1;
+                return rb - ra;
+            });
             return result;
             
         case 'scoreDesc':
@@ -2167,6 +2351,7 @@ function getSortValue(student, field) {
     switch (field) {
         case 'className': return student.className || '';
         case 'classRank': return student.classRank || 0;
+        case 'gradeRank': return student.gradeRank || 0;
         case 'score': return student.score || 0;
         case 'studentId': return student.studentId || '';
         case 'name': return student.name || '';
@@ -2239,7 +2424,8 @@ function assignStudentsToRooms(students, rooms, strategy, seatFillOrder, startPo
     
     // 获取每个考场可用座位列表
     const roomSeats = rooms.map(room => {
-        const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos);
+        const rowSeats = (room.customLayout && room.rowSeats) ? room.rowSeats : null;
+        const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos, rowSeats);
         const disabledSeats = room.disabledSeats || [];
         const availableSeats = [];
         seatOrder.forEach((seat, idx) => {
@@ -2432,6 +2618,7 @@ function addArrangement(student, room, seat) {
         className: student.className,
         classCode: student.classCode,
         classRank: student.classRank,
+        gradeRank: student.gradeRank,
         studentId: student.studentId,
         gender: student.gender,
         roomNo: room.roomNo,
@@ -2475,10 +2662,11 @@ function snakeMergeClasses(classMap) {
 function generateTicketNo(roomNo, seatNo, classCode, classRank) {
     const seatDigits = appData.settings.seatDigits || 2;
     const codeDigits = appData.settings.classCodeDigits || 2;
+    const rank = classRank && classRank > 0 ? classRank : 99;
     return roomNo + 
         String(seatNo).padStart(seatDigits, '0') + 
         String(classCode || '').padStart(codeDigits, '0').slice(0, codeDigits) + 
-        String(classRank || 0).padStart(2, '0');
+        String(rank).padStart(2, '0');
 }
 
 function resetArrange() {
@@ -2518,11 +2706,18 @@ function showRoomSeatMap() {
     });
     
     const disabledSeats = room.disabledSeats || [];
-    const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos);
+    const rowSeats = (room.customLayout && room.rowSeats) ? room.rowSeats : null;
+    const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos, rowSeats);
     const seatNoMap = {};
     seatOrder.forEach((seat, idx) => {
         seatNoMap[`${seat.row}-${seat.col}`] = idx + 1;
     });
+    
+    const actualRows = room.customLayout && room.rowSeats ? room.rowSeats.length : room.rows;
+    function getRowSeatCount(r) {
+        if (room.customLayout && room.rowSeats && room.rowSeats[r] != null) return parseInt(room.rowSeats[r]) || 0;
+        return room.cols;
+    }
     
     let html = '<div style="display:inline-block;">';
     
@@ -2530,9 +2725,10 @@ function showRoomSeatMap() {
         html += '<div class="podium" style="margin-bottom:20px;">📚 讲台</div>';
     }
     
-    for (let r = 0; r < room.rows; r++) {
+    for (let r = 0; r < actualRows; r++) {
+        const rowCount = getRowSeatCount(r);
         html += '<div class="seat-row">';
-        for (let c = 0; c < room.cols; c++) {
+        for (let c = 0; c < rowCount; c++) {
             const seatNo = seatNoMap[`${r}-${c}`];
             const student = seatMap[`${r}-${c}`];
             const isDisabled = disabledSeats.includes(seatNo);
@@ -2566,11 +2762,13 @@ function renderResultDetail() {
     tbody.innerHTML = data.map(a => `
         <tr>
             <td>${a.ticketNo}</td>
+            <td>${a.studentId || '-'}</td>
             <td>${a.name}</td>
             <td>${a.className}</td>
             <td>${a.roomNo}</td>
             <td>${a.seatNo}</td>
-            <td>${a.classRank || '-'}</td>
+            <td>${a.classRank ? '第' + a.classRank + '名' : '-'}</td>
+            <td>${a.gradeRank ? '第' + a.gradeRank + '名' : '-'}</td>
         </tr>
     `).join('');
 }
@@ -2753,32 +2951,38 @@ function previewInfoTable() {
     
     const cols = {
         ticket: document.getElementById('infoColTicket').checked,
+        studentId: document.getElementById('infoColStudentId').checked,
         name: document.getElementById('infoColName').checked,
         class: document.getElementById('infoColClass').checked,
         room: document.getElementById('infoColRoom').checked,
         seat: document.getElementById('infoColSeat').checked,
-        rank: document.getElementById('infoColRank').checked
+        rank: document.getElementById('infoColRank').checked,
+        gradeRank: document.getElementById('infoColGradeRank').checked
     };
     
     let html = `<h2 style="text-align:center; margin-bottom:20px;">${appData.settings.examName} - 考生信息表</h2>`;
     html += '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
     html += '<thead><tr style="background:#f5f5f5;">';
     if (cols.ticket) html += '<th style="border:1px solid #ccc; padding:8px;">准考证号</th>';
+    if (cols.studentId) html += '<th style="border:1px solid #ccc; padding:8px;">学号</th>';
     if (cols.name) html += '<th style="border:1px solid #ccc; padding:8px;">姓名</th>';
     if (cols.class) html += '<th style="border:1px solid #ccc; padding:8px;">班级</th>';
     if (cols.room) html += '<th style="border:1px solid #ccc; padding:8px;">考场号</th>';
     if (cols.seat) html += '<th style="border:1px solid #ccc; padding:8px;">座位号</th>';
     if (cols.rank) html += '<th style="border:1px solid #ccc; padding:8px;">班级排名</th>';
+    if (cols.gradeRank) html += '<th style="border:1px solid #ccc; padding:8px;">全校排名</th>';
     html += '</tr></thead><tbody>';
     
     data.forEach(a => {
         html += '<tr>';
         if (cols.ticket) html += `<td style="border:1px solid #ccc; padding:8px;">${a.ticketNo}</td>`;
+        if (cols.studentId) html += `<td style="border:1px solid #ccc; padding:8px;">${a.studentId || '-'}</td>`;
         if (cols.name) html += `<td style="border:1px solid #ccc; padding:8px;">${a.name}</td>`;
         if (cols.class) html += `<td style="border:1px solid #ccc; padding:8px;">${a.className}</td>`;
         if (cols.room) html += `<td style="border:1px solid #ccc; padding:8px;">${a.roomNo}</td>`;
         if (cols.seat) html += `<td style="border:1px solid #ccc; padding:8px;">${a.seatNo}</td>`;
-        if (cols.rank) html += `<td style="border:1px solid #ccc; padding:8px;">${a.classRank || '-'}</td>`;
+        if (cols.rank) html += `<td style="border:1px solid #ccc; padding:8px;">${a.classRank ? '第' + a.classRank + '名' : '-'}</td>`;
+        if (cols.gradeRank) html += `<td style="border:1px solid #ccc; padding:8px;">${a.gradeRank ? '第' + a.gradeRank + '名' : '-'}</td>`;
         html += '</tr>';
     });
     
@@ -2817,11 +3021,18 @@ function previewSeatMapPrint() {
     });
     
     const disabledSeats = room.disabledSeats || [];
-    const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos);
+    const rowSeats = (room.customLayout && room.rowSeats) ? room.rowSeats : null;
+    const seatOrder = generateSeatOrder(room.rows, room.cols, room.direction, room.startPos, rowSeats);
     const seatNoMap = {};
     seatOrder.forEach((seat, idx) => {
         seatNoMap[`${seat.row}-${seat.col}`] = idx + 1;
     });
+    
+    const actualRows = room.customLayout && room.rowSeats ? room.rowSeats.length : room.rows;
+    function getRowSeatCount(r) {
+        if (room.customLayout && room.rowSeats && room.rowSeats[r] != null) return parseInt(room.rowSeats[r]) || 0;
+        return room.cols;
+    }
     
     let html = `<h2 style="text-align:center; margin-bottom:20px;">${room.roomName || '第' + roomNo + '考场'} 座位表</h2>`;
     html += `<p style="text-align:center; margin-bottom:15px; color:#666;">${appData.settings.examName}</p>`;
@@ -2832,9 +3043,10 @@ function previewSeatMapPrint() {
     }
     
     html += '<table style="margin:0 auto; border-collapse:separate; border-spacing:8px;">';
-    for (let r = 0; r < room.rows; r++) {
+    for (let r = 0; r < actualRows; r++) {
+        const rowCount = getRowSeatCount(r);
         html += '<tr>';
-        for (let c = 0; c < room.cols; c++) {
+        for (let c = 0; c < rowCount; c++) {
             const seatNo = seatNoMap[`${r}-${c}`];
             const student = seatMap[`${r}-${c}`];
             const isDisabled = disabledSeats.includes(seatNo);
@@ -2923,6 +3135,7 @@ function doExport() {
         roomNo: '考场号',
         seatNo: '座位号',
         classRank: '班级排名',
+        gradeRank: '全校排名',
         studentId: '学号',
         gender: '性别'
     };
@@ -2991,9 +3204,9 @@ function doExport() {
         
     } else if (type === 'studentsOnly') {
         // 仅考生名单
-        const data = [['姓名', '班级', '班级代码', '班级排名', '学号', '性别', '备注']];
+        const data = [['姓名', '班级', '班级代码', '班级排名', '全校排名', '学号', '性别', '备注']];
         appData.students.forEach(s => {
-            data.push([s.name, s.className, s.classCode, s.classRank, s.studentId, s.gender, s.remark]);
+            data.push([s.name, s.className, s.classCode, s.classRank, s.gradeRank, s.studentId, s.gender, s.remark]);
         });
         exportToExcel([{ name: '考生名单', data: data }], fileName + '_考生名单.' + format, format);
         
@@ -3004,7 +3217,7 @@ function doExport() {
             data.push([
                 r.roomNo, r.roomName, r.location, r.invigilator,
                 r.rows, r.cols, getDirectionText(r.direction),
-                getStartPosText(r.startPos), r.rows * r.cols
+                getStartPosText(r.startPos), calcRoomSeats(r)
             ]);
         });
         exportToExcel([{ name: '考场信息', data: data }], fileName + '_考场信息.' + format, format);
@@ -3184,6 +3397,7 @@ function normalizeImportedStudent(raw) {
         className: (raw.className || raw.classNo || '').toString().trim(),
         classCode: (raw.classCode || '').toString().trim() || deriveClassCode(raw.className || raw.classNo || ''),
         classRank: parseInt(raw.classRank) || 0,
+        gradeRank: parseInt(raw.gradeRank) || 0,
         gender: (raw.gender || '').toString().trim(),
         remark: (raw.remark || '').toString().trim()
     };
