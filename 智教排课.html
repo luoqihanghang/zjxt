@@ -984,7 +984,8 @@
                 };
             }
             // 获取教师课时型课程的已用课时数（排除次数型）
-            function getTeacherHourCount(teacherId) {
+            // className参数指定时，仅统计该班级的课时；未指定时统计所有班级总课时（保持向后兼容）
+            function getTeacherHourCount(teacherId, className) {
                 let count = 0;
                 const teacher = teachers.value.find(t => t.id == teacherId);
                 if (!teacher) return 0;
@@ -992,7 +993,13 @@
                     for (let p = 0; p < periods.value.length; p++)
                         for (let cls of classList.value)
                             if (timetableData.value[`${w}_${p}_${cls}`] == teacherId) {
-                                if (!isCountTypeSubject(teacher.subject)) count++;
+                                if (!isCountTypeSubject(teacher.subject)) {
+                                    if (className) {
+                                        if (cls === className) count++;
+                                    } else {
+                                        count++;
+                                    }
+                                }
                             }
                 return count;
             }
@@ -1221,7 +1228,7 @@
                     let candidates = teachers.value.filter(t => 
                         t.classes.includes(className) && 
                         !isCountTypeSubject(t.subject) &&
-                        getTeacherHourCount(t.id) < t.weeklyHours &&
+                        getTeacherHourCount(t.id, className) < t.weeklyHours &&
                         !isForbidden(t.id, weekIdx, periodIdx) &&
                         checkTeacherDailyLimit(t.id, weekIdx) &&
                         checkSubjectDailyLimit(className, weekIdx, t.subject) &&
@@ -1233,8 +1240,8 @@
                         let pa = priorityMap[a.subject] || 0;
                         let pb = priorityMap[b.subject] || 0;
                         if (pa !== pb) return pb - pa;
-                        let remainA = a.weeklyHours - getTeacherHourCount(a.id);
-                        let remainB = b.weeklyHours - getTeacherHourCount(b.id);
+                        let remainA = a.weeklyHours - getTeacherHourCount(a.id, className);
+                        let remainB = b.weeklyHours - getTeacherHourCount(b.id, className);
                         return remainA - remainB;
                     });
                     let selected = candidates[0];
@@ -1532,9 +1539,9 @@
                     if (!checkConsecutiveRule(tid, wIdx, pIdx, cls)) { alert("违反避免连上规则"); closeManualDialog(); return; }
                     if (!isSubjectPeriodAllowed(teacher.subject, pIdx)) { alert(`科目 ${teacher.subject} 不允许在第${periods.value[pIdx]?.name}上课`); closeManualDialog(); return; }
                     if (checkTeacherConflict(tid, wIdx, pIdx, cls)) { alert("教师同一时段冲突"); closeManualDialog(); return; }
-                    // 课时型科目才检查周课时上限
+                    // 课时型科目才检查周课时上限（按班级维度）
                     if (!isCountTypeSubject(teacher.subject)) {
-                        let curHour = getTeacherHourCount(tid);
+                        let curHour = getTeacherHourCount(tid, cls);
                         if (curHour >= teacher.weeklyHours && teacher.weeklyHours > 0 && !confirm(`课时已达周上限(${curHour}/${teacher.weeklyHours})，仍要继续？`)) { closeManualDialog(); return; }
                     } else {
                         // 次数型科目检查带班数上限
