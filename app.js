@@ -306,11 +306,6 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "排课管理", icon: "📅", items: [
-        { id: "schedule", icon: "📆", text: "智能排课系统" }
-      ]
-    },
-    {
       group: "考务管理", icon: "🏛️", items: [
         { id: "exam_arrangement", icon: "📋", text: "排考场系统" }
       ]
@@ -940,26 +935,6 @@ function renderAccountProfile() {
   };
 }
 
-// ========== 智能排课系统 ==========
-function renderSchedule() {
-  $("pageContent").innerHTML = `
-    <div class="card" style="padding:0;overflow:hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:linear-gradient(135deg,#3b82f6,#60a5fa);color:#fff">
-        <div>
-          <div style="font-size:18px;font-weight:600">📅 智能排课系统</div>
-          <div style="font-size:13px;opacity:0.9;margin-top:4px">教师名单自动从教务平台同步，支持规则设置、自动排课、手动调课</div>
-        </div>
-        <button class="btn btn-light" onclick="window.open('智教排课.html', '_blank')" style="background:#fff;color:#3b82f6;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
-          🚀 新窗口打开
-        </button>
-      </div>
-      <div style="padding:0">
-        <iframe src="智教排课.html" style="width:100%;height:calc(100vh - 220px);border:none;display:block"></iframe>
-      </div>
-    </div>
-  `;
-}
-
 // ========== 排考场系统 ==========
 function renderExamArrangement() {
   // 仅教务端可见
@@ -1431,7 +1406,6 @@ const PAGE_RENDERERS = {
   group_scores: renderGroupScores,
   custom_analysis: renderCustomAnalysis,
   account_profile: renderAccountProfile,
-  schedule: renderSchedule,
   exam_arrangement: renderExamArrangement
 };
 
@@ -1978,26 +1952,6 @@ const PAGE_HELPS = {
           </ol>
         </div>
         <div class="help-note">💡 提示：建议定期更换密码，不要使用过于简单的密码（如 123456）。</div>
-      </div>`
-  },
-  schedule: {
-    title: "智能排课系统",
-    html: `
-      <div class="help-modal-body">
-        <div class="help-section">
-          <h4>📋 功能说明</h4>
-          <p>内置智能排课系统，自动从教务平台同步教师名单，支持排课规则设置、自动排课、手动调课，并可在新窗口全屏使用。</p>
-        </div>
-        <div class="help-section">
-          <h4>🚀 使用方法</h4>
-          <ol>
-            <li>页面内嵌排课系统，可直接操作；或点击「🚀 新窗口打开」全屏使用。</li>
-            <li>教师名单自动从教务平台同步，无需重复录入。</li>
-            <li>设置排课规则（如不连续上课、不跨楼层等）。</li>
-            <li>点击「自动排课」生成课表，可手动调整。</li>
-          </ol>
-        </div>
-        <div class="help-note">💡 提示：排课前请先在「教师名单管理」中完善教师信息与任课安排。</div>
       </div>`
   },
   exam_arrangement: {
