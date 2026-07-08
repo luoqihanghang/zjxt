@@ -4973,7 +4973,7 @@ function getTeacherClassNos(user, grade) {
 
 function computeTeacherRanking(examId, grade) {
   const subjects = DB.subjects[grade] || [];
-  const allRecords = DB.records.filter((r) => r.examId === examId && r.grade === grade && r.status === "confirmed");
+  const allRecords = DB.records.filter((r) => r.examId === examId && r.grade === grade && (r.status === "confirmed" || r.status === "pending"));
   if (allRecords.length === 0) return { subjects: [], rows: [] };
   // 按归一化后的班级号分组（"7班"/"7"/"七班" 全部归并为 "7班"）
   const byClass = {};
@@ -7757,6 +7757,7 @@ function renderMyRanking() {
         <div class="tech-hero-title">
           <span class="tech-badge">🏅 我的教学专业排行</span>
           <h2>${esc(currentUser.name)} · 教学综合分析</h2>
+          <button class="btn btn-info" style="margin-left:auto;" onclick="refreshMyRanking()" title="重新拉取最新数据">🔄 刷新数据</button>
         </div>
         <div class="tech-hero-stats">
           <div class="tech-stat-card">
@@ -8156,6 +8157,41 @@ function generateMyRankingDiagnosis(g) {
 
   return suggestions;
 }
+
+// 刷新按钮：优先从云端仓库拉取最新数据，再重新渲染我的排行
+window.refreshMyRanking = async function () {
+  let refreshed = false;
+  // 1. 优先从云端仓库拉取
+  if (GitHubService.isConfigured()) {
+    try {
+      const remote = await GitHubService.loadRemoteDB();
+      if (remote && remote.users && remote.users.length > 0) {
+        // 更新全局 DB 对象
+        Object.assign(DB, remote);
+        // 同时更新本地缓存
+        localStorage.setItem(DB_KEY, JSON.stringify(remote));
+        refreshed = true;
+      }
+    } catch (e) {
+      console.log("[refreshMyRanking] 云端拉取失败:", e.message);
+    }
+  }
+  // 2. 若云端未配置或拉取失败，回退到本地缓存
+  if (!refreshed) {
+    try {
+      const raw = localStorage.getItem(DB_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.users) DB.users = parsed.users;
+        if (parsed.records) DB.records = parsed.records;
+        if (parsed.exams) DB.exams = parsed.exams;
+        if (parsed.subjects) DB.subjects = parsed.subjects;
+      }
+    } catch (_) {}
+  }
+  renderMyRanking();
+  showToast(refreshed ? "已从云端仓库刷新数据" : "已刷新排行数据", "success");
+};
 
 // ========== 任课教师：学科对比分析（独立页面） ==========
 let _taActiveSubject = null;

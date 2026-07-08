@@ -905,6 +905,7 @@ input:checked + .slider:before { transform: translateX(22px); }
                                 <option value="all">全部考生信息（总表）</option>
                                 <option value="byRoom">按考场分批导出</option>
                                 <option value="byClass">按班级分批导出</option>
+                                <option value="scoreSheet">登分表（按班级批量）</option>
                                 <option value="studentsOnly">仅考生名单</option>
                                 <option value="roomsOnly">仅考场信息</option>
                             </select>
@@ -3088,7 +3089,7 @@ function printSeatMap() {
 function updateExportOptions() {
     const type = document.getElementById('exportType').value;
     document.getElementById('exportRoomOptions').style.display = (type === 'byRoom') ? 'block' : 'none';
-    document.getElementById('exportClassOptions').style.display = (type === 'byClass') ? 'block' : 'none';
+    document.getElementById('exportClassOptions').style.display = (type === 'byClass' || type === 'scoreSheet') ? 'block' : 'none';
 }
 
 function updateExportCheckboxes() {
@@ -3186,7 +3187,7 @@ function doExport() {
             selectedClasses.push(cb.value);
         });
         if (selectedClasses.length === 0) { alert('请至少选择一个班级'); return; }
-        
+
         const sheets = [];
         selectedClasses.forEach(cls => {
             const classData = appData.arrangements.filter(a => a.className === cls)
@@ -3201,7 +3202,46 @@ function doExport() {
             sheets.push({ name: cls.replace(/[\\/?*\[\]:]/g, '_'), data: data });
         });
         exportToExcel(sheets, fileName + '_按班级.' + format, format);
-        
+
+    } else if (type === 'scoreSheet') {
+        // 登分表（按班级批量）
+        const selectedClasses = [];
+        document.querySelectorAll('.export-class:checked').forEach(cb => {
+            selectedClasses.push(cb.value);
+        });
+        if (selectedClasses.length === 0) { alert('请至少选择一个班级'); return; }
+
+        const sheets = [];
+        selectedClasses.forEach(cls => {
+            // 获取该班级的所有考生，按考场号、座位号排序
+            const classStudents = appData.arrangements.filter(a => a.className === cls)
+                .sort((a, b) => {
+                    if (a.roomNo !== b.roomNo) return a.roomNo.localeCompare(b.roomNo);
+                    return a.seatNo - b.seatNo;
+                });
+
+            const data = [];
+            // 标题行
+            data.push([appData.settings.schoolName || '学校', cls + ' 登分表']);
+            data.push([]);
+            // 表头
+            data.push(['序号', '考号（准考证号）', '姓名', '分数', '等第']);
+            // 数据行（分数和等第留空，供考试后填写）
+            classStudents.forEach((s, idx) => {
+                data.push([idx + 1, s.ticketNo || s.studentId || '', s.name, '', '']);
+            });
+            // 底部空行
+            data.push([]);
+            data.push([]);
+            // 统计信息行
+            data.push(['唱分人：', '', '登分人：', '', '']);
+            data.push(['平均分：', '', '及格率：', '', '']);
+            data.push(['优秀率：', '', '低分率：', '', '']);
+
+            sheets.push({ name: cls.replace(/[\\/?*\[\]:]/g, '_') + '_登分表', data: data });
+        });
+        exportToExcel(sheets, fileName + '_登分表.' + format, format);
+
     } else if (type === 'studentsOnly') {
         // 仅考生名单
         const data = [['姓名', '班级', '班级代码', '班级排名', '全校排名', '学号', '性别', '备注']];
