@@ -12,6 +12,32 @@ const fmtPct = (n) => (isFinite(n) ? (n * 100).toFixed(2) + "%" : "-");
 // HTML 转义，防止特殊字符破坏页面结构
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
+// 生成分页HTML
+function buildPagination(totalPages, currentPage, onchange, pageInfo = "") {
+  if (totalPages <= 1) return pageInfo ? `<div class="page-info">${pageInfo}</div>` : "";
+  let pages = [];
+  for (let i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+      pages.push(i);
+    } else if (pages[pages.length - 1] !== "...") {
+      pages.push("...");
+    }
+  }
+  return `
+    <div class="card-footer-pagination">
+      <div class="page-info">${pageInfo}</div>
+      <div class="pagination">
+        <button class="page-btn" ${currentPage === 1 ? "disabled" : ""} onclick="${onchange}(${currentPage - 1})">‹ 上一页</button>
+        ${pages.map((p) => p === "..."
+          ? `<span class="page-ellipsis">...</span>`
+          : `<button class="page-btn ${p === currentPage ? "active" : ""}" onclick="${onchange}(${p})">${p}</button>`
+        ).join("")}
+        <button class="page-btn" ${currentPage === totalPages ? "disabled" : ""} onclick="${onchange}(${currentPage + 1})">下一页 ›</button>
+      </div>
+    </div>
+  `;
+}
+
 // 根据用户角色过滤记录：学术用户可见所有记录，班主任可见本班所有记录，任课教师仅可见已确认记录
 const getVisibleRecords = (records) => {
   if (!currentUser || currentUser.role === "academic") return records;
@@ -329,7 +355,6 @@ const NAV_MENUS = {
     },
     {
       group: "我的成绩", icon: "📖", items: [
-        { id: "my_scores", icon: "📖", text: "我的班级成绩" },
         { id: "my_ranking", icon: "🏅", text: "我的排行信息" }
       ]
     },
@@ -341,8 +366,7 @@ const NAV_MENUS = {
     },
     {
       group: "小组与分析", icon: "👥", items: [
-        { id: "group_scores", icon: "👥", text: "小组成绩分析" },
-        { id: "custom_analysis", icon: "⚙️", text: "自定义分析" }
+        { id: "group_scores", icon: "👥", text: "小组成绩分析" }
       ]
     },
     {
@@ -2372,15 +2396,6 @@ function renderDashboard() {
 
     const teacherModules = `
       <div class="dashboard-modules">
-        <div class="module-card" onclick="navigate('my_scores')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">📖</div>
-          <div class="mc-content">
-            <div class="mc-title">查看班级成绩</div>
-            <div class="mc-desc">查看任教班级的成绩数据，按科目筛选学生成绩，分析得分情况</div>
-            <div class="mc-tags"><span class="mc-tag">成绩查看</span><span class="mc-tag">科目筛选</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
         <div class="module-card" onclick="navigate('my_ranking')">
           <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">🏆</div>
           <div class="mc-content">
@@ -7724,27 +7739,393 @@ function renderMyRanking() {
     $("pageContent").innerHTML = `<div class="card"><div class="empty-state"><div class="es-tip">暂无排行数据</div></div></div>`; return;
   }
 
-  let allRows = [];
+  // 收集所有考试的所有同学科数据，用于全局对比
+  const allExamData = [];
+  const subjectTeacherMap = {}; // 同学科所有教师成绩（用于标准化）
+
   exams.forEach((e) => {
     const { rows } = computeTeacherRanking(e.id, grade);
-    rows.forEach((r) => { r.examName = e.name; allRows.push(r); });
+    rows.forEach((r) => { r.examName = e.name; r.examId = e.id; allExamData.push(r); });
   });
-  const myRows = allRows.filter((r) => subjects.indexOf(r.subject) >= 0 && r.teacherId === currentUser.id);
 
-  $("pageContent").innerHTML = `
-    <div class="card"><div class="card-title">🏅 我的排行信息 - ${currentUser.name}</div>
-      <p style="color:var(--text-light); margin-bottom:14px;">任教科目：${subjects.join("、") || "暂无"}</p>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>考试</th><th>学科</th><th>班级</th><th>人数</th><th>均分</th><th>优秀率</th><th>及格率</th><th>综合分数</th><th>学科内名次</th></tr></thead>
-        <tbody>${myRows.map((r) => `<tr class="${r.rank === 1 ? "rank-top" : ""}">
-          <td>${r.examName}</td><td><b>${r.subject}</b></td><td>${r.classNo}</td>
-          <td>${r.total}</td><td>${fmt(r.avg)}</td>
-          <td>${fmtPct(r.excellentPct)}</td><td>${fmtPct(r.passPct)}</td>
-          <td><b>${fmt(r.compositeScore * 100, 2)}</b></td><td><b>${r.rank}</b></td>
-        </tr>`).join("") || `<tr><td colspan="9"><div class="empty-state"><div class="es-tip">暂无我的排行数据，等待教务老师推送</div></div></td></tr>`}</tbody>
-      </table></div>
+  // 我的数据
+  const myRows = allExamData.filter((r) => subjects.indexOf(r.subject) >= 0 && r.teacherId === currentUser.id);
+
+  // 我的执教汇总
+  const myClassNos = [...new Set(myRows.map((r) => r.classNo))];
+  const mySubjectSet = [...new Set(myRows.map((r) => r.subject))];
+  const totalStudents = myRows.reduce((a, b) => a + (b.total || 0), 0);
+  const myAvg = myRows.length > 0 ? myRows.reduce((a, b) => a + b.avg, 0) / myRows.length : 0;
+  const rank1Count = myRows.filter((r) => r.rank === 1).length;
+  const top3Count = myRows.filter((r) => r.rank <= 3).length;
+
+  // 顶部 Hero 区域
+  const heroHTML = `
+    <div class="tech-hero-section">
+      <div class="tech-hero-bg"></div>
+      <div class="tech-hero-content">
+        <div class="tech-hero-title">
+          <span class="tech-badge">🏅 我的教学专业排行</span>
+          <h2>${esc(currentUser.name)} · 教学综合分析</h2>
+        </div>
+        <div class="tech-hero-stats">
+          <div class="tech-stat-card">
+            <div class="tech-stat-icon">📚</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${mySubjectSet.length}</div>
+              <div class="tech-stat-label">任教学科</div>
+            </div>
+          </div>
+          <div class="tech-stat-card">
+            <div class="tech-stat-icon">🏫</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${myClassNos.length}</div>
+              <div class="tech-stat-label">任教班级</div>
+            </div>
+          </div>
+          <div class="tech-stat-card">
+            <div class="tech-stat-icon">📈</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${fmt(myAvg, 1)}</div>
+              <div class="tech-stat-label">整体均分</div>
+            </div>
+          </div>
+          <div class="tech-stat-card ${rank1Count > 0 ? 'highlight' : ''}">
+            <div class="tech-stat-icon">🥇</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${rank1Count} / ${top3Count}</div>
+              <div class="tech-stat-label">第1名 / 前3名</div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   `;
+
+  if (myRows.length === 0) {
+    $("pageContent").innerHTML = heroHTML + `<div class="card"><div class="empty-state"><div class="es-tip">暂无我的排行数据，等待教务老师推送</div></div></div>`;
+    return;
+  }
+
+  // 按考试+学科分组，每组做一次专业分析
+  const groupKey = (r) => `${r.examId}_${r.subject}`;
+  const groups = {};
+  myRows.forEach((r) => {
+    const k = groupKey(r);
+    if (!groups[k]) groups[k] = { examId: r.examId, examName: r.examName, subject: r.subject, myRow: null, peers: [] };
+    if (r.teacherId === currentUser.id) groups[k].myRow = r;
+  });
+  // 填充同学科的所有教师
+  mySubjectSet.forEach((subj) => {
+    exams.forEach((e) => {
+      const k = `${e.id}_${subj}`;
+      if (!groups[k]) return;
+      const peerRows = allExamData.filter((r) => r.examId === e.id && r.subject === subj);
+      groups[k].peers = peerRows;
+    });
+  });
+
+  // 计算每组的科学指标
+  const groupStats = Object.values(groups).map((g) => {
+    if (!g.myRow) return null;
+    const peers = g.peers.filter((p) => p.teacherId); // 排除未分配教师的行
+    const peerScores = peers.map((p) => p.avg);
+    const peerAvg = peerScores.length > 0 ? peerScores.reduce((a, b) => a + b, 0) / peerScores.length : 0;
+    const peerStd = peerScores.length > 1 ? mathStdDev(peerScores) : 0;
+    // Z-Score 标准化得分
+    const zScore = peerStd > 0 ? (g.myRow.avg - peerAvg) / peerStd : 0;
+    // 百分位（PR值）：在同学科中的相对位置
+    const betterCount = peers.filter((p) => p.avg < g.myRow.avg).length;
+    const prValue = peers.length > 1 ? (betterCount / (peers.length - 1)) * 100 : 100;
+    // 教学效益值（Effect Size）：与平均分差距的效应量
+    const effectSize = peerStd > 0 ? (g.myRow.avg - peerAvg) / peerStd : 0;
+    // 离散系数 CV = std/avg
+    const cv = g.myRow.avg > 0 ? (g.myRow.std || 0) / g.myRow.avg : 0;
+
+    return {
+      ...g,
+      peerAvg, peerStd, peerCount: peers.length,
+      zScore, prValue, effectSize, cv
+    };
+  }).filter(Boolean);
+
+  // 按考试倒序、学科顺序排列
+  groupStats.sort((a, b) => {
+    if (a.examId !== b.examId) return exams.findIndex((e) => e.id === b.examId) - exams.findIndex((e) => e.id === a.examId);
+    return a.subject.localeCompare(b.subject);
+  });
+
+  let html = heroHTML;
+
+  groupStats.forEach((g, idx) => {
+    const zScore = g.zScore;
+    const zColor = zScore >= 1 ? "#10b981" : zScore >= 0 ? "#06b6d4" : zScore >= -1 ? "#f59e0b" : "#ef4444";
+    const zLabel = zScore >= 1 ? "🌟 显著领先" : zScore >= 0 ? "📊 略高于平均" : zScore >= -1 ? "📉 略低于平均" : "⚠️ 显著落后";
+    const radarId = `my_radar_${g.examId}_${g.subject}_${idx}`;
+    const compareId = `my_compare_${g.examId}_${g.subject}_${idx}`;
+    const distId = `my_dist_${g.examId}_${g.subject}_${idx}`;
+
+    // 同伴排名表
+    const peerRowsHTML = g.peers
+      .filter((p) => p.teacherId)
+      .sort((a, b) => b.avg - a.avg)
+      .map((p, i) => {
+        const isMine = p.teacherId === currentUser.id;
+        return `<tr class="${isMine ? 'my-row-highlight' : ''}">
+          <td>${isMine ? '<span class="me-tag">我</span>' : i + 1}</td>
+          <td><b>${esc(p.teacherName)}</b>${isMine ? ' ✨' : ''}</td>
+          <td>${esc(p.classNo)}</td>
+          <td>${p.total}</td>
+          <td class="${isMine ? 'score-main' : ''}"><b>${fmt(p.avg, 1)}</b></td>
+          <td>${fmtPct(p.excellentPct)}</td>
+          <td>${fmtPct(p.passPct)}</td>
+          <td>${fmtPct(p.lowPct)}</td>
+          <td>${fmt(p.compositeScore * 100, 1)}</td>
+        </tr>`;
+      }).join("");
+
+    html += `
+      <div class="tech-section">
+        <div class="tech-section-header">
+          <h3><span class="tech-dot"></span>📊 ${esc(g.examName)} · ${esc(g.subject)}</h3>
+          <div class="tech-section-sub">
+            同学科 ${g.peerCount} 位教师参与对比 · 我的学科内排名：<b>第 ${g.myRow.rank} 名</b> · 班级：${esc(g.myRow.classNo)}
+          </div>
+        </div>
+
+        <div class="tech-stats-mini">
+          <div class="tsm-item" style="--accent:${zColor}">
+            <div class="tsm-label">Z-Score 标准化分</div>
+            <div class="tsm-value">${zScore >= 0 ? '+' : ''}${fmt(zScore, 2)} σ</div>
+            <div class="tsm-tag">${zLabel}</div>
+          </div>
+          <div class="tsm-item" style="--accent:#6366f1">
+            <div class="tsm-label">PR 百分位值</div>
+            <div class="tsm-value">${fmt(g.prValue, 0)}%</div>
+            <div class="tsm-tag">高于 ${fmt(g.prValue, 0)}% 同科教师</div>
+          </div>
+          <div class="tsm-item" style="--accent:#8b5cf6">
+            <div class="tsm-label">同科均分对比</div>
+            <div class="tsm-value">${fmt(g.myRow.avg - g.peerAvg, 1)}</div>
+            <div class="tsm-tag">${g.myRow.avg >= g.peerAvg ? '↑ 高于' : '↓ 低于'} 同科均值 ${fmt(g.peerAvg, 1)}</div>
+          </div>
+          <div class="tsm-item" style="--accent:#06b6d4">
+            <div class="tsm-label">综合得分</div>
+            <div class="tsm-value">${fmt(g.myRow.compositeScore * 100, 1)}</div>
+            <div class="tsm-tag">权重：均分40%+优秀30%+及格30%</div>
+          </div>
+        </div>
+
+        <div class="tech-chart-row" style="margin-top:18px">
+          <div class="tech-chart-box tech-chart-main">
+            <div class="tech-sub-title">🎯 同学科教师能力对比</div>
+            <canvas id="${compareId}" style="height:280px"></canvas>
+          </div>
+          <div class="tech-chart-side">
+            <div class="tech-chart-box" style="height:320px">
+              <div class="tech-sub-title">📡 我的多维能力雷达</div>
+              <canvas id="${radarId}" style="height:240px"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="tech-sub-title" style="margin-top:18px;margin-bottom:8px">🏅 同学科教师详细排名</div>
+        <div class="tech-table-wrap">
+          <table class="tech-table">
+            <thead><tr>
+              <th>排名</th><th>教师</th><th>班级</th><th>人数</th>
+              <th>均分</th><th>优秀率</th><th>及格率</th><th>低分率</th><th>综合分</th>
+            </tr></thead>
+            <tbody>${peerRowsHTML}</tbody>
+          </table>
+        </div>
+
+        <div class="tech-suggestions-section" style="margin-top:18px">
+          <div class="tech-suggest-title">💡 科学教学诊断</div>
+          <div class="tech-suggestions-grid">
+            ${generateMyRankingDiagnosis(g).map((s, i) => {
+              const colors = ["#6366f1", "#10b981", "#f59e0b", "#06b6d4"];
+              return `<div class="tech-suggest-card" style="--accent-color: ${colors[i % colors.length]}">
+                <div class="suggest-card-header">
+                  <div class="suggest-group-name">${s.title}</div>
+                </div>
+                <div class="suggest-card-body">
+                  <div class="suggest-item"><div class="suggest-text">${s.text}</div></div>
+                </div>
+              </div>`;
+            }).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 渲染图表：同学科对比柱状图
+    setTimeout(() => {
+      const peerLabels = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg).map((p) => p.teacherId === currentUser.id ? `${p.teacherName} ⭐` : p.teacherName);
+      const peerAvgs = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg).map((p) => p.avg);
+      const peerColors = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg).map((p) => p.teacherId === currentUser.id ? "#ef4444" : "#6366f1");
+      const compareCanvas = document.getElementById(compareId);
+      if (compareCanvas) {
+        if (compareCanvas._chart) compareCanvas._chart.destroy();
+        compareCanvas._chart = new Chart(compareCanvas, {
+          type: "bar",
+          data: {
+            labels: peerLabels,
+            datasets: [{
+              label: `${g.subject}平均分`,
+              data: peerAvgs,
+              backgroundColor: peerColors.map((c) => c + "88"),
+              borderColor: peerColors,
+              borderWidth: 2,
+              borderRadius: 6
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  afterLabel: (ctx) => {
+                    const sortedPeers = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg);
+                    const p = sortedPeers[ctx.dataIndex];
+                    if (!p) return "";
+                    return `班级：${p.classNo}\n综合分：${fmt(p.compositeScore * 100, 1)}\n优秀率：${fmtPct(p.excellentPct)}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              y: {
+                beginAtZero: false,
+                title: { display: true, text: "平均分" }
+              }
+            }
+          }
+        });
+      }
+
+      // 雷达图：我的多维能力评估
+      const radarCanvas = document.getElementById(radarId);
+      if (radarCanvas) {
+        if (radarCanvas._chart) radarCanvas._chart.destroy();
+        const peerAvgOfPct = g.peers.length > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.excellentPct, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0;
+        const peerPassPct = g.peers.length > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.passPct, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0;
+        const peerLowPct = g.peers.length > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.lowPct, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0;
+        const myExPct = g.myRow.excellentPct * 100;
+        const myPassPct = g.myRow.passPct * 100;
+        const myLowPct = g.myRow.lowPct * 100;
+        const normMyAvg = (g.myRow.avg / 100) * 100;
+        const normPeerAvg = g.peerAvg;
+
+        radarCanvas._chart = new Chart(radarCanvas, {
+          type: "radar",
+          data: {
+            labels: ["均分水平", "优秀率", "及格率", "低分率(越低越好)", "综合得分"],
+            datasets: [
+              {
+                label: "我",
+                data: [normMyAvg, myExPct, myPassPct, 100 - myLowPct, g.myRow.compositeScore * 100],
+                backgroundColor: "rgba(99, 102, 241, 0.25)",
+                borderColor: "#6366f1",
+                borderWidth: 2.5,
+                pointBackgroundColor: "#6366f1",
+                pointBorderColor: "#fff",
+                pointRadius: 4
+              },
+              {
+                label: "同学科平均",
+                data: [normPeerAvg, peerAvgOfPct, peerPassPct, 100 - peerLowPct, g.peerCount > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.compositeScore, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0],
+                backgroundColor: "rgba(239, 68, 68, 0.1)",
+                borderColor: "#ef4444",
+                borderWidth: 2,
+                borderDash: [5, 5],
+                pointBackgroundColor: "#ef4444",
+                pointRadius: 3
+              }
+            ]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: { legend: { position: "bottom", labels: { font: { size: 11 } } } },
+            scales: {
+              r: {
+                beginAtZero: true,
+                max: 100,
+                ticks: { stepSize: 20, font: { size: 10 } },
+                pointLabels: { font: { size: 11 } }
+              }
+            }
+          }
+        });
+      }
+    }, 50 * (idx + 1));
+  });
+
+  $("pageContent").innerHTML = html;
+}
+
+// 基于科学指标生成教学诊断建议
+function generateMyRankingDiagnosis(g) {
+  const suggestions = [];
+  const z = g.zScore;
+  const pr = g.prValue;
+
+  // Z-Score 分析（科学定位）
+  if (z >= 1.5) {
+    suggestions.push({
+      title: "🌟 显著领先分析",
+      text: `Z-Score = ${fmt(z, 2)}σ（统计学中|Z|≥1.5属显著水平），${g.subject}教学效果在同学科中处于第一梯队。建议：①提炼教学方法论形成"教学范式"；②承担教研示范课、师徒结对；③将成功经验申报教学成果奖。`
+    });
+  } else if (z >= 0.5) {
+    suggestions.push({
+      title: "📈 中上水平分析",
+      text: `Z-Score = ${fmt(z, 2)}σ，PR百分位 = ${fmt(pr, 0)}%，${g.subject}教学效果优于大多数同科教师。建议：①对标头部1-2名教师，深挖差距环节；②聚焦"中等生提升"策略，进一步提升整体水平；③开展分层教学实验。`
+    });
+  } else if (z >= -0.5) {
+    suggestions.push({
+      title: "📊 中等水平分析",
+      text: `Z-Score = ${fmt(z, 2)}σ，教学效果处于同学科中等水平。建议：①全面诊断教与学薄弱点；②借鉴头部教师的"分层作业+错题本+课堂提问"等方法；③每周教研时重点研讨2-3个高频失分点。`
+    });
+  } else {
+    suggestions.push({
+      title: "⚠️ 待提升分析",
+      text: `Z-Score = ${fmt(z, 2)}σ，${g.subject}教学效果与同学科平均水平有显著差距。建议：①主动向同科优秀教师请教，加入教学研讨小组；②全面分析班级学情，从基础抓起；③及时与班主任沟通学生状况，必要时调整教学节奏。`
+    });
+  }
+
+  // 优秀率与及格率分析
+  if (g.myRow.passPct < 0.85) {
+    suggestions.push({
+      title: "🚨 及格率分析",
+      text: `本次${g.subject}及格率仅 ${fmtPct(g.myRow.passPct)}，低于年级基准 85%。建议：①识别"临界生"（50-59分）重点帮扶；②建立"每日一题"训练机制；③开展家校沟通督促学生课后学习。`
+    });
+  } else if (g.myRow.excellentPct < 0.2) {
+    suggestions.push({
+      title: "📉 拔尖不足分析",
+      text: `本次${g.subject}优秀率 ${fmtPct(g.myRow.excellentPct)}，高分段学生偏少。建议：①增加学科思维拓展内容；②组织学科竞赛小组；③提供课外阅读与探究任务。`
+    });
+  } else {
+    suggestions.push({
+      title: "✅ 优势项分析",
+      text: `${g.subject}及格率 ${fmtPct(g.myRow.passPct)}、优秀率 ${fmtPct(g.myRow.excellentPct)}，整体质量较好。建议：继续保持当前教学节奏，并适当引入拔高性内容，形成"保基础、促拔尖"的双轨教学。`
+    });
+  }
+
+  // 学科间均衡度分析
+  if (g.cv > 0.2) {
+    suggestions.push({
+      title: "📊 班级内部分化",
+      text: `班级内成绩离散系数 CV=${fmt(g.cv, 2)}，${g.subject}班级内部分化明显。建议：①实施"组内异质、组间同质"分组合作学习；②对后进生进行一对一辅导；③设置分层作业（基础+提升+拓展）。`
+    });
+  } else {
+    suggestions.push({
+      title: "🎯 整体均衡",
+      text: `班级内成绩离散系数 CV=${fmt(g.cv, 2)}，整体水平较为均衡。建议：①开展小组合作探究式学习；②引入项目式学习提升综合能力；③培养"小老师"带动共同进步。`
+    });
+  }
+
+  return suggestions;
 }
 
 // ========== 任课教师：学科对比分析（独立页面） ==========
@@ -9313,28 +9694,60 @@ window.downloadExamCompare = function () {
 // ========== 班主任：学习小组管理 ==========
 function renderGroupManage() {
   const grade = currentUser.grade;
-  const classNo = currentUser.classNo;
+  const myClassNo = currentUser.classNo;
   const exams = getSortedExams(grade);
   const subjects = DB.subjects[grade] || [];
+  const showStudentId = hasRoster(grade);
 
-  // 获取本班小组数据
   if (!DB.groups) DB.groups = {};
   if (!DB.groups[grade]) DB.groups[grade] = {};
-  if (!DB.groups[grade][classNo]) DB.groups[grade][classNo] = [];
 
-  const groups = DB.groups[grade][classNo] || [];
+  const allClassGroups = DB.groups[grade] || {};
+  const classesFromRecords = [...new Set(DB.records.filter((r) => r.grade === grade).map((r) => r.classNo))];
+  const allClasses = [...new Set([myClassNo, ...Object.keys(allClassGroups), ...classesFromRecords])].sort();
+  const viewClassNo = window._htViewClass || myClassNo;
+  const isMyClass = classNoEquals(viewClassNo, myClassNo);
 
-  // 下载模板按钮
+  if (!DB.groups[grade][viewClassNo]) DB.groups[grade][viewClassNo] = [];
+
+  const classNo = viewClassNo;
+  const groups = DB.groups[grade][viewClassNo] || [];
+
+  const groupMap = {};
+  groups.forEach((g) => {
+    if (!groupMap[g.groupName]) groupMap[g.groupName] = [];
+    groupMap[g.groupName].push(g);
+  });
+  const groupNames = Object.keys(groupMap).sort();
+
+  const getClassStudents = () => {
+    const roster = DB.studentRoster && DB.studentRoster[grade] && DB.studentRoster[grade][classNo];
+    if (roster && roster.length > 0) {
+      return roster.map((s) => ({ studentId: s.studentId || "", studentName: s.studentName }));
+    }
+    const latestExam = exams[0];
+    if (latestExam) {
+      const recs = DB.records.filter((r) => r.examId === latestExam.id && classNoEquals(r.classNo, classNo));
+      const seen = {};
+      return recs.filter((r) => { if (seen[r.studentName]) return false; seen[r.studentName] = true; return true; })
+        .map((r) => ({ studentId: r.studentId || "", studentName: r.studentName }));
+    }
+    return [];
+  };
+
+  const classStudents = getClassStudents();
+  const assignedNames = new Set(groups.map((g) => g.studentName));
+  const unassignedStudents = classStudents.filter((s) => !assignedNames.has(s.studentName));
+
   const downloadTemplate = () => {
-    const data = [["学号", "姓名", "小组名称"], ["001", "张三", "第一组"], ["002", "李四", "第一组"], ["003", "王五", "第二组"]];
+    const data = [["姓名", "小组名称", "是否组长"], ["张三", "第一组", "是"], ["李四", "第一组", "否"], ["王五", "第二组", "是"]];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), "小组名单");
     XLSX.writeFile(wb, "小组名单模板.xlsx");
     showToast("模板已下载", "success");
   };
 
-  // 上传小组名单
-  const handleUpload = (input) => {
+  const handleBatchUpload = (input) => {
     const file = input.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -9346,50 +9759,182 @@ function renderGroupManage() {
         const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
         if (rows.length < 2) { showToast("文件内容为空", "error"); return; }
         const header = rows[0].map((h) => String(h).trim());
-        const idxId = header.findIndex((h) => h.includes("学号"));
         const idxName = header.findIndex((h) => h.includes("姓名"));
         const idxGroup = header.findIndex((h) => h.includes("小组"));
-        if (idxId < 0 || idxName < 0 || idxGroup < 0) { showToast("表头必须包含：学号、姓名、小组名称", "error"); return; }
+        const idxLeader = header.findIndex((h) => h.includes("组长"));
+        if (idxName < 0 || idxGroup < 0) { showToast("表头必须包含：姓名、小组名称", "error"); return; }
 
         const newGroups = [];
         for (let i = 1; i < rows.length; i++) {
           const row = rows[i];
-          if (!row[idxId] || !row[idxName] || !row[idxGroup]) continue;
-          newGroups.push({ studentId: String(row[idxId]).trim(), studentName: String(row[idxName]).trim(), groupName: String(row[idxGroup]).trim() });
+          if (!row[idxName] || !row[idxGroup]) continue;
+          const studentName = String(row[idxName]).trim();
+          const groupName = String(row[idxGroup]).trim();
+          const isLeader = idxLeader >= 0 && row[idxLeader] && String(row[idxLeader]).trim() === "是";
+          const studentId = getStudentIdFromRoster(grade, classNo, studentName) || "";
+          const existing = newGroups.find((g) => g.studentName === studentName);
+          if (!existing) {
+            newGroups.push({ studentId, studentName, groupName, isLeader: isLeader || false });
+          }
         }
 
         if (newGroups.length === 0) { showToast("没有有效数据", "error"); return; }
-        DB.groups[grade][classNo] = newGroups;
+
+        const mode = confirm("点击【确定】追加到现有小组，点击【取消】替换全部小组数据");
+        if (mode) {
+          const existingNames = new Set(groups.map((g) => g.studentName));
+          const toAdd = newGroups.filter((g) => !existingNames.has(g.studentName));
+          DB.groups[grade][classNo] = [...groups, ...toAdd];
+          showToast(`成功追加 ${toAdd.length} 名学生`, "success");
+        } else {
+          DB.groups[grade][classNo] = newGroups;
+          showToast(`成功导入 ${newGroups.length} 名学生`, "success");
+        }
         saveDB();
-        showToast(`成功导入 ${newGroups.length} 名学生`, "success");
         renderGroupManage();
       } catch (err) { showToast("文件解析失败", "error"); }
     };
     reader.readAsArrayBuffer(file);
+    input.value = "";
   };
 
-  // 考试选择
   const examOptions = exams.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("");
 
-  // 渲染小组列表
-  const groupListHTML = groups.length > 0 ? `
-    <div class="card"><div class="card-title"><span>📋 小组名单（${groups.length}人）</span>
-      <button class="btn btn-sm btn-danger" onclick="clearAllGroups()">清空全部</button>
-    </div>
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th><th>小组</th><th>操作</th></tr></thead>
-      <tbody>${groups.map((g, i) => {
-        const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
-        return `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td>
-        <td><button class="btn btn-sm btn-danger" onclick="deleteGroupMember(${i})">删除</button></td></tr>`;
-      }).join("")}</tbody></table></div></div>
-    <div class="card"><div class="card-title">📊 小组统计</div>
-    ${renderGroupStats(groups)}
-    </div>` : "";
+  const pageSize = 6;
+  const totalPages = Math.max(1, Math.ceil(groupNames.length / pageSize));
+  const currentPage = Math.min(Math.max(1, window._gmPage || 1), totalPages);
+  const startIdx = (currentPage - 1) * pageSize;
+  const endIdx = Math.min(startIdx + pageSize, groupNames.length);
+  const pagedGroupNames = groupNames.slice(startIdx, endIdx);
 
-  // 小组成绩分析区域
+  const buildPagination = (prefix, totalPages, currentPage, onchange) => {
+    if (totalPages <= 1) return "";
+    let pages = [];
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+        pages.push(i);
+      } else if (pages[pages.length - 1] !== "...") {
+        pages.push("...");
+      }
+    }
+    return `
+      <div class="pagination">
+        <button class="page-btn" ${currentPage === 1 ? "disabled" : ""} onclick="${onchange}(${currentPage - 1})">‹ 上一页</button>
+        ${pages.map((p) => p === "..."
+          ? `<span class="page-ellipsis">...</span>`
+          : `<button class="page-btn ${p === currentPage ? "active" : ""}" onclick="${onchange}(${p})">${p}</button>`
+        ).join("")}
+        <button class="page-btn" ${currentPage === totalPages ? "disabled" : ""} onclick="${onchange}(${currentPage + 1})">下一页 ›</button>
+      </div>
+    `;
+  };
+
+  const cardActions = isMyClass ? `
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm btn-primary" onclick="openCreateGroupModal()">➕ 新建小组</button>
+        <button class="btn btn-sm btn-danger" onclick="clearAllGroups()">清空全部</button>
+      </div>
+  ` : "";
+
+  const memberActions = (gn, mi) => isMyClass
+    ? `<button class="member-remove" onclick="removeMemberFromGroup('${esc(gn)}', ${mi})" title="移除">×</button>`
+    : "";
+
+  const addChip = (gn) => isMyClass
+    ? `<div class="group-member-chip add-chip" onclick="openAddMemberModal('${esc(gn)}')">
+        <span class="member-avatar">+</span>
+        <span class="member-name">添加</span>
+      </div>`
+    : "";
+
+  const groupHeaderActions = (gn) => isMyClass ? `
+              <div class="group-card-actions">
+                <button class="btn-icon" onclick="openAddMemberModal('${esc(gn)}')" title="添加组员">➕</button>
+                <button class="btn-icon" onclick="renameGroup('${esc(gn)}')" title="重命名">✏️</button>
+                <button class="btn-icon btn-icon-danger" onclick="deleteGroup('${esc(gn)}')" title="删除小组">🗑️</button>
+              </div>
+  ` : "";
+
+  const footerActions = (gn) => isMyClass
+    ? `<button class="btn btn-sm btn-outline" onclick="openSetLeaderModal('${esc(gn)}')">设置组长</button>`
+    : "";
+
+  const groupCardsHTML = groupNames.length > 0 ? `
+    <div class="card group-manage-card">
+      <div class="card-title">
+        <span>👥 小组列表（${groupNames.length}个小组 · ${groups.length}人）</span>
+        ${cardActions}
+      </div>
+      <div class="card-scroll-body">
+        <div class="group-cards-grid">
+          ${pagedGroupNames.map((gn, idx) => {
+            const realIdx = startIdx + idx;
+            const members = groupMap[gn];
+            const leader = members.find((m) => m.isLeader);
+            const colorIdx = realIdx % 8;
+            return `
+              <div class="group-card" style="--group-color: var(--group-color-${colorIdx + 1})">
+                <div class="group-card-header">
+                  <div class="group-card-title">${esc(gn)}</div>
+                  ${groupHeaderActions(gn)}
+                </div>
+                <div class="group-card-body">
+                  <div class="group-card-stat">
+                    <span class="stat-num">${members.length}</span>
+                    <span class="stat-label">组员</span>
+                  </div>
+                  <div class="group-card-stat">
+                    <span class="stat-num">${leader ? "1" : "0"}</span>
+                    <span class="stat-label">组长</span>
+                  </div>
+                </div>
+                <div class="group-card-members">
+                  ${members.map((m, mi) => `
+                    <div class="group-member-chip ${m.isLeader ? 'is-leader' : ''}" title="${m.isLeader ? '组长' : '组员'}">
+                      <span class="member-avatar">${esc(m.studentName.charAt(0))}</span>
+                      <span class="member-name">${esc(m.studentName)}</span>
+                      ${m.isLeader ? '<span class="leader-badge">组长</span>' : ''}
+                      ${memberActions(gn, mi)}
+                    </div>
+                  `).join("")}
+                  ${addChip(gn)}
+                </div>
+                ${!leader ? `<div class="group-card-footer"><span style="color:#d97706;font-size:12px">⚠️ 未设置组长</span>
+                  ${footerActions(gn)}
+                </div>` : ''}
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+      <div class="card-footer-pagination">
+        <div class="page-info">第 ${startIdx + 1}-${endIdx} 个 / 共 ${groupNames.length} 个小组</div>
+        ${buildPagination("gm", totalPages, currentPage, "changeGroupPage")}
+      </div>
+    </div>
+  ` : "";
+
+  window.changeGroupPage = (page) => {
+    window._gmPage = page;
+    renderGroupManage();
+  };
+
+  const unassignedHTML = unassignedStudents.length > 0 ? `
+    <div class="card"><div class="card-title">📋 未分组学生（${unassignedStudents.length}人）</div>
+      <div class="unassigned-list">
+        ${unassignedStudents.map((s, i) => `
+          <div class="unassigned-item">
+            <span class="member-avatar">${esc(s.studentName.charAt(0))}</span>
+            <span>${esc(s.studentName)}</span>
+            <button class="btn btn-sm btn-primary" onclick="openQuickAssignModal('${esc(s.studentName)}')">分配小组</button>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  ` : "";
+
   const scoreHTML = exams.length > 0 && groups.length > 0 ? `
-    <div class="card"><div class="card-title">📈 小组成绩分析</div>
+    <div class="card tech-card"><div class="card-title">📈 小组成绩分析</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
         <label>选择考试：</label>
         <select id="htg_exam" class="form-control" style="width:200px">${examOptions}</select>
@@ -9399,42 +9944,393 @@ function renderGroupManage() {
       <div id="htg_result"></div>
     </div>` : "";
 
+  const classOptions = allClasses.map((c) => `
+    <option value="${esc(c)}" ${classNoEquals(c, viewClassNo) ? "selected" : ""}>${esc(c)}${classNoEquals(c, myClassNo) ? "（我的班级）" : ""}</option>
+  `).join("");
+
+  const manageButtons = isMyClass ? `
+        <div class="gm-action-group">
+          <button class="btn btn-primary" onclick="downloadGroupTemplate()">📥 下载模板</button>
+          <label class="btn btn-success" style="cursor:pointer">📤 批量导入
+            <input type="file" accept=".xlsx,.xls" style="display:none" onchange="handleGroupBatchUpload(this)"/>
+          </label>
+        </div>
+        <div class="gm-action-group">
+          <button class="btn btn-info" onclick="openCreateGroupModal()">➕ 新建小组</button>
+          <button class="btn btn-secondary" onclick="openQuickAddModal()">👤 单个添加学生</button>
+        </div>
+  ` : `
+        <div class="gm-action-group">
+          <span style="color:var(--text-muted);font-size:13px">
+            <span class="badge badge-warning">只读模式</span> 查看其他班级小组数据，不可编辑
+          </span>
+        </div>
+  `;
+
+  const emptyTip = isMyClass
+    ? '可通过"批量导入"或"单个添加"创建学习小组'
+    : "该班级暂无学习小组数据";
+
   $("pageContent").innerHTML = `
-    <div class="card"><div class="card-title">👥 学习小组管理</div>
-      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px">
-        <button class="btn btn-primary" onclick="downloadGroupTemplate()">📥 下载模板</button>
-        <label class="btn btn-success" style="cursor:pointer">📤 上传小组名单 <input type="file" accept=".xlsx,.xls" style="display:none" onchange="handleGroupUpload(this)"/></label>
+    <div class="card"><div class="card-title">
+      <span>👥 学习小组管理</span>
+      <div style="display:flex;gap:12px;align-items:center">
+        <label style="font-size:13px;color:var(--text-secondary);font-weight:normal">查看班级：</label>
+        <select id="ht_view_class" class="form-control" style="width:180px">${classOptions}</select>
       </div>
     </div>
-    ${groups.length > 0 ? groupListHTML : `<div class="card"><div class="empty-state"><div class="es-icon">👥</div><div class="es-title">暂无小组数据</div><div class="es-tip">请下载模板填写后上传</div></div></div>`}
+      <div class="gm-actions">
+        ${manageButtons}
+      </div>
+      <div class="gm-stats">
+        <div class="gm-stat-item"><div class="gm-stat-num">${groupNames.length}</div><div class="gm-stat-label">小组数量</div></div>
+        <div class="gm-stat-item"><div class="gm-stat-num">${groups.length}</div><div class="gm-stat-label">已分组人数</div></div>
+        <div class="gm-stat-item"><div class="gm-stat-num">${unassignedStudents.length}</div><div class="gm-stat-label">未分组人数</div></div>
+        <div class="gm-stat-item"><div class="gm-stat-num">${groups.filter(g => g.isLeader).length}</div><div class="gm-stat-label">组长数量</div></div>
+      </div>
+    </div>
+    ${groupCardsHTML}
+    ${isMyClass ? unassignedHTML : ""}
+    ${groups.length === 0 ? `<div class="card"><div class="empty-state"><div class="es-icon">👥</div><div class="es-title">暂无小组数据</div><div class="es-tip">${emptyTip}</div></div></div>` : ""}
     ${scoreHTML}
   `;
 
-  // 绑定函数到全局
+  const classSel = $("ht_view_class");
+  if (classSel) {
+    classSel.addEventListener("change", (e) => {
+      window._htViewClass = e.target.value;
+      renderGroupManage();
+    });
+  }
+
   window.downloadGroupTemplate = downloadTemplate;
-  window.handleGroupUpload = handleUpload;
-  window.deleteGroupMember = (idx) => {
-    DB.groups[grade][classNo].splice(idx, 1);
+  window.handleGroupBatchUpload = handleBatchUpload;
+
+  window.openCreateGroupModal = () => {
+    showModal("➕ 新建小组", `
+      <div class="form-group">
+        <label>小组名称</label>
+        <input type="text" id="new_group_name" placeholder="如：第一组、奋进组" />
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="auto_assign_leader" checked /> 自动选择一名组长
+        </label>
+      </div>
+    `, "创建", () => {
+      const name = $("new_group_name").value.trim();
+      if (!name) { showToast("请输入小组名称", "warning"); return false; }
+      if (groupMap[name]) { showToast("小组名称已存在", "warning"); return false; }
+      if (!DB.groups[grade][classNo]) DB.groups[grade][classNo] = [];
+      saveDB();
+      showToast(`小组「${name}」创建成功`, "success");
+      renderGroupManage();
+    });
+  };
+
+  window.renameGroup = (oldName) => {
+    showModal("✏️ 重命名小组", `
+      <div class="form-group">
+        <label>原小组名称</label>
+        <input type="text" value="${esc(oldName)}" disabled />
+      </div>
+      <div class="form-group">
+        <label>新小组名称</label>
+        <input type="text" id="rename_group_name" value="${esc(oldName)}" />
+      </div>
+    `, "保存", () => {
+      const newName = $("rename_group_name").value.trim();
+      if (!newName) { showToast("请输入新名称", "warning"); return false; }
+      if (newName !== oldName && groupMap[newName]) { showToast("名称已存在", "warning"); return false; }
+      DB.groups[grade][classNo].forEach((g) => { if (g.groupName === oldName) g.groupName = newName; });
+      saveDB();
+      showToast("重命名成功", "success");
+      renderGroupManage();
+    });
+  };
+
+  window.deleteGroup = (gn) => {
+    if (!confirm(`确定删除小组「${gn}」？该小组所有学生将被移出。`)) return;
+    DB.groups[grade][classNo] = DB.groups[grade][classNo].filter((g) => g.groupName !== gn);
     saveDB();
-    showToast("已删除", "success");
+    showToast("小组已删除", "success");
     renderGroupManage();
   };
+
   window.clearAllGroups = () => {
-    if (confirm("确定清空所有小组数据？")) {
+    if (confirm("确定清空所有小组数据？此操作不可恢复！")) {
       DB.groups[grade][classNo] = [];
       saveDB();
-      showToast("已清空", "success");
+      showToast("已清空所有小组", "success");
       renderGroupManage();
     }
   };
 
-  // 刷新小组成绩
+  window.openAddMemberModal = (gn) => {
+    const unassigned = classStudents.filter((s) => !assignedNames.has(s.studentName));
+    const options = unassigned.length > 0
+      ? unassigned.map((s) => `<label class="checkbox-item"><input type="checkbox" class="add_member_cb" value="${esc(s.studentName)}" /> ${esc(s.studentName)}</label>`).join("")
+      : `<div style="color:#999;padding:12px;text-align:center">暂无可添加的学生</div>`;
+
+    showModal(`➕ 添加组员到「${gn}」`, `
+      <div class="form-group">
+        <label>选择要添加的学生（可多选）</label>
+        <div class="checkbox-group" style="max-height:300px;overflow-y:auto">
+          ${options}
+        </div>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="add_as_leader" /> 设为组长（仅第一个选中的有效）
+        </label>
+      </div>
+    `, "添加", () => {
+      const checked = Array.from(document.querySelectorAll(".add_member_cb:checked")).map((el) => el.value);
+      if (checked.length === 0) { showToast("请选择学生", "warning"); return false; }
+      const isLeader = $("add_as_leader").checked;
+      checked.forEach((name, i) => {
+        const studentId = getStudentIdFromRoster(grade, classNo, name) || "";
+        DB.groups[grade][classNo].push({
+          studentId, studentName: name, groupName: gn, isLeader: isLeader && i === 0
+        });
+      });
+      saveDB();
+      showToast(`成功添加 ${checked.length} 名学生`, "success");
+      renderGroupManage();
+    });
+  };
+
+  window.removeMemberFromGroup = (gn, idx) => {
+    const members = groupMap[gn];
+    const member = members[idx];
+    if (!member) return;
+    if (!confirm(`确定将「${member.studentName}」移出「${gn}」？`)) return;
+    const allIdx = DB.groups[grade][classNo].findIndex((g) => g.studentName === member.studentName && g.groupName === gn);
+    if (allIdx >= 0) DB.groups[grade][classNo].splice(allIdx, 1);
+    saveDB();
+    showToast("已移出", "success");
+    renderGroupManage();
+  };
+
+  window.openSetLeaderModal = (gn) => {
+    const members = groupMap[gn] || [];
+    if (members.length === 0) { showToast("小组暂无成员", "warning"); return; }
+    const options = members.map((m, i) => `
+      <label class="radio-item">
+        <input type="radio" name="set_leader_radio" value="${esc(m.studentName)}" ${m.isLeader ? "checked" : ""} />
+        ${esc(m.studentName)}
+      </label>
+    `).join("");
+    showModal(`👑 设置「${gn}」组长`, `
+      <div class="form-group">
+        <label>选择组长</label>
+        <div class="radio-group">${options}</div>
+      </div>
+    `, "确定", () => {
+      const selected = document.querySelector("input[name=set_leader_radio]:checked")?.value;
+      if (!selected) { showToast("请选择组长", "warning"); return false; }
+      DB.groups[grade][classNo].forEach((g) => {
+        if (g.groupName === gn) g.isLeader = g.studentName === selected;
+      });
+      saveDB();
+      showToast("组长设置成功", "success");
+      renderGroupManage();
+    });
+  };
+
+  window.openQuickAddModal = () => {
+    const groupOptions = groupNames.map((gn) => `<option value="${esc(gn)}">${esc(gn)}</option>`).join("");
+    showModal("👤 单个添加学生", `
+      <div class="form-group">
+        <label>学生姓名</label>
+        <input type="text" id="qa_student_name" placeholder="输入学生姓名" />
+      </div>
+      <div class="form-group">
+        <label>选择小组</label>
+        <select id="qa_group_name">
+          <option value="">-- 请选择 --</option>
+          ${groupOptions}
+          <option value="__new__">➕ 创建新小组</option>
+        </select>
+      </div>
+      <div class="form-group" id="qa_new_group_div" style="display:none">
+        <label>新小组名称</label>
+        <input type="text" id="qa_new_group_name" placeholder="输入新小组名称" />
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="qa_is_leader" /> 设为组长
+        </label>
+      </div>
+    `, "添加", () => {
+      const name = $("qa_student_name").value.trim();
+      if (!name) { showToast("请输入学生姓名", "warning"); return false; }
+      let gn = $("qa_group_name").value;
+      if (gn === "__new__") {
+        gn = $("qa_new_group_name").value.trim();
+        if (!gn) { showToast("请输入新小组名称", "warning"); return false; }
+      }
+      if (!gn) { showToast("请选择小组", "warning"); return false; }
+      const isLeader = $("qa_is_leader").checked;
+      const studentId = getStudentIdFromRoster(grade, classNo, name) || "";
+      if (DB.groups[grade][classNo].find((g) => g.studentName === name)) {
+        showToast("该学生已在小组中", "warning"); return false;
+      }
+      if (isLeader) {
+        DB.groups[grade][classNo].forEach((g) => { if (g.groupName === gn) g.isLeader = false; });
+      }
+      DB.groups[grade][classNo].push({ studentId, studentName: name, groupName: gn, isLeader });
+      saveDB();
+      showToast("添加成功", "success");
+      renderGroupManage();
+    });
+    setTimeout(() => {
+      $("qa_group_name").onchange = () => {
+        $("qa_new_group_div").style.display = $("qa_group_name").value === "__new__" ? "block" : "none";
+      };
+    }, 50);
+  };
+
+  window.openQuickAssignModal = (studentName) => {
+    const groupOptions = groupNames.map((gn) => `<option value="${esc(gn)}">${esc(gn)}</option>`).join("");
+    showModal(`分配「${studentName}」到小组`, `
+      <div class="form-group">
+        <label>选择小组</label>
+        <select id="qa_assign_group">
+          <option value="">-- 请选择 --</option>
+          ${groupOptions}
+          <option value="__new__">➕ 创建新小组</option>
+        </select>
+      </div>
+      <div class="form-group" id="qa_assign_new_div" style="display:none">
+        <label>新小组名称</label>
+        <input type="text" id="qa_assign_new_name" placeholder="输入新小组名称" />
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="qa_assign_leader" /> 设为组长
+        </label>
+      </div>
+    `, "分配", () => {
+      let gn = $("qa_assign_group").value;
+      if (gn === "__new__") {
+        gn = $("qa_assign_new_name").value.trim();
+        if (!gn) { showToast("请输入新小组名称", "warning"); return false; }
+      }
+      if (!gn) { showToast("请选择小组", "warning"); return false; }
+      const isLeader = $("qa_assign_leader").checked;
+      const studentId = getStudentIdFromRoster(grade, classNo, studentName) || "";
+      if (isLeader) {
+        DB.groups[grade][classNo].forEach((g) => { if (g.groupName === gn) g.isLeader = false; });
+      }
+      DB.groups[grade][classNo].push({ studentId, studentName, groupName: gn, isLeader });
+      saveDB();
+      showToast("分配成功", "success");
+      renderGroupManage();
+    });
+    setTimeout(() => {
+      $("qa_assign_group").onchange = () => {
+        $("qa_assign_new_div").style.display = $("qa_assign_group").value === "__new__" ? "block" : "none";
+      };
+    }, 50);
+  };
+
+  // 计算小组综合指标
+  const calcGroupMetrics = (groupRecs, groupMembers) => {
+    if (groupRecs.length === 0) return null;
+    const totals = groupRecs.map((r) => r.total);
+    const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+    const max = Math.max(...totals);
+    const min = Math.min(...totals);
+    const std = mathStdDev(totals);
+    const fullScore = subjects.reduce((sum, s) => sum + (s.fullScore || s.score || 100), 0);
+    const passLine = subjects.reduce((sum, s) => sum + (s.pass || 60), 0);
+    const excLine = subjects.reduce((sum, s) => sum + (s.excellent || 90), 0);
+    const passCount = totals.filter((t) => t >= passLine).length;
+    const excCount = totals.filter((t) => t >= excLine).length;
+
+    const subjAvgs = {};
+    subjects.forEach((s) => {
+      const vals = groupRecs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number" && !isNaN(v));
+      subjAvgs[s.name] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    });
+
+    const weakSubjs = subjects.filter((s) => subjAvgs[s.name] != null && subjAvgs[s.name] < (s.pass || 60))
+      .sort((a, b) => (subjAvgs[a.name] || 0) - (subjAvgs[b.name] || 0));
+
+    const strongSubjs = subjects.filter((s) => subjAvgs[s.name] != null && subjAvgs[s.name] >= (s.excellent || 90))
+      .sort((a, b) => (subjAvgs[b.name] || 0) - (subjAvgs[a.name] || 0));
+
+    return {
+      avg, max, min, std, fullScore, passLine, excLine,
+      passRate: passCount / groupRecs.length,
+      excRate: excCount / groupRecs.length,
+      subjAvgs, weakSubjs, strongSubjs,
+      count: groupRecs.length,
+      memberCount: groupMembers.length
+    };
+  };
+
+  // 生成小组专业建议
+  const generateGroupSuggestions = (gn, metrics, allMetrics, groupMembersWithScores) => {
+    const suggestions = [];
+    if (!metrics) return ["暂无成绩数据，建议先导入考试成绩后再分析。"];
+
+    const sortedGroups = Object.entries(allMetrics)
+      .filter(([, m]) => m)
+      .sort((a, b) => b[1].avg - a[1].avg);
+    const rank = sortedGroups.findIndex(([name]) => name === gn) + 1;
+    const totalGroups = sortedGroups.length;
+
+    if (rank === 1) {
+      suggestions.push(`🏆 综合表现：该小组总分均分排名第 ${rank}/${totalGroups}，整体表现优秀，是班级的标杆小组。建议：①继续保持良好的学习氛围；②组长可分享高效学习方法带动其他小组；③适当增加挑战性任务，进一步提升上限。`);
+    } else if (rank <= Math.ceil(totalGroups / 2)) {
+      suggestions.push(`📈 综合表现：该小组总分均分排名第 ${rank}/${totalGroups}，处于中上游水平。建议：①对标第1名小组，找出差距最大的学科重点突破；②加强小组内部互助机制，优带中、中带潜；③每次考试后召开小组复盘会，总结得失。`);
+    } else {
+      suggestions.push(`⚠️ 综合表现：该小组总分均分排名第 ${rank}/${totalGroups}，有较大提升空间。建议：①班主任重点关注，与组长沟通了解困难；②分析薄弱学科原因（基础差/方法不对/学习态度），制定针对性提升计划；③建立师徒结对，由优秀小组与该小组结对帮扶；④设置短期可达成目标，逐步提升信心。`);
+    }
+
+    if (metrics.weakSubjs.length > 0) {
+      const weakNames = metrics.weakSubjs.map((s) => s.name).join("、");
+      const weakest = metrics.weakSubjs[0];
+      suggestions.push(`📉 薄弱学科：${weakNames}均分未达及格线（${weakest.name}最低）。建议：①${weakest.name}学科安排小组内专题辅导，由该科成绩好的同学担任学科组长；②每天安排15-20分钟小组互助背诵/练习；③与对应学科老师沟通，争取课堂上多关注该组学生；④建立错题共享本，小组共同攻克典型错题。`);
+    }
+
+    if (metrics.strongSubjs.length > 0) {
+      const strongNames = metrics.strongSubjs.map((s) => s.name).join("、");
+      suggestions.push(`💪 优势学科：${strongNames}表现优秀。建议：①继续巩固优势，争取满分突破；②发挥优势学科的辐射作用，帮助其他小组提升；③鼓励组内学生参加学科竞赛或拓展性学习；④总结优势学科的学习方法，迁移到薄弱学科。`);
+    }
+
+    if (metrics.std > (metrics.fullScore * 0.15)) {
+      suggestions.push(`📊 组内差异：该小组标准差较大（${fmt(metrics.std, 1)}分），组员成绩分化明显。建议：①实行"一对一"帮扶配对，优生带学困生；②小组任务分层设计，让不同层次学生都有收获；③关注后进生心理状态，避免掉队；④组长要均衡关注每个成员，不能只抓尖子生。`);
+    } else {
+      suggestions.push(`🎯 组内均衡：该小组标准差较小（${fmt(metrics.std, 1)}分），组员水平相对均衡。建议：①整体推进，共同进步；②设置小组集体目标，强化团队意识；③开展小组合作学习项目，培养协作能力；④鼓励良性竞争，激发每个人的潜力。`);
+    }
+
+    const lowScorers = groupMembersWithScores.filter((m) => m.score != null && m.score < metrics.passLine);
+    if (lowScorers.length > 0) {
+      suggestions.push(`🚨 关注学生：${lowScorers.slice(0, 3).map((s) => s.name).join("、")}${lowScorers.length > 3 ? "等" : ""}总分未达及格线。建议：①分别与学生谈心，了解学习困难和原因；②联系家长沟通，争取家庭支持配合；③制定个性化辅导计划，设定阶梯式进步目标；④安排小老师结对，课上课下双重帮扶。`);
+    }
+
+    const highScorers = groupMembersWithScores.filter((m) => m.score != null && m.score >= metrics.excLine);
+    if (highScorers.length > 0) {
+      suggestions.push(`🌟 拔尖学生：${highScorers.slice(0, 3).map((s) => s.name).join("、")}${highScorers.length > 3 ? "等" : ""}总分优秀。建议：①提供拓展性学习资源，满足更高层次需求；②鼓励担任学科小老师，在帮助他人中巩固提升；③引导参与学科竞赛或研究性学习；④树立为榜样，带动全班学习积极性。`);
+    }
+
+    const leader = groupMembersWithScores.find((m) => m.isLeader);
+    if (leader) {
+      suggestions.push(`👑 组长作用：组长${leader.name}${leader.score != null ? `本次总分${leader.score}分（${leader.score >= metrics.avg ? "高于" : "低于"}组均分）` : ""}。建议：①定期召开小组会议（每周1-2次），明确学习任务和目标；②建立小组奖惩机制，调动组员积极性；③加强小组长培训，提升组织管理能力；④关注组内动态，及时化解矛盾，营造和谐氛围。`);
+    }
+
+    return suggestions;
+  };
+
+  // 刷新小组成绩（科技感版本）
   window.refreshHeadteacherGroupScores = () => {
     const examId = $("htg_exam").value;
     const exam = DB.exams.find((e) => e.id === examId);
     if (!exam) return;
 
-    // 按小组名分组
     const groupMap = {};
     groups.forEach((g) => {
       if (!groupMap[g.groupName]) groupMap[g.groupName] = [];
@@ -9442,82 +10338,263 @@ function renderGroupManage() {
     });
     const groupNames = Object.keys(groupMap).sort();
 
-    let html = `<div class="cmp-panel">`;
+    const classRecs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo));
+    const nameToRec = {};
+    classRecs.forEach((r) => { if (r.studentName) nameToRec[r.studentName] = r; });
 
-    // 小组总分均分对比图表
-    const chartCanvas = `htg_chart_${Date.now()}`;
-    html += `<div class="cmp-section-title">📊 ${esc(exam.name)} - 小组总分均分对比</div>
-      <div class="cmp-chart-box" style="height:280px"><canvas id="${chartCanvas}"></canvas></div>`;
-
-    // 详细数据表
-    html += `<div class="cmp-section-title">📋 小组详细成绩</div>
-      <div class="cmp-table-wrap"><table class="cmp-table">
-      <thead><tr><th>小组</th><th>人数</th><th>总分均分</th><th>最高分</th><th>最低分</th><th>标准差</th>`;
-    subjects.forEach((s) => html += `<th>${esc(s.name)}均分</th>`);
-    html += `<th>及格率</th><th>优秀率</th></tr></thead><tbody>`;
-
+    const allMetrics = {};
+    const groupMembersWithScoresMap = {};
     groupNames.forEach((gn) => {
       const members = groupMap[gn];
-      const memberIds = members.map((m) => m.studentId);
-      const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
-      if (recs.length > 0) {
-        const totals = recs.map((r) => r.total);
-        const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
-        const passLine = subjects[0]?.pass || 60;
-        const passCount = totals.filter((t) => t >= passLine).length;
-        const excLine = subjects[0]?.excellent || 90;
-        const excCount = totals.filter((t) => t >= excLine).length;
-        html += `<tr><td><b>${esc(gn)}</b></td><td>${recs.length}</td><td><b>${fmt(avg, 2)}</b></td><td>${Math.max(...totals)}</td><td>${Math.min(...totals)}</td><td>${fmt(mathStdDev(totals), 2)}</td>`;
-        subjects.forEach((s) => {
-          const subjVals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number");
-          html += `<td>${subjVals.length ? fmt(subjVals.reduce((a, b) => a + b, 0) / subjVals.length, 2) : "-"}</td>`;
-        });
-        html += `<td>${fmtPct(passCount / recs.length)}</td><td>${fmtPct(excCount / recs.length)}</td></tr>`;
-      } else {
-        html += `<tr><td><b>${esc(gn)}</b></td><td>${members.length}</td><td colspan="${6 + subjects.length}"><span style="color:#999">暂无成绩数据</span></td></tr>`;
-      }
-    });
-    html += `</tbody></table></div>`;
+      const memberNames = members.map((m) => m.studentName);
+      const recs = classRecs.filter((r) => memberNames.includes(r.studentName));
+      allMetrics[gn] = calcGroupMetrics(recs, members);
 
-    // 小组成员详情
-    const thId = showStudentId ? "<th>学号</th>" : "";
-    html += `<div class="cmp-section-title">👨‍🎓 小组成员成绩明细</div>
-      <div class="cmp-table-wrap"><table class="cmp-table">
-      <thead><tr>${thId}<th>姓名</th><th>小组</th><th>总分</th>`;
-    subjects.forEach((s) => html += `<th>${esc(s.name)}</th>`);
-    html += `</tr></thead><tbody>`;
-
-    groups.forEach((g) => {
-      const rec = DB.records.find((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && r.studentId === g.studentId);
-      const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
-      html += `<tr>${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}<td><b>${esc(g.studentName)}</b></td><td><span class="tag tag-blue">${esc(g.groupName)}</span></td><td><b>${rec?.total || "-"}</b></td>`;
-      subjects.forEach((s) => {
-        const score = rec?.scores[s.name];
-        html += `<td>${typeof score === "number" ? score : "-"}</td>`;
+      groupMembersWithScoresMap[gn] = members.map((m) => {
+        const rec = nameToRec[m.studentName];
+        return { name: m.studentName, score: rec?.total, isLeader: m.isLeader };
       });
-      html += `</tr>`;
     });
-    html += `</tbody></table></div></div>`;
+
+    const sortedByAvg = [...groupNames].filter((g) => allMetrics[g]).sort((a, b) => (allMetrics[b]?.avg || 0) - (allMetrics[a]?.avg || 0));
+    const topGroup = sortedByAvg[0];
+    const bottomGroup = sortedByAvg[sortedByAvg.length - 1];
+    const classAvg = classRecs.length > 0 ? classRecs.reduce((a, b) => a + b.total, 0) / classRecs.length : 0;
+
+    const chartBar = `htg_chart_bar_${Date.now()}`;
+    const chartRadar = `htg_chart_radar_${Date.now()}`;
+    const chartDist = `htg_chart_dist_${Date.now()}`;
+
+    let html = `<div class="tech-analysis-panel">`;
+
+    html += `<div class="tech-hero-section">
+      <div class="tech-hero-bg"></div>
+      <div class="tech-hero-content">
+        <div class="tech-hero-title">
+          <span class="tech-badge">AI驱动</span>
+          <h2>${esc(exam.name)} · 学习小组智能分析报告</h2>
+        </div>
+        <div class="tech-hero-stats">
+          <div class="tech-stat-card">
+            <div class="tech-stat-icon">👥</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${groupNames.length}</div>
+              <div class="tech-stat-label">学习小组</div>
+            </div>
+          </div>
+          <div class="tech-stat-card">
+            <div class="tech-stat-icon">🎓</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${groups.length}</div>
+              <div class="tech-stat-label">学生总数</div>
+            </div>
+          </div>
+          <div class="tech-stat-card">
+            <div class="tech-stat-icon">📊</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${fmt(classAvg, 1)}</div>
+              <div class="tech-stat-label">班级均分</div>
+            </div>
+          </div>
+          <div class="tech-stat-card highlight">
+            <div class="tech-stat-icon">🏆</div>
+            <div class="tech-stat-info">
+              <div class="tech-stat-num">${topGroup ? esc(topGroup) : "-"}</div>
+              <div class="tech-stat-label">最优小组</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    html += `<div class="tech-section">
+      <div class="tech-section-header">
+        <h3><span class="tech-dot"></span>📊 小组综合实力对比</h3>
+        <div class="tech-section-sub">各小组总分均分排名与差距分析</div>
+      </div>
+      <div class="tech-chart-row">
+        <div class="tech-chart-box tech-chart-main">
+          <canvas id="${chartBar}"></canvas>
+        </div>
+        <div class="tech-chart-side">
+          <div class="tech-ranking-card">
+            <div class="tech-ranking-title">🏅 小组排名</div>
+            <div class="tech-ranking-list">
+              ${sortedByAvg.map((gn, i) => {
+                const m = allMetrics[gn];
+                const diff = m ? m.avg - classAvg : 0;
+                return `
+                  <div class="tech-ranking-item ${i === 0 ? 'rank-1' : ''} ${i === 1 ? 'rank-2' : ''} ${i === 2 ? 'rank-3' : ''}">
+                    <div class="rank-num">${i + 1}</div>
+                    <div class="rank-name">${esc(gn)}</div>
+                    <div class="rank-score">${m ? fmt(m.avg, 1) : "-"}</div>
+                    <div class="rank-diff ${diff >= 0 ? 'positive' : 'negative'}">${diff >= 0 ? '+' : ''}${fmt(diff, 1)}</div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+    html += `<div class="tech-section">
+      <div class="tech-section-header">
+        <h3><span class="tech-dot"></span>🎯 各学科均衡度分析</h3>
+        <div class="tech-section-sub">多维度雷达图，直观展示小组学科强弱分布</div>
+      </div>
+      <div class="tech-chart-box" style="height:380px">
+        <canvas id="${chartRadar}"></canvas>
+      </div>
+    </div>`;
+
+    html += `<div class="tech-section">
+      <div class="tech-section-header">
+        <h3><span class="tech-dot"></span>📋 小组详细指标对比</h3>
+        <div class="tech-section-sub">全面数据指标横向对比</div>
+      </div>
+      <div class="tech-table-wrap">
+        <table class="tech-table">
+          <thead><tr>
+            <th>小组名称</th><th>人数</th><th>总分均分</th><th>班内排名</th><th>最高/最低分</th>
+            <th>标准差</th><th>及格率</th><th>优秀率</th>
+            ${subjects.map((s) => `<th>${esc(s.name)}均分</th>`).join("")}
+          </tr></thead>
+          <tbody>
+            ${sortedByAvg.map((gn, rankIdx) => {
+              const m = allMetrics[gn];
+              if (!m) return `<tr><td><b>${esc(gn)}</b></td><td>${groupMap[gn].length}</td><td colspan="${6 + subjects.length}"><span style="color:#999">暂无数据</span></td></tr>`;
+              return `
+                <tr class="${rankIdx === 0 ? 'row-top' : ''} ${rankIdx === sortedByAvg.length - 1 ? 'row-bottom' : ''}">
+                  <td><b>${esc(gn)}</b></td>
+                  <td>${m.count}</td>
+                  <td class="score-main">${fmt(m.avg, 1)}</td>
+                  <td><span class="rank-badge rank-${rankIdx + 1}">第${rankIdx + 1}名</span></td>
+                  <td>${m.max} / ${m.min}</td>
+                  <td>${fmt(m.std, 1)}</td>
+                  <td>${fmtPct(m.passRate)}</td>
+                  <td>${fmtPct(m.excRate)}</td>
+                  ${subjects.map((s) => {
+                    const val = m.subjAvgs[s.name];
+                    const isWeak = val != null && val < (s.pass || 60);
+                    const isStrong = val != null && val >= (s.excellent || 90);
+                    return `<td class="${isWeak ? 'score-low' : isStrong ? 'score-high' : ''}">${val != null ? fmt(val, 1) : "-"}</td>`;
+                  }).join("")}
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+    html += `<div class="tech-section">
+      <div class="tech-section-header">
+        <h3><span class="tech-dot"></span>💡 智能诊断与专业建议</h3>
+        <div class="tech-section-sub">基于教育数据分析，为每个小组提供个性化改进方案</div>
+      </div>
+      <div class="tech-suggestions-grid">
+        ${groupNames.map((gn, idx) => {
+          const metrics = allMetrics[gn];
+          const suggestions = generateGroupSuggestions(gn, metrics, allMetrics, groupMembersWithScoresMap[gn] || []);
+          const colorIdx = idx % 8;
+          return `
+            <div class="tech-suggest-card" style="--accent-color: var(--group-color-${colorIdx + 1})">
+              <div class="suggest-card-header">
+                <div class="suggest-group-name">${esc(gn)}</div>
+                ${metrics ? `<div class="suggest-group-rank">排名 ${sortedByAvg.indexOf(gn) + 1}/${sortedByAvg.length}</div>` : ''}
+              </div>
+              <div class="suggest-card-body">
+                ${suggestions.slice(0, 4).map((s) => `
+                  <div class="suggest-item">
+                    <div class="suggest-text">${s}</div>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    </div>`;
+
+    const thId = showStudentId ? "<th>学号</th>" : "";
+    html += `<div class="tech-section">
+      <div class="tech-section-header">
+        <h3><span class="tech-dot"></span>👨‍🎓 小组成员成绩明细</h3>
+        <div class="tech-section-sub">逐人逐项成绩详情</div>
+      </div>
+      <div class="tech-table-wrap">
+        <table class="tech-table">
+          <thead><tr>${thId}<th>姓名</th><th>小组</th><th>角色</th><th>总分</th>
+            ${subjects.map((s) => `<th>${esc(s.name)}</th>`).join("")}
+          </tr></thead>
+          <tbody>
+            ${sortedByAvg.flatMap((gn) => {
+              const members = groupMap[gn];
+              return members.map((g) => {
+                const rec = nameToRec[g.studentName];
+                const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
+                return `<tr>
+                  ${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}
+                  <td><b>${esc(g.studentName)}</b></td>
+                  <td><span class="group-chip">${esc(gn)}</span></td>
+                  <td>${g.isLeader ? '<span class="leader-tag">👑 组长</span>' : '<span style="color:#999">组员</span>'}</td>
+                  <td class="score-main"><b>${rec?.total || "-"}</b></td>
+                  ${subjects.map((s) => {
+                    const score = rec?.scores[s.name];
+                    const isLow = typeof score === "number" && score < (s.pass || 60);
+                    const isHigh = typeof score === "number" && score >= (s.excellent || 90);
+                    return `<td class="${isLow ? 'score-low' : isHigh ? 'score-high' : ''}">${typeof score === "number" ? score : "-"}</td>`;
+                  }).join("")}
+                </tr>`;
+              });
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+
+    html += `</div>`;
 
     $("htg_result").innerHTML = html;
 
-    // 绘制图表
     setTimeout(() => {
-      const datasets = [{
-        label: "小组总分均分",
-        data: groupNames.map((gn) => {
-          const members = groupMap[gn];
-          const memberIds = members.map((m) => m.studentId);
-          const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
-          if (recs.length > 0) return +fmt(recs.reduce((a, b) => a + b.total, 0) / recs.length, 2);
-          return null;
-        })
-      }];
-      drawChart(chartCanvas, "bar", groupNames, datasets);
-    }, 200);
+      const chartData = sortedByAvg.map((gn) => allMetrics[gn]?.avg || 0);
+      drawChart(chartBar, "bar", sortedByAvg, [{ label: "总分均分", data: chartData }], {
+        colors: ["#6366f1"],
+        gradient: true
+      });
+
+      const radarLabels = subjects.map((s) => s.name);
+      const radarDatasets = sortedByAvg.slice(0, Math.min(sortedByAvg.length, 6)).map((gn, i) => {
+        const colors = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4"];
+        const data = subjects.map((s) => {
+          const m = allMetrics[gn];
+          const val = m?.subjAvgs[s.name] || 0;
+          const full = s.fullScore || s.score || 100;
+          return +fmt((val / full) * 100, 1);
+        });
+        return { label: gn, data, borderColor: colors[i], backgroundColor: colors[i] + "20" };
+      });
+      if (window.Chart) {
+        const ctx = document.getElementById(chartRadar);
+        if (ctx) {
+          new Chart(ctx, {
+            type: "radar",
+            data: { labels: radarLabels, datasets: radarDatasets },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: { r: { beginAtZero: true, max: 100 } },
+              plugins: { legend: { position: "right" } }
+            }
+          });
+        }
+      }
+    }, 100);
   };
 
-  // 导出小组分析报告
+  // 导出小组分析报告（增强版）
   window.downloadHeadteacherGroupAnalysis = () => {
     const examId = $("htg_exam")?.value;
     if (!examId) { showToast("请先选择考试", "warning"); return; }
@@ -9527,44 +10604,59 @@ function renderGroupManage() {
     groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
     const groupNames = Object.keys(groupMap).sort();
 
-    const wb = XLSX.utils.book_new();
+    const classRecs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo));
+    const nameToRec = {};
+    classRecs.forEach((r) => { if (r.studentName) nameToRec[r.studentName] = r; });
 
-    // Sheet 1: 小组统计
-    const statHeader = ["小组", "人数", "总分均分", "最高分", "最低分", "标准差", ...subjects.map((s) => s.name + "均分"), "及格率", "优秀率"];
-    const statData = [];
+    const allMetrics = {};
     groupNames.forEach((gn) => {
       const members = groupMap[gn];
-      const memberIds = members.map((m) => m.studentId);
-      const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
-      if (recs.length > 0) {
-        const totals = recs.map((r) => r.total);
-        const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
-        const passLine = subjects[0]?.pass || 60;
-        const passCount = totals.filter((t) => t >= passLine).length;
-        const excLine = subjects[0]?.excellent || 90;
-        const excCount = totals.filter((t) => t >= excLine).length;
-        const subjAvgs = subjects.map((s) => {
-          const vals = recs.map((r) => r.scores[s.name]).filter((v) => typeof v === "number");
-          return vals.length ? fmt(vals.reduce((a, b) => a + b, 0) / vals.length, 2) : "-";
-        });
-        statData.push([gn, recs.length, fmt(avg, 2), Math.max(...totals), Math.min(...totals), fmt(mathStdDev(totals), 2), ...subjAvgs, fmt(passCount / recs.length * 100, 1) + "%", fmt(excCount / recs.length * 100, 1) + "%"]);
-      } else {
-        statData.push([gn, members.length, "-", "-", "-", "-", ...subjects.map(() => "-"), "-", "-"]);
-      }
+      const memberNames = members.map((m) => m.studentName);
+      const recs = classRecs.filter((r) => memberNames.includes(r.studentName));
+      allMetrics[gn] = calcGroupMetrics(recs, members);
     });
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([statHeader, ...statData]), "小组统计");
+    const sortedByAvg = [...groupNames].filter((g) => allMetrics[g]).sort((a, b) => (allMetrics[b]?.avg || 0) - (allMetrics[a]?.avg || 0));
 
-    // Sheet 2: 成员明细
-    const memberHeader = ["学号", "姓名", "小组", "总分", ...subjects.map((s) => s.name)];
+    const wb = XLSX.utils.book_new();
+
+    const statHeader = ["排名", "小组", "人数", "总分均分", "最高分", "最低分", "标准差", ...subjects.map((s) => s.name + "均分"), "及格率", "优秀率"];
+    const statData = sortedByAvg.map((gn, rankIdx) => {
+      const m = allMetrics[gn];
+      if (!m) return [rankIdx + 1, gn, groupMap[gn].length, "-", "-", "-", "-", ...subjects.map(() => "-"), "-", "-"];
+      const subjAvgs = subjects.map((s) => m.subjAvgs[s.name] != null ? fmt(m.subjAvgs[s.name], 2) : "-");
+      return [rankIdx + 1, gn, m.count, fmt(m.avg, 2), m.max, m.min, fmt(m.std, 2), ...subjAvgs,
+        fmt(m.passRate * 100, 1) + "%", fmt(m.excRate * 100, 1) + "%"];
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([statHeader, ...statData]), "小组排名统计");
+
+    const memberHeader = ["学号", "姓名", "小组", "角色", "总分", ...subjects.map((s) => s.name)];
     const memberData = groups.map((g) => {
-      const rec = DB.records.find((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && r.studentId === g.studentId);
+      const rec = nameToRec[g.studentName];
       const scores = subjects.map((s) => rec?.scores[s.name] != null ? rec.scores[s.name] : "-");
-      return [g.studentId, g.studentName, g.groupName, rec?.total || "-", ...scores];
+      return [g.studentId, g.studentName, g.groupName, g.isLeader ? "组长" : "组员", rec?.total || "-", ...scores];
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([memberHeader, ...memberData]), "成员明细");
 
-    XLSX.writeFile(wb, `${grade}_${classNo}_${exam.name}_小组分析.xlsx`);
-    showToast("分析报告已下载", "success");
+    const sugHeader = ["小组", "建议类型", "详细建议"];
+    const sugData = [];
+    groupNames.forEach((gn) => {
+      const members = groupMap[gn];
+      const memberNames = members.map((m) => m.studentName);
+      const recs = classRecs.filter((r) => memberNames.includes(r.studentName));
+      const metrics = calcGroupMetrics(recs, members);
+      const membersWithScores = members.map((m) => {
+        const rec = nameToRec[m.studentName];
+        return { name: m.studentName, score: rec?.total, isLeader: m.isLeader };
+      });
+      const suggestions = generateGroupSuggestions(gn, metrics, allMetrics, membersWithScores);
+      suggestions.forEach((s, i) => {
+        sugData.push([gn, `建议${i + 1}`, s]);
+      });
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([sugHeader, ...sugData]), "智能建议");
+
+    XLSX.writeFile(wb, `${grade}_${classNo}_${exam.name}_小组智能分析.xlsx`);
+    showToast("分析报告已下载（含排名、明细、建议）", "success");
   };
 
   // 初始加载成绩分析
@@ -9586,7 +10678,7 @@ function renderGroupStats(groups) {
   </table></div>`;
 }
 
-// ========== 任课教师：小组成绩分析 ==========
+// ========== 任课教师：小组成绩分析（科技感版本） ==========
 function renderGroupScores() {
   const grade = currentUser.grade;
   const mySubjects = currentUser.subjects || [];
@@ -9598,149 +10690,370 @@ function renderGroupScores() {
     return;
   }
 
-  // 获取任教班级的所有小组数据
   const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
   if (!DB.groups) DB.groups = {};
   if (!DB.groups[grade]) DB.groups[grade] = {};
   const allGroups = DB.groups[grade] || {};
   const myGroups = {};
-  myClasses.forEach((c) => {
-    if (allGroups[c]) myGroups[c] = allGroups[c];
-  });
+  myClasses.forEach((c) => { if (allGroups[c]) myGroups[c] = allGroups[c]; });
 
-  // 考试选择
+  const totalStudents = Object.values(myGroups).reduce((sum, arr) => sum + arr.length, 0);
+  const totalGroups = Object.values(myGroups).reduce((sum, arr) => {
+    const names = new Set(arr.map((g) => g.groupName));
+    return sum + names.size;
+  }, 0);
+
   const examOptions = exams.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("");
+  const classOptions = myClasses.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
 
   $("pageContent").innerHTML = `
-    <div class="card"><div class="card-title">👥 小组成绩分析</div>
+    <div class="card tech-card">
+      <div class="card-title">👥 小组成绩智能分析</div>
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
         <label>选择考试：</label>
-        <select id="gs_exam" class="form-control" style="width:200px">${examOptions}</select>
+        <select id="gs_exam" class="form-control" style="width:220px">${examOptions}</select>
+        <label>选择班级：</label>
+        <select id="gs_class" class="form-control" style="width:140px">
+          <option value="">全部班级</option>
+          ${classOptions}
+        </select>
         <button class="btn btn-primary" onclick="refreshGroupScores()">🔍 分析</button>
-        <button class="btn btn-success" onclick="downloadGroupAnalysis()">📥 导出分析报告</button>
+        <button class="btn btn-success" onclick="downloadGroupAnalysis()">📥 导出Excel</button>
+        <button class="btn btn-info" onclick="downloadGroupMemberList()">📋 下载小组名单</button>
+      </div>
+      <div class="gm-stats">
+        <div class="gm-stat-item"><div class="gm-stat-num">${myClasses.length}</div><div class="gm-stat-label">任教班级</div></div>
+        <div class="gm-stat-item"><div class="gm-stat-num">${totalGroups}</div><div class="gm-stat-label">小组总数</div></div>
+        <div class="gm-stat-item"><div class="gm-stat-num">${totalStudents}</div><div class="gm-stat-label">学生总数</div></div>
+        <div class="gm-stat-item"><div class="gm-stat-num">${mySubjects.join("、")}</div><div class="gm-stat-label">任教学科</div></div>
       </div>
     </div>
     <div id="gs_result"></div>
   `;
 
   $("gs_exam").addEventListener("change", () => refreshGroupScores());
+  $("gs_class").addEventListener("change", () => refreshGroupScores());
   setTimeout(() => refreshGroupScores(), 100);
+}
+
+function generateTeacherGroupSuggestions(gn, subjectName, subjectMetrics, allMetrics, membersWithScores) {
+  const suggestions = [];
+  if (!subjectMetrics) return ["暂无该学科成绩数据。"];
+
+  const sortedGroups = Object.entries(allMetrics)
+    .filter(([, m]) => m)
+    .sort((a, b) => b[1].avg - a[1].avg);
+  const rank = sortedGroups.findIndex(([name]) => name === gn) + 1;
+  const totalGroups = sortedGroups.length;
+
+  if (rank === 1) {
+    suggestions.push(`🏆 学科表现：该小组${subjectName}均分排名第 ${rank}/${totalGroups}，表现卓越。建议：①继续保持学科优势，挑战更高难度题目；②鼓励组内学生担任该学科"小老师"，帮助其他小组；③开展学科拓展阅读和竞赛训练；④总结高效学习方法，在全班分享。`);
+  } else if (rank <= Math.ceil(totalGroups / 2)) {
+    suggestions.push(`📈 学科表现：该小组${subjectName}均分排名第 ${rank}/${totalGroups}，处于中上游。建议：①对标第1名小组，分析失分点差距；②加强重难点专题训练；③建立小组错题本，定期复盘；④组内开展"每周一题"研讨活动。`);
+  } else {
+    suggestions.push(`⚠️ 学科表现：该小组${subjectName}均分排名第 ${rank}/${totalGroups}，需重点提升。建议：①从基础抓起，回归课本夯实基础；②每天安排15分钟小组背诵/默写；③与学生沟通了解学习困难点；④联系班主任协同关注；⑤设置"小步走"目标，逐步提升信心。`);
+  }
+
+  if (subjectMetrics.std > (subjectMetrics.fullScore * 0.15)) {
+    suggestions.push(`📊 组内差异：标准差${fmt(subjectMetrics.std, 1)}分，组员分化较明显。建议：①组内"一对一"结对帮扶；②分层布置作业，各有收获；③关注后进生，避免掉队；④组长多组织互助学习。`);
+  } else {
+    suggestions.push(`🎯 组内均衡：标准差${fmt(subjectMetrics.std, 1)}分，组员水平较整齐。建议：①整体推进，共同进步；②小组竞赛激发斗志；③合作探究式学习；④人人都当小老师。`);
+  }
+
+  const lowScorers = membersWithScores.filter((m) => m.score != null && m.score < subjectMetrics.passLine);
+  if (lowScorers.length > 0) {
+    suggestions.push(`🚨 待优生：${lowScorers.slice(0, 3).map((s) => s.name).join("、")}${lowScorers.length > 3 ? "等" : ""}未达及格线。建议：①课堂上多提问、多关注；②课后针对性辅导；③作业面批面改；④家校沟通形成合力；⑤建立进步档案，及时肯定。`);
+  }
+
+  const highScorers = membersWithScores.filter((m) => m.score != null && m.score >= subjectMetrics.excLine);
+  if (highScorers.length > 0) {
+    suggestions.push(`🌟 学优生：${highScorers.slice(0, 3).map((s) => s.name).join("、")}${highScorers.length > 3 ? "等" : ""}成绩优秀。建议：①提供拓展性学习资源；②鼓励参加学科竞赛；③担任课代表或小组长；④引导深度学习和探究。`);
+  }
+
+  const leader = membersWithScores.find((m) => m.isLeader);
+  if (leader) {
+    suggestions.push(`👑 组长引领：组长${leader.name}${leader.score != null ? `该科${leader.score}分` : ""}。建议：①组长带头组织小组学科学习；②建立小组学习公约；③定期检查作业完成情况；④组织考前互助复习。`);
+  }
+
+  return suggestions;
 }
 
 function refreshGroupScores() {
   const grade = currentUser.grade;
   const mySubjects = currentUser.subjects || [];
   const examId = $("gs_exam").value;
+  const filterClass = $("gs_class")?.value || "";
   const exam = DB.exams.find((e) => e.id === examId);
   if (!exam) return;
 
-  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  let myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  if (filterClass) myClasses = myClasses.filter((c) => c === filterClass);
+
   if (!DB.groups) DB.groups = {};
   if (!DB.groups[grade]) DB.groups[grade] = {};
   const allGroups = DB.groups[grade];
   const subjects = DB.subjects[grade] || [];
+  const showStudentId = hasRoster(grade);
 
-  let html = "";
+  let html = `<div class="tech-analysis-panel">`;
 
-  myClasses.forEach((classNo) => {
+  myClasses.forEach((classNo, classIdx) => {
     const groups = allGroups[classNo] || [];
     if (groups.length === 0) return;
 
-    // 按小组名分组
     const groupMap = {};
-    groups.forEach((g) => {
-      if (!groupMap[g.groupName]) groupMap[g.groupName] = [];
-      groupMap[g.groupName].push(g);
-    });
-
+    groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
     const groupNames = Object.keys(groupMap).sort();
 
-    html += `<div class="card"><div class="card-title">🏫 ${esc(classNo)} - ${mySubjects.join("、")}小组成绩分析</div>`;
+    const classRecs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo));
+    const nameToRec = {};
+    classRecs.forEach((r) => { if (r.studentName) nameToRec[r.studentName] = r; });
 
-    // 遍历每门任教科目
-    mySubjects.forEach((subjectName) => {
+    html += `<div class="tech-section">
+      <div class="tech-section-header">
+        <h3><span class="tech-dot"></span>🏫 ${esc(classNo)} · ${mySubjects.join("、")}小组分析</h3>
+        <div class="tech-section-sub">共 ${groupNames.length} 个学习小组，${groups.length} 名学生</div>
+      </div>`;
+
+    mySubjects.forEach((subjectName, subjIdx) => {
       const subject = subjects.find((s) => s.name === subjectName);
       if (!subject) return;
 
-      // 小组学科成绩对比图表
-      const chartCanvas = `gs_chart_${esc(classNo)}_${esc(subjectName)}`;
-      html += `<div class="cmp-section-title">📊 ${esc(subjectName)} - 小组均分对比</div>
-        <div class="cmp-chart-box" style="height:250px"><canvas id="${chartCanvas}"></canvas></div>`;
-
-      // 详细数据表
-      html += `<div class="cmp-section-title">📋 ${esc(subjectName)}详细数据</div>
-        <div class="cmp-table-wrap"><table class="cmp-table">
-        <thead><tr><th>小组</th><th>人数</th><th>均分</th><th>最高分</th><th>最低分</th><th>标准差</th><th>及格率</th><th>优秀率</th></tr></thead>
-        <tbody>`;
-
+      const subjMetrics = {};
+      const membersWithScoresMap = {};
       groupNames.forEach((gn) => {
         const members = groupMap[gn];
-        const memberIds = members.map((m) => m.studentId);
-        const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
-        if (recs.length > 0) {
-          const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
-          if (scores.length > 0) {
-            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-            const max = Math.max(...scores);
-            const min = Math.min(...scores);
-            const passCount = scores.filter((s) => s >= subject.pass).length;
-            const excCount = scores.filter((s) => s >= subject.excellent).length;
-            html += `<tr><td><b>${esc(gn)}</b></td><td>${scores.length}</td><td><b>${fmt(avg, 2)}</b></td><td>${max}</td><td>${min}</td><td>${fmt(mathStdDev(scores), 2)}</td><td>${fmtPct(passCount / scores.length)}</td><td>${fmtPct(excCount / scores.length)}</td></tr>`;
-          } else {
-            html += `<tr><td><b>${esc(gn)}</b></td><td>${members.length}</td><td colspan="6"><span style="color:#999">暂无${esc(subjectName)}成绩</span></td></tr>`;
-          }
+        const memberNames = members.map((m) => m.studentName);
+        const recs = classRecs.filter((r) => memberNames.includes(r.studentName));
+        const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
+        if (scores.length > 0) {
+          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+          const passCount = scores.filter((s) => s >= subject.pass).length;
+          const excCount = scores.filter((s) => s >= subject.excellent).length;
+          subjMetrics[gn] = {
+            avg, max: Math.max(...scores), min: Math.min(...scores),
+            std: mathStdDev(scores), count: scores.length,
+            passRate: passCount / scores.length,
+            excRate: excCount / scores.length,
+            fullScore: subject.fullScore || subject.score || 100,
+            passLine: subject.pass, excLine: subject.excellent
+          };
         } else {
-          html += `<tr><td><b>${esc(gn)}</b></td><td>${members.length}</td><td colspan="6"><span style="color:#999">暂无成绩数据</span></td></tr>`;
+          subjMetrics[gn] = null;
         }
+        membersWithScoresMap[gn] = members.map((m) => {
+          const rec = nameToRec[m.studentName];
+          return { name: m.studentName, score: rec?.scores?.[subjectName], isLeader: m.isLeader };
+        });
       });
-      html += `</tbody></table></div>`;
+
+      const sortedSubj = [...groupNames].filter((g) => subjMetrics[g]).sort((a, b) => (subjMetrics[b]?.avg || 0) - (subjMetrics[a]?.avg || 0));
+      const chartId = `gs_${classNo}_${subjectName}_${Date.now()}`;
+
+      html += `<div class="tech-sub-section">
+        <div class="tech-sub-title">📊 ${esc(subjectName)}学科小组对比</div>
+        <div class="tech-chart-row">
+          <div class="tech-chart-box tech-chart-main">
+            <canvas id="${chartId}"></canvas>
+          </div>
+          <div class="tech-chart-side">
+            <div class="tech-ranking-card">
+              <div class="tech-ranking-title">🏅 学科排名</div>
+              <div class="tech-ranking-list">
+                ${sortedSubj.map((gn, i) => {
+                  const m = subjMetrics[gn];
+                  return `
+                    <div class="tech-ranking-item ${i === 0 ? 'rank-1' : ''} ${i === 1 ? 'rank-2' : ''} ${i === 2 ? 'rank-3' : ''}">
+                      <div class="rank-num">${i + 1}</div>
+                      <div class="rank-name">${esc(gn)}</div>
+                      <div class="rank-score">${m ? fmt(m.avg, 1) : "-"}</div>
+                    </div>
+                  `;
+                }).join("")}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tech-table-wrap" style="margin-top:16px">
+          <table class="tech-table">
+            <thead><tr><th>排名</th><th>小组</th><th>人数</th><th>均分</th><th>最高分</th><th>最低分</th><th>标准差</th><th>及格率</th><th>优秀率</th></tr></thead>
+            <tbody>
+              ${sortedSubj.map((gn, i) => {
+                const m = subjMetrics[gn];
+                if (!m) return `<tr><td>-</td><td><b>${esc(gn)}</b></td><td>${groupMap[gn].length}</td><td colspan="6" style="color:#999">暂无数据</td></tr>`;
+                return `<tr class="${i === 0 ? 'row-top' : ''} ${i === sortedSubj.length - 1 ? 'row-bottom' : ''}">
+                  <td><span class="rank-badge rank-${i + 1}">${i + 1}</span></td>
+                  <td><b>${esc(gn)}</b></td>
+                  <td>${m.count}</td>
+                  <td class="score-main">${fmt(m.avg, 1)}</td>
+                  <td>${m.max}</td>
+                  <td>${m.min}</td>
+                  <td>${fmt(m.std, 1)}</td>
+                  <td>${fmtPct(m.passRate)}</td>
+                  <td>${fmtPct(m.excRate)}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="tech-suggestions-section">
+          <div class="tech-suggest-title">💡 ${esc(subjectName)}学科教学建议</div>
+          <div class="tech-suggestions-grid">
+            ${sortedSubj.slice(0, 4).map((gn, idx) => {
+              const m = subjMetrics[gn];
+              const suggestions = generateTeacherGroupSuggestions(gn, subjectName, m, subjMetrics, membersWithScoresMap[gn] || []);
+              const colors = ["#6366f1", "#10b981", "#f59e0b", "#06b6d4"];
+              return `
+                <div class="tech-suggest-card" style="--accent-color: ${colors[idx % colors]}">
+                  <div class="suggest-card-header">
+                    <div class="suggest-group-name">${esc(gn)}</div>
+                    <div class="suggest-group-rank">第${idx + 1}名</div>
+                  </div>
+                  <div class="suggest-card-body">
+                    ${suggestions.slice(0, 2).map((s) => `<div class="suggest-item"><div class="suggest-text">${s}</div></div>`).join("")}
+                  </div>
+                </div>
+              `;
+            }).join("")}
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <div class="tech-sub-title" style="margin-bottom:12px">👨‍🎓 成员成绩明细</div>
+          <div class="tech-table-wrap">
+            <table class="tech-table">
+              <thead><tr>${showStudentId ? "<th>学号</th>" : ""}<th>姓名</th><th>小组</th><th>角色</th><th>${esc(subjectName)}</th></tr></thead>
+              <tbody>
+                ${sortedSubj.flatMap((gn) => {
+                  return groupMap[gn].map((g) => {
+                    const rec = nameToRec[g.studentName];
+                    const score = rec?.scores?.[subjectName];
+                    const isLow = typeof score === "number" && score < (subject.pass || 60);
+                    const isHigh = typeof score === "number" && score >= (subject.excellent || 90);
+                    const rosterId = showStudentId ? getStudentIdFromRoster(grade, classNo, g.studentName) : "";
+                    return `<tr>
+                      ${showStudentId ? `<td>${esc(rosterId)}</td>` : ""}
+                      <td><b>${esc(g.studentName)}</b></td>
+                      <td><span class="group-chip">${esc(gn)}</span></td>
+                      <td>${g.isLeader ? '<span class="leader-tag">👑 组长</span>' : '<span style="color:#999">组员</span>'}</td>
+                      <td class="score-main ${isLow ? 'score-low' : isHigh ? 'score-high' : ''}"><b>${typeof score === "number" ? score : "-"}</b></td>
+                    </tr>`;
+                  });
+                }).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+
+      setTimeout(() => {
+        const data = sortedSubj.map((gn) => subjMetrics[gn]?.avg || 0);
+        drawChart(chartId, "bar", sortedSubj, [{ label: `${subjectName}均分`, data }], { colors: ["#6366f1"], gradient: true });
+      }, 100 * (classIdx + subjIdx + 1));
     });
 
     html += `</div>`;
   });
 
-  if (!html) {
-    $("gs_result").innerHTML = `<div class="card"><div class="empty-state"><div class="es-icon">👥</div><div class="es-title">暂无小组数据</div><div class="es-tip">请联系班主任设置学习小组</div></div></div>`;
-    return;
+  if (!myClasses.length || myClasses.every((c) => !allGroups[c] || allGroups[c].length === 0)) {
+    html = `<div class="card"><div class="empty-state"><div class="es-icon">👥</div><div class="es-title">暂无小组数据</div><div class="es-tip">请联系班主任设置学习小组</div></div></div>`;
   }
 
-  $("gs_result").innerHTML = `<div class="cmp-panel">${html}</div>`;
-
-  // 绘制图表
-  setTimeout(() => {
-    myClasses.forEach((classNo) => {
-      const groups = allGroups[classNo] || [];
-      if (groups.length === 0) return;
-      const groupMap = {};
-      groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
-      const groupNames = Object.keys(groupMap).sort();
-
-      mySubjects.forEach((subjectName) => {
-        const datasets = [{
-          label: `${subjectName}均分`,
-          data: groupNames.map((gn) => {
-            const members = groupMap[gn];
-            const memberIds = members.map((m) => m.studentId);
-            const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
-            const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
-            if (scores.length > 0) return +fmt(scores.reduce((a, b) => a + b, 0) / scores.length, 2);
-            return null;
-          })
-        }];
-        drawChart(`gs_chart_${esc(classNo)}_${esc(subjectName)}`, "bar", groupNames, datasets);
-      });
-    });
-  }, 200);
+  html += `</div>`;
+  $("gs_result").innerHTML = html;
 }
 
 window.downloadGroupAnalysis = function () {
   const grade = currentUser.grade;
   const mySubjects = currentUser.subjects || [];
   const examId = $("gs_exam")?.value;
+  const filterClass = $("gs_class")?.value || "";
   if (!examId) { showToast("请先选择考试", "warning"); return; }
   const exam = DB.exams.find((e) => e.id === examId);
+
+  let myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  if (filterClass) myClasses = myClasses.filter((c) => c === filterClass);
+
+  if (!DB.groups) DB.groups = {};
+  if (!DB.groups[grade]) DB.groups[grade] = {};
+  const allGroups = DB.groups[grade];
   const subjects = DB.subjects[grade] || [];
-  const myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+
+  const wb = XLSX.utils.book_new();
+
+  myClasses.forEach((classNo) => {
+    const groups = allGroups[classNo] || [];
+    if (groups.length === 0) return;
+    const groupMap = {};
+    groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
+    const groupNames = Object.keys(groupMap).sort();
+
+    const classRecs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo));
+    const nameToRec = {};
+    classRecs.forEach((r) => { if (r.studentName) nameToRec[r.studentName] = r; });
+
+    mySubjects.forEach((subjectName) => {
+      const subject = subjects.find((s) => s.name === subjectName);
+      if (!subject) return;
+
+      const header = ["排名", "小组", "人数", "均分", "最高分", "最低分", "标准差", "及格率", "优秀率"];
+      const data = [];
+      const metrics = [];
+      groupNames.forEach((gn) => {
+        const members = groupMap[gn];
+        const memberNames = members.map((m) => m.studentName);
+        const recs = classRecs.filter((r) => memberNames.includes(r.studentName));
+        const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
+        if (scores.length > 0) {
+          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+          const passCount = scores.filter((s) => s >= subject.pass).length;
+          const excCount = scores.filter((s) => s >= subject.excellent).length;
+          metrics.push({
+            gn, count: scores.length, avg, max: Math.max(...scores), min: Math.min(...scores),
+            std: mathStdDev(scores), passRate: passCount / scores.length, excRate: excCount / scores.length
+          });
+        } else {
+          metrics.push({ gn, count: members.length, avg: null });
+        }
+      });
+      metrics.sort((a, b) => (b.avg || 0) - (a.avg || 0));
+      metrics.forEach((m, i) => {
+        if (m.avg == null) {
+          data.push(["-", m.gn, m.count, "-", "-", "-", "-", "-", "-"]);
+        } else {
+          data.push([i + 1, m.gn, m.count, fmt(m.avg, 2), m.max, m.min, fmt(m.std, 2),
+            fmt(m.passRate * 100, 1) + "%", fmt(m.excRate * 100, 1) + "%"]);
+        }
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data]), `${classNo}_${subjectName}_统计`);
+
+      const memberHeader = ["学号", "姓名", "小组", "角色", subjectName];
+      const memberData = groups.map((g) => {
+        const rec = nameToRec[g.studentName];
+        return [g.studentId, g.studentName, g.groupName, g.isLeader ? "组长" : "组员", rec?.scores?.[subjectName] ?? "-"];
+      });
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([memberHeader, ...memberData]), `${classNo}_${subjectName}_明细`);
+    });
+  });
+
+  if (wb.SheetNames.length > 0) {
+    XLSX.writeFile(wb, `${grade}_${currentUser.name}_小组成绩分析_${exam.name}.xlsx`);
+    showToast("分析报告已下载", "success");
+  } else {
+    showToast("暂无数据可下载", "warning");
+  }
+};
+
+window.downloadGroupMemberList = function () {
+  const grade = currentUser.grade;
+  const mySubjects = currentUser.subjects || [];
+  const filterClass = $("gs_class")?.value || "";
+
+  let myClasses = [...new Set(DB.records.filter((r) => r.grade === grade && mySubjects.some((s) => r.scores && r.scores[s] != null)).map((r) => r.classNo))].sort();
+  if (filterClass) myClasses = myClasses.filter((c) => c === filterClass);
+
   if (!DB.groups) DB.groups = {};
   if (!DB.groups[grade]) DB.groups[grade] = {};
   const allGroups = DB.groups[grade];
@@ -9754,39 +11067,23 @@ window.downloadGroupAnalysis = function () {
     groups.forEach((g) => { if (!groupMap[g.groupName]) groupMap[g.groupName] = []; groupMap[g.groupName].push(g); });
     const groupNames = Object.keys(groupMap).sort();
 
-    // 每个学科单独一个Sheet
-    mySubjects.forEach((subjectName) => {
-      const subject = subjects.find((s) => s.name === subjectName);
-      if (!subject) return;
-
-      const header = ["小组", "人数", `${subjectName}均分`, `${subjectName}最高分`, `${subjectName}最低分`, "标准差", "及格人数", "及格率", "优秀人数", "优秀率"];
-      const data = [];
-      groupNames.forEach((gn) => {
-        const members = groupMap[gn];
-        const memberIds = members.map((m) => m.studentId);
-        const recs = DB.records.filter((r) => r.examId === examId && classNoEquals(r.classNo, classNo) && memberIds.includes(r.studentId));
-        if (recs.length > 0) {
-          const scores = recs.map((r) => r.scores[subjectName]).filter((v) => typeof v === "number" && !isNaN(v));
-          if (scores.length > 0) {
-            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-            const passCount = scores.filter((s) => s >= subject.pass).length;
-            const excCount = scores.filter((s) => s >= subject.excellent).length;
-            data.push([gn, scores.length, fmt(avg, 2), Math.max(...scores), Math.min(...scores), fmt(mathStdDev(scores), 2), passCount, fmt(passCount / scores.length * 100, 1) + "%", excCount, fmt(excCount / scores.length * 100, 1) + "%"]);
-          } else {
-            data.push([gn, members.length, "-", "-", "-", "-", "-", "-", "-", "-"]);
-          }
-        } else {
-          data.push([gn, members.length, "-", "-", "-", "-", "-", "-", "-", "-"]);
-        }
-      });
-
-      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data]), `${classNo}_${subjectName}`);
+    const header = ["小组名称", "组长", "组员人数", "组员名单"];
+    const data = groupNames.map((gn) => {
+      const members = groupMap[gn];
+      const leader = members.find((m) => m.isLeader);
+      const otherMembers = members.filter((m) => !m.isLeader).map((m) => m.studentName).join("、");
+      return [gn, leader ? leader.studentName : "（未设置）", members.length, otherMembers];
     });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header, ...data]), `${classNo}_小组名单`);
+
+    const detailHeader = ["学号", "姓名", "小组", "角色"];
+    const detailData = groups.map((g) => [g.studentId, g.studentName, g.groupName, g.isLeader ? "组长" : "组员"]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([detailHeader, ...detailData]), `${classNo}_详细名单`);
   });
 
   if (wb.SheetNames.length > 0) {
-    XLSX.writeFile(wb, `${grade}_${currentUser.name}_小组成绩分析.xlsx`);
-    showToast("分析报告已下载", "success");
+    XLSX.writeFile(wb, `${grade}_${currentUser.name}_学习小组名单.xlsx`);
+    showToast("小组名单已下载", "success");
   } else {
     showToast("暂无小组数据", "warning");
   }
