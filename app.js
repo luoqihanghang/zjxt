@@ -47,8 +47,8 @@ const getVisibleRecords = (records) => {
     console.log("[getVisibleRecords] 班主任过滤", { role: currentUser.role, classNo: currentUser.classNo, inputRecords: records.length, outputRecords: filtered.length });
     return filtered;
   }
-  // 任课教师：只能看到已确认的记录
-  return records.filter((r) => r.status === "confirmed");
+  // 任课教师：可以看到已确认和待审核的记录（及时获取最新数据）
+  return records.filter((r) => r.status === "confirmed" || r.status === "pending");
 };
 
 // 学号辅助函数：学号以学生名单为准，无名单时不显示
@@ -8255,8 +8255,9 @@ function refreshTeacherAnalysis() {
   const fullScore = subject.fullScore || 100;
 
   const myClassNos = getTeacherClassNos(currentUser, grade).filter((c) => teacherTeaches(currentUser, grade, c, subjectName));
-  const gradeRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade));
-  const myRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.classNo && myClassNos.indexOf(r.classNo) >= 0 && r.scores[subjectName] != null));
+  const allExamRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade && (r.status === "confirmed" || r.status === "pending"));
+  const gradeRecs = getVisibleRecords(allExamRecs);
+  const myRecs = getVisibleRecords(allExamRecs.filter((r) => r.classNo && myClassNos.some((cn) => classNoEquals(cn, r.classNo)) && r.scores[subjectName] != null));
 
   // 年级学科统计
   const gradeVals = gradeRecs.map((r) => r.scores[subjectName]).filter((v) => v != null);
