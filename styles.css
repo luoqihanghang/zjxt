@@ -3721,6 +3721,16 @@ table.tech-table tr.row-bottom td { background: #fee2e2; }
   font-weight: 600;
 }
 
+.no-data-row {
+  opacity: 0.6;
+  background: linear-gradient(90deg, rgba(156, 163, 175, 0.05), transparent);
+}
+
+.no-data-row td {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* ========== 卡片固定布局 + 分页 ========== */
 .group-manage-card {
   display: flex;

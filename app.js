@@ -396,7 +396,6 @@ const NAV_MENUS = {
     },
     {
       group: "任教科目（作为任课教师）", icon: "📘", items: [
-        { id: "my_scores", icon: "📖", text: "我的班级成绩" },
         { id: "my_ranking", icon: "🏅", text: "我的排行信息" },
         { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
         { id: "group_scores", icon: "👥", text: "小组成绩分析" }
@@ -2326,15 +2325,6 @@ function renderDashboard() {
             <div class="mc-title">智能对比分析</div>
             <div class="mc-desc">AI智能分析班级成绩，对比年级数据，提供班级薄弱学科诊断和教学建议</div>
             <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">班级对比</span><span class="mc-tag">智能诊断</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('my_scores')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">📊</div>
-          <div class="mc-content">
-            <div class="mc-title">我的任教科目成绩</div>
-            <div class="mc-desc">查看自己任教科目的成绩数据，分析学生得分分布，对比年级水平</div>
-            <div class="mc-tags"><span class="mc-tag">学科分析</span><span class="mc-tag">得分分布</span></div>
           </div>
           <div class="mc-arrow">→</div>
         </div>
@@ -4983,7 +4973,7 @@ function getTeacherClassNos(user, grade) {
 
 function computeTeacherRanking(examId, grade) {
   const subjects = DB.subjects[grade] || [];
-  const allRecords = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
+  const allRecords = DB.records.filter((r) => r.examId === examId && r.grade === grade && r.status === "confirmed");
   if (allRecords.length === 0) return { subjects: [], rows: [] };
   // 按归一化后的班级号分组（"7班"/"7"/"七班" 全部归并为 "7班"）
   const byClass = {};
@@ -7807,6 +7797,16 @@ function renderMyRanking() {
     return;
   }
 
+  // 获取本年级所有同科教师
+  const allTeachers = DB.users.filter((u) => u.grade === grade && (u.role === "teacher" || u.role === "headteacher"));
+  const subjectTeachers = {};
+  mySubjectSet.forEach((subj) => {
+    subjectTeachers[subj] = allTeachers.filter((u) => {
+      const subjects = u.subjects || [];
+      return subjects.indexOf(subj) >= 0;
+    });
+  });
+
   // 按考试+学科分组，每组做一次专业分析
   const groupKey = (r) => `${r.examId}_${r.subject}`;
   const groups = {};
@@ -7815,12 +7815,33 @@ function renderMyRanking() {
     if (!groups[k]) groups[k] = { examId: r.examId, examName: r.examName, subject: r.subject, myRow: null, peers: [] };
     if (r.teacherId === currentUser.id) groups[k].myRow = r;
   });
-  // 填充同学科的所有教师
+  // 填充同学科的所有教师（包括没有成绩数据的教师）
   mySubjectSet.forEach((subj) => {
     exams.forEach((e) => {
       const k = `${e.id}_${subj}`;
       if (!groups[k]) return;
       const peerRows = allExamData.filter((r) => r.examId === e.id && r.subject === subj);
+      const existingTeacherIds = new Set(peerRows.filter((p) => p.teacherId).map((p) => p.teacherId));
+      const teachersWithSubject = subjectTeachers[subj] || [];
+      teachersWithSubject.forEach((teacher) => {
+        if (!existingTeacherIds.has(teacher.id)) {
+          peerRows.push({
+            subject: subj,
+            teacherId: teacher.id,
+            teacherName: teacher.name,
+            classNo: teacher.classNo || "-",
+            total: 0,
+            avg: null,
+            excellent: 0, excellentPct: 0, excellentCount: 0,
+            passCount: 0, passPct: 0,
+            good: 0, goodPct: 0, goodCount: 0,
+            low: 0, lowPct: 0, lowCount: 0,
+            compositeScore: 0,
+            gradeAvg: 0,
+            hasData: false
+          });
+        }
+      });
       groups[k].peers = peerRows;
     });
   });
@@ -7828,7 +7849,7 @@ function renderMyRanking() {
   // 计算每组的科学指标
   const groupStats = Object.values(groups).map((g) => {
     if (!g.myRow) return null;
-    const peers = g.peers.filter((p) => p.teacherId); // 排除未分配教师的行
+    const peers = g.peers.filter((p) => p.teacherId && p.avg != null && p.hasData !== false); // 排除未分配教师和无数据的行
     const peerScores = peers.map((p) => p.avg);
     const peerAvg = peerScores.length > 0 ? peerScores.reduce((a, b) => a + b, 0) / peerScores.length : 0;
     const peerStd = peerScores.length > 1 ? mathStdDev(peerScores) : 0;
@@ -7868,19 +7889,24 @@ function renderMyRanking() {
     // 同伴排名表
     const peerRowsHTML = g.peers
       .filter((p) => p.teacherId)
-      .sort((a, b) => b.avg - a.avg)
+      .sort((a, b) => {
+        if (a.avg == null) return 1;
+        if (b.avg == null) return -1;
+        return b.avg - a.avg;
+      })
       .map((p, i) => {
         const isMine = p.teacherId === currentUser.id;
-        return `<tr class="${isMine ? 'my-row-highlight' : ''}">
-          <td>${isMine ? '<span class="me-tag">我</span>' : i + 1}</td>
+        const hasData = p.hasData !== false && p.avg != null;
+        return `<tr class="${isMine ? 'my-row-highlight' : ''} ${!hasData ? 'no-data-row' : ''}">
+          <td>${isMine ? '<span class="me-tag">我</span>' : (hasData ? i + 1 : '-')}</td>
           <td><b>${esc(p.teacherName)}</b>${isMine ? ' ✨' : ''}</td>
           <td>${esc(p.classNo)}</td>
-          <td>${p.total}</td>
-          <td class="${isMine ? 'score-main' : ''}"><b>${fmt(p.avg, 1)}</b></td>
-          <td>${fmtPct(p.excellentPct)}</td>
-          <td>${fmtPct(p.passPct)}</td>
-          <td>${fmtPct(p.lowPct)}</td>
-          <td>${fmt(p.compositeScore * 100, 1)}</td>
+          <td>${hasData ? p.total : '-'}</td>
+          <td class="${isMine ? 'score-main' : ''}"><b>${hasData ? fmt(p.avg, 1) : '-'}</b></td>
+          <td>${hasData ? fmtPct(p.excellentPct) : '-'}</td>
+          <td>${hasData ? fmtPct(p.passPct) : '-'}</td>
+          <td>${hasData ? fmtPct(p.lowPct) : '-'}</td>
+          <td>${hasData ? fmt(p.compositeScore * 100, 1) : '-'}</td>
         </tr>`;
       }).join("");
 
@@ -7889,7 +7915,7 @@ function renderMyRanking() {
         <div class="tech-section-header">
           <h3><span class="tech-dot"></span>📊 ${esc(g.examName)} · ${esc(g.subject)}</h3>
           <div class="tech-section-sub">
-            同学科 ${g.peerCount} 位教师参与对比 · 我的学科内排名：<b>第 ${g.myRow.rank} 名</b> · 班级：${esc(g.myRow.classNo)}
+            同学科 ${g.peerCount} 位教师有数据（${g.peers.filter((p) => p.teacherId).length} 位同科教师） · 我的学科内排名：<b>第 ${g.myRow.rank} 名</b> · 班级：${esc(g.myRow.classNo)}
           </div>
         </div>
 
@@ -7961,9 +7987,12 @@ function renderMyRanking() {
 
     // 渲染图表：同学科对比柱状图
     setTimeout(() => {
-      const peerLabels = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg).map((p) => p.teacherId === currentUser.id ? `${p.teacherName} ⭐` : p.teacherName);
-      const peerAvgs = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg).map((p) => p.avg);
-      const peerColors = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg).map((p) => p.teacherId === currentUser.id ? "#ef4444" : "#6366f1");
+      // 只显示有数据的教师
+      const peersWithData = g.peers.filter((p) => p.teacherId && p.avg != null && p.hasData !== false)
+        .sort((a, b) => b.avg - a.avg);
+      const peerLabels = peersWithData.map((p) => p.teacherId === currentUser.id ? `${p.teacherName} ⭐` : p.teacherName);
+      const peerAvgs = peersWithData.map((p) => p.avg);
+      const peerColors = peersWithData.map((p) => p.teacherId === currentUser.id ? "#ef4444" : "#6366f1");
       const compareCanvas = document.getElementById(compareId);
       if (compareCanvas) {
         if (compareCanvas._chart) compareCanvas._chart.destroy();
@@ -7987,8 +8016,7 @@ function renderMyRanking() {
               tooltip: {
                 callbacks: {
                   afterLabel: (ctx) => {
-                    const sortedPeers = g.peers.filter((p) => p.teacherId).sort((a, b) => b.avg - a.avg);
-                    const p = sortedPeers[ctx.dataIndex];
+                    const p = peersWithData[ctx.dataIndex];
                     if (!p) return "";
                     return `班级：${p.classNo}\n综合分：${fmt(p.compositeScore * 100, 1)}\n优秀率：${fmtPct(p.excellentPct)}`;
                   }
@@ -8009,9 +8037,10 @@ function renderMyRanking() {
       const radarCanvas = document.getElementById(radarId);
       if (radarCanvas) {
         if (radarCanvas._chart) radarCanvas._chart.destroy();
-        const peerAvgOfPct = g.peers.length > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.excellentPct, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0;
-        const peerPassPct = g.peers.length > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.passPct, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0;
-        const peerLowPct = g.peers.length > 0 ? g.peers.filter((p) => p.teacherId).reduce((a, b) => a + b.lowPct, 0) / g.peers.filter((p) => p.teacherId).length * 100 : 0;
+        const validPeers = g.peers.filter((p) => p.teacherId && p.avg != null && p.hasData !== false);
+        const peerAvgOfPct = validPeers.length > 0 ? validPeers.reduce((a, b) => a + b.excellentPct, 0) / validPeers.length * 100 : 0;
+        const peerPassPct = validPeers.length > 0 ? validPeers.reduce((a, b) => a + b.passPct, 0) / validPeers.length * 100 : 0;
+        const peerLowPct = validPeers.length > 0 ? validPeers.reduce((a, b) => a + b.lowPct, 0) / validPeers.length * 100 : 0;
         const myExPct = g.myRow.excellentPct * 100;
         const myPassPct = g.myRow.passPct * 100;
         const myLowPct = g.myRow.lowPct * 100;
