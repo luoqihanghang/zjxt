@@ -309,6 +309,7 @@ const GitHubService = {
         if (hasExamFile || hasMetaFile) {
           this.log(`❌ 主 Gist ID 配置错误！这个 Gist 是业务 Gist（包含 ${fileNames.slice(0, 3).join(", ")}），不是主配置 Gist。`, "error");
           this.log(`👉 请重新创建一个新 Gist 用于存储系统配置（应该只包含 ${this.CONFIG_FILE}）`, "error");
+          return null;
         } else if (fileNames.length > 0) {
           this.log(`ℹ️ 主 Gist 已有 ${fileNames.length} 个文件，但没有 ${this.CONFIG_FILE}（首次使用，将自动创建）`, "warn");
         } else {
@@ -324,6 +325,11 @@ const GitHubService = {
         if (Array.isArray(cfg.dataGistIds) && cfg.dataGistIds.length) {
           this.config.dataGistIds = cfg.dataGistIds;
           localStorage.setItem("gh_data_gist_ids", JSON.stringify(cfg.dataGistIds));
+        } else if (this.config.dataGistIds.length > 0) {
+          // 关键修复：本地有业务 Gist ID 但主 Gist 没有，同步到主 Gist
+          this.log("⚠️ 本地有业务 Gist ID 但主 Gist 没有，同步到主 Gist");
+          cfg.dataGistIds = this.config.dataGistIds;
+          await this.saveConfigDB(cfg);
         }
       }
       return cfg;
@@ -338,7 +344,15 @@ const GitHubService = {
   async saveConfigDB(configPart) {
     if (!this.isConfigured()) return false;
     // 确保 dataGistIds 与最新配置同步
-    configPart.dataGistIds = this.config.dataGistIds;
+    // 关键修复：优先使用传入的 dataGistIds，如果为空才使用本地配置的
+    // 这样可以避免覆盖主 Gist 中已有的业务 Gist ID 列表
+    if (!configPart.dataGistIds || configPart.dataGistIds.length === 0) {
+      configPart.dataGistIds = this.config.dataGistIds;
+    } else {
+      // 合并去重：确保本地配置也包含所有业务 Gist ID
+      this.config.dataGistIds = [...new Set([...this.config.dataGistIds, ...configPart.dataGistIds])];
+      localStorage.setItem("gh_data_gist_ids", JSON.stringify(this.config.dataGistIds));
+    }
     try {
       // 第一次尝试：使用压缩 JSON（无缩进，节省 30-50% 体积）
       const content = JSON.stringify(configPart);
@@ -598,7 +612,16 @@ const GitHubService = {
     this.isSyncing = true;
     const startTime = performance.now();
     try {
+      // 0. 先确保业务 Gist 容量（可能会创建新 Gist，更新 dataGistIds）
+      const activeId = await this.ensureCapacity();
+      if (!activeId) {
+        this.log("❌ 无可用业务 Gist（自动创建失败）", "error");
+        this.isSyncing = false;
+        return false;
+      }
+
       // 1. 主 Gist：配置（每次都写，因为配置变更频繁）
+      // 注意：必须在 ensureCapacity 之后，因为 ensureCapacity 可能会更新 dataGistIds
       const configPart = {
         users: db.users || [],
         subjects: db.subjects || {},
@@ -615,18 +638,11 @@ const GitHubService = {
       };
       const ok1 = await this.saveConfigDB(configPart);
 
-      // 2. 业务 Gist：先确保有活跃 Gist
-      const activeId = await this.ensureCapacity();
-      if (!activeId) {
-        this.isSyncing = false;
-        return ok1;
-      }
-
-      // 3. 业务 Gist：索引文件（每次都写，保证 exams/sends 元数据一致）
+      // 2. 业务 Gist：索引文件（每次都写，保证 exams/sends 元数据一致）
       const meta = { exams: db.exams || [], sends: db.sends || [], rankSends: db.rankSends || [] };
       await this.saveDataMeta(meta);
 
-      // 4. 业务 Gist：按 examId 分组写成绩文件
+      // 3. 业务 Gist：按 examId 分组写成绩文件
       // 【优化】增量模式：若传了 changedExamIds，只写变化的 exam；否则全量写入
       const byExam = {};
       (db.records || []).forEach(r => {
@@ -651,7 +667,7 @@ const GitHubService = {
         );
       }
 
-      // 5. 【删除同步】删除云端存在但本地已删除的考试文件
+      // 4. 【删除同步】删除云端存在但本地已删除的考试文件
       // 只在全量上传时检查，增量上传跳过（避免额外网络请求拖慢速度）
       if (!changedExamIds || changedExamIds.length === 0) {
         const localExamIds = new Set(db.exams.map(e => e.id));
@@ -680,14 +696,16 @@ const GitHubService = {
             this.log(`删除检查 ${gid} 失败: ${e.message}`, "error");
           }
         }
-
-        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-        const deleteMsg = deletedCount > 0 ? `，删除 ${deletedCount} 个已清理文件` : "";
-        this.log(`✅ 上传完成，共 ${examIdsToWrite.length} 个考试文件${deleteMsg}，用时 ${elapsed} 秒`);
-      } else {
-        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-        this.log(`✅ 增量上传完成，共 ${examIdsToWrite.length} 个考试文件，用时 ${elapsed} 秒`);
       }
+
+      // 5. 最后再次更新主 Gist，确保 dataGistIds 是最新的
+      // 这是关键修复：ensureCapacity 可能创建了新 Gist，需要确保主 Gist 中的 dataGistIds 同步
+      configPart.dataGistIds = this.config.dataGistIds;
+      configPart.updatedAt = Date.now();
+      await this.saveConfigDB(configPart);
+
+      const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+      this.log(`✅ 上传完成，共 ${examIdsToWrite.length} 个考试文件，dataGistIds: ${this.config.dataGistIds.length}，用时 ${elapsed} 秒`);
       return true;
     } catch (e) {
       this.log(`❌ saveRemoteDB 异常: ${e.message}`, "error");
@@ -712,6 +730,27 @@ const GitHubService = {
         return null;
       }
 
+      this.log(`主 Gist 配置已加载（${cfg.users?.length || 0} 用户，${cfg.dataGistIds?.length || 0} 业务 Gist）`);
+
+      // 如果主 Gist 里没有业务 Gist 配置，尝试创建一个
+      // 这是关键修复：新设备登录时，如果主 Gist 中没有 dataGistIds，需要自动创建
+      if (!cfg.dataGistIds || cfg.dataGistIds.length === 0) {
+        this.log("⚠️ 主 Gist 中无业务 Gist，尝试创建...");
+        const newGistId = await this.createNewDataGist();
+        if (newGistId) {
+          this.log(`✅ 新业务 Gist 创建成功: ${newGistId}`);
+          // 更新主 Gist 中的 dataGistIds
+          cfg.dataGistIds = [newGistId];
+          await this.saveConfigDB({
+            ...cfg,
+            dataGistIds: [newGistId],
+            updatedAt: Date.now()
+          });
+        } else {
+          this.log("❌ 创建业务 Gist 失败", "error");
+        }
+      }
+
       // 如果主 Gist 里指定了业务 Gist，也读回来
       const meta = await this.loadAllDataMeta();
       const records = await this.loadAllRecords();
@@ -723,6 +762,8 @@ const GitHubService = {
           studentRoster = rosterFromData;
         }
       }
+
+      this.log(`远程数据加载完成：${meta.exams?.length || 0} 考试，${records.length} 成绩记录`);
 
       // 合并成一个 DB 对象（与原有 initDefaultDB 结构一致）
       return {

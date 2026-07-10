@@ -177,10 +177,12 @@ async function loadDB() {
       if (remote && remote.users && remote.users.length > 0) {
         // 成功从 Gist 拉到了真实数据（至少有用户账号）
         localStorage.setItem(DB_KEY, JSON.stringify(remote));
+        console.log("[loadDB] ✅ 成功从云端加载数据（", remote.users.length, "个用户）");
         return remote;
       }
+      console.log("[loadDB] ⚠️ 云端数据为空或无效");
     } catch (e) {
-      console.log("[loadDB] Gist 加载失败，使用本地缓存:", e.message);
+      console.log("[loadDB] ❌ Gist 加载失败:", e.message);
     }
   }
   // 2. 回退到本地浏览器缓存
@@ -189,20 +191,24 @@ async function loadDB() {
     // 本地也没有缓存，创建默认数据（本地优先：不再自动推送到云端）
     db = initDefaultDB();
     localStorage.setItem(DB_KEY, JSON.stringify(db));
+    console.log("[loadDB] 📦 创建默认数据");
   } else {
     try {
       const parsed = JSON.parse(db);
       // 检查本地缓存是否包含真实数据（至少有用户账号）
       if (parsed.users && parsed.users.length > 0) {
         db = parsed;
+        console.log("[loadDB] 📤 从本地缓存加载数据（", parsed.users.length, "个用户）");
       } else {
         // 本地缓存是空的初始化数据
         db = initDefaultDB();
         localStorage.setItem(DB_KEY, JSON.stringify(db));
+        console.log("[loadDB] 📦 本地缓存无效，创建默认数据");
       }
     } catch (e) {
       db = initDefaultDB();
       localStorage.setItem(DB_KEY, JSON.stringify(db));
+      console.log("[loadDB] 📦 本地缓存解析失败，创建默认数据:", e.message);
     }
   }
   return db;
@@ -237,6 +243,12 @@ async function pushToRemote(manual) {
   }
   if (_syncInProgress) {
     if (manual) showToast("正在传输中，请稍候…", "warning");
+    return false;
+  }
+  const hasRealData = DB && DB.users && DB.users.length > 0;
+  if (!hasRealData) {
+    if (manual) showToast("无真实数据，无需上传", "info");
+    else console.log("[pushToRemote] 无真实数据，跳过上传");
     return false;
   }
   _syncInProgress = true;
@@ -348,9 +360,14 @@ async function pullFromRemote(manual) {
 
 // 其他端导航切换时的自动同步：先上传本地更改，再拉取最新
 async function autoSyncOnNavigate() {
-  if (!GitHubService.isConfigured() || _syncInProgress) return;
+  if (!GitHubService.isConfigured()) return;
   try {
-    if (_dirtyFlag) await pushToRemote(false);
+    const hasRealData = DB && DB.users && DB.users.length > 0;
+    if (_dirtyFlag && hasRealData) {
+      await pushToRemote(false);
+    } else if (_dirtyFlag && !hasRealData) {
+      console.log("[navigate] 无真实数据，跳过上传");
+    }
     await pullFromRemote(false);
   } catch (e) {
     console.log("[navigate] 自动同步失败:", e.message);
@@ -713,12 +730,27 @@ function renderSyncStatus() {
       style="font-size:12px;padding:4px 10px;border-radius:12px;display:none">⬇️ 拉取</button>
     <button id="sync-push-btn" class="btn btn-sm btn-success" title="上传本地数据到云端" type="button"
       style="font-size:12px;padding:4px 10px;border-radius:12px;display:none">⬆️ 上传</button>
+    <button id="sync-refresh-btn" class="btn btn-sm btn-warning" title="强制刷新页面（重新加载）" type="button"
+      style="font-size:12px;padding:4px 10px;border-radius:12px;display:none">🔄 刷新</button>
   `;
   const rightBar = document.querySelector(".topbar-right");
   if (rightBar) rightBar.insertBefore(statusDiv, rightBar.firstChild);
-  const pushBtn = $("sync-push-btn"), pullBtn = $("sync-pull-btn");
+  const pushBtn = $("sync-push-btn"), pullBtn = $("sync-pull-btn"), refreshBtn = $("sync-refresh-btn");
   if (pushBtn) pushBtn.onclick = () => pushToRemote(true).then(() => { const r = PAGE_RENDERERS[currentPage]; if (r) r(); });
   if (pullBtn) pullBtn.onclick = () => pullFromRemote(true).then((ok) => { if (ok) { const r = PAGE_RENDERERS[currentPage]; if (r) r(); } });
+  if (refreshBtn) refreshBtn.onclick = () => {
+    if (_syncInProgress) {
+      showToast("正在同步数据，请稍候…", "warning");
+      return;
+    }
+    if (_dirtyFlag) {
+      if (confirm("⚠️ 当前有未上传的本地更改，刷新页面将丢失这些更改。确定要强制刷新吗？")) {
+        location.reload();
+      }
+    } else {
+      location.reload();
+    }
+  };
   updateSyncBadge();
 }
 
@@ -779,9 +811,10 @@ function updateSyncBadge() {
 }
 
 function _setSyncBtns(pushOn, pullOn) {
-  const p = $("sync-push-btn"), l = $("sync-pull-btn");
+  const p = $("sync-push-btn"), l = $("sync-pull-btn"), r = $("sync-refresh-btn");
   if (p) p.style.display = pushOn ? "" : "none";
   if (l) l.style.display = pullOn ? "" : "none";
+  if (r) r.style.display = pullOn ? "" : "none";
 }
 
 function _fmtSyncTime(ts) {
@@ -1017,6 +1050,11 @@ function renderNavMenu() {
 }
 
 async function navigate(pageId) {
+  if (_syncInProgress) {
+    showToast("正在同步数据，请稍候…", "warning");
+    return;
+  }
+
   currentPage = pageId;
   $("navMenu").querySelectorAll(".nav-item").forEach((el) => {
     el.classList.toggle("active", el.dataset.id === pageId);
