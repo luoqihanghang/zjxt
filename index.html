@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>网络智慧教务平台</title>
-<link rel="stylesheet" href="styles.css?v=20260706" />
+<link rel="stylesheet" href="styles.css?v=20260710" />
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="config.js?v=20260706"></script>
@@ -134,13 +134,14 @@
 <!-- 主界面 -->
 <div id="mainApp" class="main-app hidden">
   <!-- 左侧导航 -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">🎓</div>
       <div class="brand">
         <div class="brand-title">智慧教务</div>
         <div class="brand-sub">Smart Edu Platform</div>
       </div>
+      <button class="sidebar-toggle" id="sidebarToggle" title="折叠/展开导航" type="button">◀</button>
     </div>
     <nav id="navMenu" class="nav-menu"></nav>
     <div class="sidebar-footer">
@@ -256,6 +257,6 @@
   <span class="eab-badge hidden" id="eaBadge"></span>
 </button>
 
-<script src="app.js?v=20260706"></script>
+<script src="app.js?v=20260710"></script>
 </body>
 </html>

@@ -212,6 +212,8 @@ const GitHubService = {
     if (!token) throw new Error("Token 为空");
     const githubUrl = `https://api.github.com/gists/${gistId || ""}`;
     const url = this.useProxy ? `${this.CORS_PROXY}${encodeURIComponent(githubUrl)}` : githubUrl;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
     const opts = {
       method,
       headers: {
@@ -219,17 +221,23 @@ const GitHubService = {
         "Accept": "application/vnd.github+json",
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28"
-      }
+      },
+      signal: controller.signal
     };
     if (body) opts.body = JSON.stringify(body);
     try {
       const res = await fetch(url, opts);
+      clearTimeout(timeoutId);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(`${err.message || "HTTP " + res.status}（${res.status}）`);
       }
       return res.status === 204 ? null : res.json();
     } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === "AbortError") {
+        throw new Error("请求超时（30秒），请检查网络或稍后重试");
+      }
       if (this.useProxy && (e.message.includes("Failed to fetch") || e.message.includes("NetworkError"))) {
         this.useProxy = false;
         return this.api(method, gistId, body);
@@ -493,19 +501,43 @@ const GitHubService = {
   },
 
   // 从所有业务 Gist 读取所有 exam-*.json → records 数组
+  // 【优化】并行读取：先批量获取所有 Gist 的文件列表，再批量并发读取（限制并发数）
   async loadAllRecords() {
     const records = [];
-    for (const gid of this.config.dataGistIds) {
-      try {
-        const info = await this.getGistInfo(gid);
-        const files = Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json"));
-        for (const fname of files) {
-          const recs = await this.readGistFile(gid, fname);
-          if (Array.isArray(recs)) records.push(...recs);
+    // 1. 并行获取所有 Gist 的文件列表
+    const gistInfos = await Promise.all(
+      this.config.dataGistIds.map(async (gid) => {
+        try {
+          const info = await this.getGistInfo(gid);
+          return { gid, files: Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json")) };
+        } catch (e) {
+          this.log(`读取 ${gid} 文件列表失败: ${e.message}`, "error");
+          return { gid, files: [] };
         }
-      } catch (e) {
-        this.log(`读取 ${gid} 下的成绩文件失败: ${e.message}`, "error");
-      }
+      })
+    );
+    // 2. 收集所有待读取的文件路径
+    const allFiles = [];
+    gistInfos.forEach(({ gid, files }) => {
+      files.forEach((fname) => {
+        allFiles.push({ gid, fname });
+      });
+    });
+    // 3. 批量并发读取（最多 5 个并发，避免超时）
+    const CONCURRENCY = 5;
+    for (let i = 0; i < allFiles.length; i += CONCURRENCY) {
+      const batch = allFiles.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(
+        batch.map(({ gid, fname }) =>
+          this.readGistFile(gid, fname).catch((e) => {
+            this.log(`读取 ${gid}/${fname} 失败: ${e.message}`, "error");
+            return null;
+          })
+        )
+      );
+      batchResults.forEach((recs) => {
+        if (Array.isArray(recs)) records.push(...recs);
+      });
     }
     return records;
   },
@@ -515,6 +547,7 @@ const GitHubService = {
     const currentId = this.getActiveDataGistId();
     if (!currentId) return false;
     try {
+      // 【优化】索引文件去掉缩进，减少传输体积
       const files = {
         [this.DATA_META_FILE]: { content: JSON.stringify({
           exams: meta.exams || [],
@@ -544,6 +577,7 @@ const GitHubService = {
     }
     try {
       const filename = `exam-${examId}.json`;
+      // 【优化】去掉 JSON 缩进，减少传输体积
       const files = {
         [filename]: { content: JSON.stringify(records) }
       };
@@ -558,11 +592,13 @@ const GitHubService = {
 
   // 一次性完整写入：主 Gist 配置 + 当前业务 Gist 索引 + 每个考试的成绩文件
   // 入参 db 是完整的 DB 对象（users, subjects, exams, records, announcements, sends, rankSends, groups）
-  async saveRemoteDB(db) {
+  // 【优化】changedExamIds：增量上传。只传有变化的 examId，不传则全量写入（首次/强制同步）
+  async saveRemoteDB(db, changedExamIds) {
     if (this.isSyncing) return false;
     this.isSyncing = true;
+    const startTime = performance.now();
     try {
-      // 1. 主 Gist：配置
+      // 1. 主 Gist：配置（每次都写，因为配置变更频繁）
       const configPart = {
         users: db.users || [],
         subjects: db.subjects || {},
@@ -583,26 +619,75 @@ const GitHubService = {
       const activeId = await this.ensureCapacity();
       if (!activeId) {
         this.isSyncing = false;
-        // 业务 Gist 不可用，主 Gist 状态决定返回值
-        return ok1; // true | 'partial' | false
+        return ok1;
       }
 
-      // 3. 业务 Gist：索引文件
+      // 3. 业务 Gist：索引文件（每次都写，保证 exams/sends 元数据一致）
       const meta = { exams: db.exams || [], sends: db.sends || [], rankSends: db.rankSends || [] };
       await this.saveDataMeta(meta);
 
-      // 4. 业务 Gist：按 examId 分组写每个考试的成绩文件
+      // 4. 业务 Gist：按 examId 分组写成绩文件
+      // 【优化】增量模式：若传了 changedExamIds，只写变化的 exam；否则全量写入
       const byExam = {};
       (db.records || []).forEach(r => {
         const k = r.examId;
         if (!byExam[k]) byExam[k] = [];
         byExam[k].push(r);
       });
-      for (const examId of Object.keys(byExam)) {
-        await this.saveExamRecords(examId, byExam[examId]);
+      const examIdsToWrite = changedExamIds && changedExamIds.length > 0
+        ? changedExamIds.filter(id => byExam[id])
+        : Object.keys(byExam);
+
+      if (changedExamIds && changedExamIds.length > 0) {
+        this.log(`🚀 增量上传：${examIdsToWrite.length}/${Object.keys(byExam).length} 个考试文件需更新`);
       }
 
-      // 主 Gist 和业务 Gist 都成功了
+      // 【优化】并行写入多个 exam 文件（最多并发 5 个，避免触发 rate limit）
+      const CONCURRENCY = 5;
+      for (let i = 0; i < examIdsToWrite.length; i += CONCURRENCY) {
+        const batch = examIdsToWrite.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          batch.map((examId) => this.saveExamRecords(examId, byExam[examId]))
+        );
+      }
+
+      // 5. 【删除同步】删除云端存在但本地已删除的考试文件
+      // 只在全量上传时检查，增量上传跳过（避免额外网络请求拖慢速度）
+      if (!changedExamIds || changedExamIds.length === 0) {
+        const localExamIds = new Set(db.exams.map(e => e.id));
+        const localRecordExamIds = new Set((db.records || []).map(r => r.examId));
+        const allLocalExamIds = new Set([...localExamIds, ...localRecordExamIds]);
+
+        // 扫描所有业务 Gist，删除多余的 exam 文件
+        let deletedCount = 0;
+        for (const gid of this.config.dataGistIds) {
+          try {
+            const info = await this.getGistInfo(gid);
+            const files = Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json"));
+            const toDelete = files.filter(filename => {
+              const examId = filename.replace("exam-", "").replace(".json", "");
+              return !allLocalExamIds.has(examId);
+            });
+            if (toDelete.length > 0) {
+              const deleteFiles = {};
+              toDelete.forEach(fn => { deleteFiles[fn] = { content: "" }; });
+              await this.updateGistFiles(gid, deleteFiles,
+                `删除已清理考试数据 · ${new Date().toLocaleString()}`);
+              deletedCount += toDelete.length;
+              this.log(`🗑️ 删除 ${gid.slice(0,8)} 中 ${toDelete.length} 个多余文件: ${toDelete.join(", ")}`);
+            }
+          } catch (e) {
+            this.log(`删除检查 ${gid} 失败: ${e.message}`, "error");
+          }
+        }
+
+        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+        const deleteMsg = deletedCount > 0 ? `，删除 ${deletedCount} 个已清理文件` : "";
+        this.log(`✅ 上传完成，共 ${examIdsToWrite.length} 个考试文件${deleteMsg}，用时 ${elapsed} 秒`);
+      } else {
+        const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
+        this.log(`✅ 增量上传完成，共 ${examIdsToWrite.length} 个考试文件，用时 ${elapsed} 秒`);
+      }
       return true;
     } catch (e) {
       this.log(`❌ saveRemoteDB 异常: ${e.message}`, "error");
