@@ -579,11 +579,17 @@ input:checked + .slider:before { transform: translateX(22px); }
                                         </div>
                                         <div class="form-item">
                                             <label class="form-label">分配策略</label>
-                                            <select class="form-select layer-strategy" data-layer="0">
+                                            <select class="form-select layer-strategy" data-layer="0" onchange="updateFixedRoomOption(0)">
+                                                <option value="fixedRoom">固定考场（全部进入指定考场）</option>
                                                 <option value="snakeRoom">蛇形分配（S形）</option>
                                                 <option value="roundRobin">轮次分配</option>
                                                 <option value="sequential">按顺序填充</option>
                                                 <option value="balanced">均衡分配</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-item" id="fixedRoomSelect-0" style="display:none;">
+                                            <label class="form-label">目标考场</label>
+                                            <select class="form-select layer-fixed-room" data-layer="0">
                                             </select>
                                         </div>
                                     </div>
@@ -2019,11 +2025,17 @@ function addLayer() {
                     </div>
                     <div class="form-item">
                         <label class="form-label">分配策略</label>
-                        <select class="form-select layer-strategy" data-layer="${layerIdx}">
+                        <select class="form-select layer-strategy" data-layer="${layerIdx}" onchange="updateFixedRoomOption(${layerIdx})">
+                            <option value="fixedRoom">固定考场（全部进入指定考场）</option>
                             <option value="snakeRoom">蛇形分配（S形）</option>
                             <option value="roundRobin">轮次分配</option>
                             <option value="sequential">按顺序填充</option>
                             <option value="balanced">均衡分配</option>
+                        </select>
+                    </div>
+                    <div class="form-item" id="fixedRoomSelect-${layerIdx}" style="display:none;">
+                        <label class="form-label">目标考场</label>
+                        <select class="form-select layer-fixed-room" data-layer="${layerIdx}">
                         </select>
                     </div>
                 </div>
@@ -2088,6 +2100,48 @@ function updateRoomSelections() {
             ${r.roomName || '考场' + r.roomNo} (${calcRoomSeats(r)}座)
         </label>
     `).join('') + '</div>';
+    
+    updateAllFixedRoomSelects();
+}
+
+function updateFixedRoomOption(layerIdx) {
+    const strategy = document.querySelector(`.layer-strategy[data-layer="${layerIdx}"]`).value;
+    const selectDiv = document.getElementById(`fixedRoomSelect-${layerIdx}`);
+    if (!selectDiv) return;
+    
+    if (strategy === 'fixedRoom') {
+        selectDiv.style.display = 'block';
+        updateFixedRoomSelect(layerIdx);
+    } else {
+        selectDiv.style.display = 'none';
+    }
+}
+
+function updateAllFixedRoomSelects() {
+    document.querySelectorAll('.layer-strategy').forEach((el, idx) => {
+        const layerIdx = parseInt(el.dataset.layer);
+        if (el.value === 'fixedRoom') {
+            const selectDiv = document.getElementById(`fixedRoomSelect-${layerIdx}`);
+            if (selectDiv) {
+                selectDiv.style.display = 'block';
+                updateFixedRoomSelect(layerIdx);
+            }
+        }
+    });
+}
+
+function updateFixedRoomSelect(layerIdx) {
+    const select = document.querySelector(`.layer-fixed-room[data-layer="${layerIdx}"]`);
+    if (!select) return;
+    
+    if (appData.rooms.length === 0) {
+        select.innerHTML = '<option value="">请先添加考场</option>';
+        return;
+    }
+    
+    select.innerHTML = appData.rooms.map(r => `
+        <option value="${r.roomNo}">${r.roomName || '考场' + r.roomNo}</option>
+    `).join('');
 }
 
 function doArrange() {
@@ -2206,6 +2260,7 @@ function doLayeredArrange(selectedRooms) {
         const valueEl = document.querySelector(`.layer-value[data-layer="${i}"]`);
         const sortEl = document.querySelector(`.layer-sort[data-layer="${i}"]`);
         const strategyEl = document.querySelector(`.layer-strategy[data-layer="${i}"]`);
+        const fixedRoomEl = document.querySelector(`.layer-fixed-room[data-layer="${i}"]`);
         
         if (methodEl || sortEl) {
             layers.push({
@@ -2214,6 +2269,7 @@ function doLayeredArrange(selectedRooms) {
                 value: valueEl ? parseFloat(valueEl.value) || 0 : 0,
                 sort: sortEl ? sortEl.value : 'random',
                 strategy: strategyEl ? strategyEl.value : 'roundRobin',
+                fixedRoomNo: fixedRoomEl ? fixedRoomEl.value : null,
                 isLast: i === totalLayers - 1
             });
         }
@@ -2271,9 +2327,17 @@ function doLayeredArrange(selectedRooms) {
         layerStudents = sortStudents(layerStudents, layer.sort);
         
         // 分配本层学生到考场
+        let targetRooms = selectedRooms;
+        if (layer.strategy === 'fixedRoom' && layer.fixedRoomNo) {
+            const targetRoom = selectedRooms.find(r => r.roomNo === layer.fixedRoomNo);
+            if (targetRoom) {
+                targetRooms = [targetRoom];
+            }
+        }
+        
         assignStudentsToRooms(
             layerStudents, 
-            selectedRooms, 
+            targetRooms, 
             layer.strategy,
             document.getElementById('fillOrder') ? document.getElementById('fillOrder').value : 'rowMajor',
             document.getElementById('startPosition') ? document.getElementById('startPosition').value : 'tl',
@@ -2447,6 +2511,9 @@ function assignStudentsToRooms(students, rooms, strategy, seatFillOrder, startPo
     }
     
     switch (strategy) {
+        case 'fixedRoom':
+            assignFixedRoom(students, roomSeats, appendMode, roomSeats[0] && roomSeats[0].room);
+            break;
         case 'sequential':
             assignSequential(students, roomSeats, appendMode);
             break;
@@ -2467,6 +2534,29 @@ function assignStudentsToRooms(students, rooms, strategy, seatFillOrder, startPo
             break;
         default:
             assignSequential(students, roomSeats, appendMode);
+    }
+}
+
+// 策略0：固定考场（全部进入指定考场）
+function assignFixedRoom(students, roomSeats, appendMode, targetRoom) {
+    if (!targetRoom) {
+        assignSequential(students, roomSeats, appendMode);
+        return;
+    }
+    
+    const targetRoomSeats = roomSeats.find(rs => rs.room.roomNo === targetRoom.roomNo);
+    if (!targetRoomSeats) {
+        assignSequential(students, roomSeats, appendMode);
+        return;
+    }
+    
+    let studentIdx = 0;
+    const startIdx = targetRoomSeats.occupied;
+    for (let i = startIdx; i < targetRoomSeats.seats.length && studentIdx < students.length; i++) {
+        const student = students[studentIdx];
+        const seat = targetRoomSeats.seats[i];
+        addArrangement(student, targetRoomSeats.room, seat);
+        studentIdx++;
     }
 }
 
