@@ -487,19 +487,7 @@ const NAV_MENUS = {
     },
     {
       group: "人员管理", icon: "👥", items: [
-        { id: "users", icon: "👤", text: "教师名单管理" },
-        { id: "permissions", icon: "🔐", text: "权限管理" }
-      ]
-    },
-    {
-      group: "教学设置", icon: "🎓", items: [
-        { id: "grades", icon: "🏫", text: "年级设置" },
-        { id: "exams", icon: "📝", text: "考试管理" }
-      ]
-    },
-    {
-      group: "公告消息", icon: "📢", items: [
-        { id: "announcements_all", icon: "📢", text: "公告管理" }
+        { id: "users", icon: "👤", text: "教师名单管理" }
       ]
     },
     {
@@ -2506,109 +2494,68 @@ function renderDashboard() {
   let roleSection = "";
 
   if (currentUser.role === "admin") {
-    // ===== 管理员：全学校视角 =====
+    // ===== 管理员：快速入口 =====
     const grades = Object.keys(DB.subjects);
-
-    // 计算每个年级的核心数据
-    const gradeRows = grades.map((g) => {
-      const userCount = DB.users.filter((u) => u.grade === g).length;
-      const examCount = DB.exams.filter((e) => e.grade === g && !e.isClassExam).length;
-      const recCount = DB.records.filter((r) => r.grade === g).length;
-      const recentExam = DB.exams.filter((e) => e.grade === g && !e.isClassExam).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-      let recentAvg = "-";
-      if (recentExam) {
-        const recs = DB.records.filter((r) => r.examId === recentExam.id);
-        if (recs.length > 0) {
-          const totalAvg = recs.map((r) => {
-            const vs = Object.values(r.scores || {}).filter((v) => v != null);
-            if (vs.length === 0) return null;
-            return vs.reduce((a, b) => a + b, 0) / vs.length;
-          }).filter(v => v != null);
-          if (totalAvg.length > 0) recentAvg = fmt(totalAvg.reduce((a, b) => a + b, 0) / totalAvg.length);
-        }
-      }
-      const htCount = DB.users.filter((u) => u.grade === g && u.role === "headteacher").length;
-      const subjectCount = (DB.subjects[g] || []).length;
-      return { grade: g, users: userCount, exams: examCount, recs: recCount, avg: recentAvg, ht: htCount, subjects: subjectCount };
-    });
-
-    // 图表数据
-    const gradeChartLabels = gradeRows.map((r) => r.grade);
-    const examCounts = gradeRows.map((r) => r.exams);
-    const recCounts = gradeRows.map((r) => r.recs);
-
-    // 功能模块介绍
-    const adminModules = `
-      <div class="dashboard-modules">
-        <div class="module-card" onclick="navigate('users')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">👥</div>
-          <div class="mc-content">
-            <div class="mc-title">教师名单管理</div>
-            <div class="mc-desc">批量导入导出教师信息，管理教师账号、角色、任课学科，支持Excel模板下载</div>
-            <div class="mc-tags"><span class="mc-tag">批量导入</span><span class="mc-tag">角色管理</span><span class="mc-tag">密码重置</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('grades')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">🏫</div>
-          <div class="mc-content">
-            <div class="mc-title">年级设置</div>
-            <div class="mc-desc">管理学校年级信息，查看各年级教师、学生数据统计，支持多年级数据隔离</div>
-            <div class="mc-tags"><span class="mc-tag">年级管理</span><span class="mc-tag">数据统计</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('exams')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">📝</div>
-          <div class="mc-content">
-            <div class="mc-title">考试管理</div>
-            <div class="mc-desc">创建和管理考试，设置考试科目，查看考试进度，支持成绩汇总分析</div>
-            <div class="mc-tags"><span class="mc-tag">考试创建</span><span class="mc-tag">进度跟踪</span><span class="mc-tag">成绩汇总</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('announcements_all')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)">📢</div>
-          <div class="mc-content">
-            <div class="mc-title">公告管理</div>
-            <div class="mc-desc">发布和管理系统公告，向指定年级广播通知，支持消息推送和历史记录</div>
-            <div class="mc-tags"><span class="mc-tag">消息发布</span><span class="mc-tag">年级广播</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-      </div>
-    `;
+    const gradeCount = grades.length;
+    const teacherCount = DB.users.filter(u => u.role !== "admin").length;
+    const examCount = DB.exams.filter(e => !e.isClassExam).length;
 
     roleSection = `
-      ${adminModules}
-
-      <div class="dashboard-grid-2">
-        <div class="card">
-          <div class="card-title">🏫 各年级数据概况</div>
-          <div class="table-wrap"><table class="data-table">
-            <thead><tr><th>年级</th><th>学科</th><th>教师</th><th>班主任</th><th>考试</th><th>成绩</th><th>均分</th></tr></thead>
-            <tbody>
-              ${gradeRows.length === 0 ? `<tr><td colspan="7"><div class="empty-state"><div class="es-tip">暂无年级数据</div></div></td></tr>` : gradeRows.map((r) => `<tr>
-                <td><b>${r.grade}</b></td><td>${r.subjects}</td><td>${r.users}</td><td>${r.ht}</td><td>${r.exams}</td><td>${r.recs}</td><td><b style="color:#3b82f6">${r.avg}</b></td>
-              </tr>`).join("")}
-            </tbody>
-          </table></div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">📊 考试与成绩趋势</div>
-          <div class="chart-box" style="height:280px"><canvas id="adminGradeChart"></canvas></div>
+      <div class="admin-quick-grid">
+        <div class="aq-card" onclick="navigate('users')" style="--aq-color:#3b82f6;--aq-color2:#60a5fa">
+          <div class="aq-icon">👥</div>
+          <div class="aq-title">教师名单管理</div>
+          <div class="aq-desc">管理年组、添加教师、批量导入导出</div>
+          <div class="aq-stat">${teacherCount} 位教师 · ${gradeCount} 个年组</div>
+          <div class="aq-go">进入 →</div>
         </div>
       </div>
+      <style>
+        .admin-quick-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          gap: 20px;
+          margin-top: 8px;
+        }
+        .aq-card {
+          background: linear-gradient(135deg, var(--aq-color), var(--aq-color2));
+          color: #fff;
+          border-radius: 16px;
+          padding: 28px 24px;
+          cursor: pointer;
+          transition: transform 0.2s, box-shadow 0.2s;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          position: relative;
+          overflow: hidden;
+        }
+        .aq-card::after {
+          content: ""; position: absolute; right: -30px; bottom: -30px;
+          width: 100px; height: 100px; border-radius: 50%;
+          background: rgba(255,255,255,0.12);
+        }
+        .aq-card:hover {
+          transform: translateY(-4px) scale(1.02);
+          box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+        }
+        .aq-icon { font-size: 36px; }
+        .aq-title { font-size: 20px; font-weight: 700; }
+        .aq-desc { font-size: 13px; opacity: 0.85; }
+        .aq-stat {
+          font-size: 12px; opacity: 0.7;
+          background: rgba(255,255,255,0.2);
+          padding: 4px 12px; border-radius: 10px;
+          align-self: flex-start;
+        }
+        .aq-go {
+          font-size: 14px; font-weight: 600; opacity: 0.8;
+          border-top: 1px solid rgba(255,255,255,0.25);
+          padding-top: 12px; margin-top: 4px;
+        }
+      </style>
     `;
 
-    setTimeout(() => {
-      if (gradeChartLabels.length === 0) return;
-      drawChart("adminGradeChart", "bar", gradeChartLabels, [
-        { label: "考试数", data: examCounts, color: "#3b82f6" },
-        { label: "成绩记录", data: recCounts, color: "#10b981" }
-      ]);
-    }, 50);
   } else if (currentUser.role === "academic") {
     // ===== 教务老师 =====
     const grade = currentUser.grade;
@@ -2890,18 +2837,17 @@ function renderDashboard() {
     <div class="dashboard-welcome">
       <div class="dw-content">
         <h1 class="dw-title">欢迎回来，${currentUser.name}！</h1>
-        <p class="dw-subtitle">${getRoleWelcome(currentUser.role)} · ${currentUser.grade || ""}</p>
+        <p class="dw-subtitle">${getRoleWelcome(currentUser.role)}${currentUser.grade ? " · " + currentUser.grade : ""}</p>
       </div>
       <div class="dw-icon">🎓</div>
     </div>
 
-    ${statsCards}
-    ${roleSection}
+    ${currentUser.role === "admin" ? roleSection : `${statsCards}${roleSection}
 
     <div class="card">
       <div class="card-title">📢 最近公告</div>
       <div class="ann-list">${annHtml}</div>
-    </div>
+    </div>`}
   `;
 }
 
@@ -3002,13 +2948,14 @@ function renderAdminGradeCards(allUsers) {
           <button class="btn btn-primary" onclick="downloadTeacherTemplate()">📥 下载模板</button>
           <button class="btn btn-warning" onclick="showBatchUploadModal()">📤 批量导入</button>
           <button class="btn btn-success" onclick="editUser(null)">+ 添加教师</button>
+          <button class="btn btn-primary" onclick="addGradeFromUsers()">🏫 创建年组</button>
         </span>
       </div>
       <div style="margin-bottom:16px;font-size:13px;color:var(--text-light)">
         共 ${sortedGrades.length} 个年级 · 班主任 ${headteachers.length} 人 · 任课教师 ${teachers.length} 人 · 教务老师 ${academics.length} 人
       </div>
       <div class="grade-cards-grid">
-        ${gradeCards || `<div class="empty-state"><div class="es-tip">暂无教师，点击右上角添加</div></div>`}
+        ${gradeCards || `<div class="empty-state"><div class="es-tip">暂无年组，请先点击右上角「🏫 创建年组」</div></div>`}
       </div>
     </div>
     <style>
@@ -3221,6 +3168,36 @@ window.enterAdminGrade = function(grade) {
 window.exitAdminGrade = function() {
   window._adminTeacherGrade = null;
   renderUsers();
+};
+
+// 从教师名单页面创建年组
+window.addGradeFromUsers = function () {
+  const existingGrades = Object.keys(DB.subjects);
+  showModal("🏫 创建年组", `
+    <div class="form-group">
+      <label>年组名称</label>
+      <input id="m_new_grade" placeholder="如 高一年级、高二年级" />
+    </div>
+    ${existingGrades.length > 0 ? `
+    <div style="margin-top:12px;padding:12px;background:#f5f7fa;border-radius:8px;font-size:13px;color:#666">
+      <b>已有年组：</b>${existingGrades.map(g => `<span style="display:inline-block;margin:2px 4px;padding:2px 10px;background:#eef2ff;border-radius:8px;color:#5b6ee1">${esc(g)}</span>`).join("")}
+    </div>` : ""}
+    <div style="margin-top:12px;font-size:13px;color:#999">
+      💡 创建年组后，即可在该年组下添加教师、设置学科和考试。
+    </div>
+  `, "创建", async () => {
+    const g = $("m_new_grade").value.trim();
+    if (!g) { showToast("请输入年组名称", "error"); return false; }
+    if (DB.subjects[g]) { showToast("该年组已存在", "error"); return false; }
+    DB.subjects[g] = [];
+    const syncResult = await saveDB(DB);
+    if (syncResult === true) {
+      showToast(`✅ 年组「${g}」已创建`, "success");
+    } else {
+      showToast(`✅ 年组「${g}」已创建（云端同步失败）`, "warning");
+    }
+    renderUsers();
+  });
 };
 
 // 教务端教师名单视图：按科目分类，只读
@@ -3617,7 +3594,10 @@ window.editUser = function (id) {
 
       <div class="user-form-row">
         <div class="form-group"><label>所属年级</label>
-          <select id="m_grade">${grades.map((g) => `<option ${u?.grade === g ? "selected" : ""}>${esc(g)}</option>`).join("")}${grades.length === 0 ? `<option>请先添加年级</option>` : ""}</select>
+          ${grades.length === 0
+            ? `<div style="display:flex;gap:8px;align-items:center"><span style="color:#999;font-size:13px">暂无年组</span><button type="button" class="btn btn-sm btn-primary" onclick="addGradeFromUsers(); closeModal();">🏫 创建年组</button></div>`
+            : `<select id="m_grade">${grades.map((g) => `<option ${u?.grade === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select>`
+          }
         </div>
         <div id="m_class_field_teacher" class="form-group" style="display:none;">
           <label>任教班级（多班用逗号分隔，不填则全年级）</label>
@@ -3650,7 +3630,9 @@ window.editUser = function (id) {
     const name = $("m_name").value.trim();
     const password = $("m_password").value.trim();
     const role = $("m_role").value;
-    const grade = $("m_grade").value.trim();
+    const gradeEl = $("m_grade");
+    const grade = gradeEl ? gradeEl.value.trim() : "";
+    if (!grade) { showToast("请先创建年组", "error"); return false; }
     const subjects = $("m_subjects").value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
     const isAcademic = currentUser.role === "academic";
 
