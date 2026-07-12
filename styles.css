@@ -2695,6 +2695,49 @@ table.err-table tr.err-warn:hover td { filter: brightness(0.97); }
   color: #fff;
 }
 
+.admin-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 18px;
+  margin-top: 8px;
+}
+.aq-card {
+  background: linear-gradient(135deg, var(--aq-color), var(--aq-color2));
+  color: #fff;
+  border-radius: 16px;
+  padding: 26px 22px;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.aq-card::after {
+  content: ""; position: absolute; right: -30px; bottom: -30px;
+  width: 100px; height: 100px; border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+}
+.aq-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+}
+.aq-icon { font-size: 34px; }
+.aq-title { font-size: 18px; font-weight: 700; }
+.aq-desc { font-size: 13px; opacity: 0.85; }
+.aq-stat {
+  font-size: 12px; opacity: 0.7;
+  background: rgba(255,255,255,0.2);
+  padding: 4px 12px; border-radius: 10px;
+  align-self: flex-start;
+}
+.aq-go {
+  font-size: 14px; font-weight: 600; opacity: 0.8;
+  border-top: 1px solid rgba(255,255,255,0.25);
+  padding-top: 12px; margin-top: 4px;
+}
+
 .dw-content {
   flex: 1;
 }

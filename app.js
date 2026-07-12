@@ -503,29 +503,24 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "基础设置", icon: "⚙️", items: [
+      group: "考试与成绩", icon: "📊", items: [
         { id: "exams", icon: "📝", text: "考试管理" },
+        { id: "academic_upload_scores", icon: "📥", text: "上传全年级成绩" },
+        { id: "class_ranking", icon: "🏆", text: "全年级排名" },
+        { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" }
+      ]
+    },
+    {
+      group: "数据分析", icon: "🔍", items: [
+        { id: "academic_analysis", icon: "🔍", text: "全平台智能分析" },
+        { id: "exam_compare", icon: "🔄", text: "多次考试对比" }
+      ]
+    },
+    {
+      group: "考务与名单", icon: "📋", items: [
+        { id: "exam_arrangement", icon: "🏛️", text: "排考场系统" },
         { id: "student_roster", icon: "📋", text: "学生名单管理" },
         { id: "users", icon: "👩‍🏫", text: "教师名单" }
-      ]
-    },
-    {
-      group: "成绩汇总分析", icon: "📊", items: [
-        { id: "academic_upload_scores", icon: "📥", text: "上传全年级成绩（教务）" },
-        { id: "class_ranking", icon: "🏆", text: "全年级排名" },
-        { id: "teacher_ranking", icon: "🎖️", text: "教师排行榜" },
-        { id: "academic_analysis", icon: "🔍", text: "全平台智能分析" },
-        { id: "exam_compare", icon: "🔄", text: "多次考试对比分析" }
-      ]
-    },
-    {
-      group: "考务管理", icon: "🏛️", items: [
-        { id: "exam_arrangement", icon: "📋", text: "排考场系统" }
-      ]
-    },
-    {
-      group: "全年组通知", icon: "🔔", items: [
-        { id: "grade_notifications", icon: "📣", text: "发布/管理通知" }
       ]
     },
     {
@@ -557,11 +552,6 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "年级通知", icon: "🔔", items: [
-        { id: "grade_notifications", icon: "📣", text: "全年组通知" }
-      ]
-    },
-    {
       group: "个人中心", icon: "👤", items: [
         { id: "account_profile", icon: "🔐", text: "修改我的密码" }
       ]
@@ -580,14 +570,14 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "班级成绩（班主任）", icon: "📖", items: [
+      group: "班级成绩", icon: "📖", items: [
         { id: "my_class_scores", icon: "📖", text: "本班考试成绩" },
         { id: "class_ranking", icon: "🏆", text: "本班排名统计" },
         { id: "download_scores", icon: "📤", text: "下载Excel成绩" }
       ]
     },
     {
-      group: "任教科目（作为任课教师）", icon: "📘", items: [
+      group: "任教科目", icon: "📘", items: [
         { id: "my_ranking", icon: "🏅", text: "我的排行信息" },
         { id: "teacher_analysis", icon: "🔍", text: "学科对比分析" },
         { id: "group_scores", icon: "👥", text: "小组成绩分析" }
@@ -602,11 +592,6 @@ const NAV_MENUS = {
     {
       group: "小组管理", icon: "👥", items: [
         { id: "group_manage", icon: "👥", text: "学习小组管理" }
-      ]
-    },
-    {
-      group: "年级通知", icon: "🔔", items: [
-        { id: "grade_notifications", icon: "📣", text: "全年组通知" }
       ]
     },
     {
@@ -2510,50 +2495,6 @@ function renderDashboard() {
           <div class="aq-go">进入 →</div>
         </div>
       </div>
-      <style>
-        .admin-quick-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-          gap: 20px;
-          margin-top: 8px;
-        }
-        .aq-card {
-          background: linear-gradient(135deg, var(--aq-color), var(--aq-color2));
-          color: #fff;
-          border-radius: 16px;
-          padding: 28px 24px;
-          cursor: pointer;
-          transition: transform 0.2s, box-shadow 0.2s;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-          position: relative;
-          overflow: hidden;
-        }
-        .aq-card::after {
-          content: ""; position: absolute; right: -30px; bottom: -30px;
-          width: 100px; height: 100px; border-radius: 50%;
-          background: rgba(255,255,255,0.12);
-        }
-        .aq-card:hover {
-          transform: translateY(-4px) scale(1.02);
-          box-shadow: 0 8px 28px rgba(0,0,0,0.18);
-        }
-        .aq-icon { font-size: 36px; }
-        .aq-title { font-size: 20px; font-weight: 700; }
-        .aq-desc { font-size: 13px; opacity: 0.85; }
-        .aq-stat {
-          font-size: 12px; opacity: 0.7;
-          background: rgba(255,255,255,0.2);
-          padding: 4px 12px; border-radius: 10px;
-          align-self: flex-start;
-        }
-        .aq-go {
-          font-size: 14px; font-weight: 600; opacity: 0.8;
-          border-top: 1px solid rgba(255,255,255,0.25);
-          padding-top: 12px; margin-top: 4px;
-        }
-      </style>
     `;
 
   } else if (currentUser.role === "academic") {
@@ -2579,81 +2520,63 @@ function renderDashboard() {
       }
     }
 
-    const academicModules = `
-      <div class="dashboard-modules">
-        <div class="module-card" onclick="navigate('exams')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">📚</div>
-          <div class="mc-content">
-            <div class="mc-title">考试管理与科目分值</div>
-            <div class="mc-desc">新建考试自动沿用上次科目分值；每场考试可独立编辑/删除学科、批量导入导出Excel</div>
-            <div class="mc-tags"><span class="mc-tag">新建考试</span><span class="mc-tag">科目分值</span><span class="mc-tag">批量导入</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('academic_upload_scores')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">📝</div>
-          <div class="mc-content">
-            <div class="mc-title">上传全年级成绩</div>
-            <div class="mc-desc">上传各班成绩Excel，自动校验数据错误并给出详细解读，支持单科/全科模式</div>
-            <div class="mc-tags"><span class="mc-tag">成绩上传</span><span class="mc-tag">数据校验</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('grade_summary')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">📊</div>
-          <div class="mc-content">
-            <div class="mc-title">成绩汇总</div>
-            <div class="mc-desc">汇总各班级成绩数据，审核班主任上传的成绩，生成年级成绩总表</div>
-            <div class="mc-tags"><span class="mc-tag">成绩审核</span><span class="mc-tag">数据汇总</span><span class="mc-tag">导出报表</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('teacher_ranking')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#ec4899,#f472b6)">🏆</div>
-          <div class="mc-content">
-            <div class="mc-title">教师排行榜</div>
-            <div class="mc-desc">查看各学科教师教学成绩排名，分析班级平均分对比，激励教学竞争</div>
-            <div class="mc-tags"><span class="mc-tag">成绩排名</span><span class="mc-tag">班级对比</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('academic_analysis')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">🔍</div>
-          <div class="mc-content">
-            <div class="mc-title">全平台智能分析</div>
-            <div class="mc-desc">AI智能分析年级成绩数据，提供薄弱学科诊断、教学建议、学生关注名单</div>
-            <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">智能诊断</span><span class="mc-tag">教学建议</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-      </div>
-    `;
-
     roleSection = `
-      <div class="dashboard-quick-stats">
-        <div class="qs-item">
-          <div class="qs-value">${gradeExams.length}</div>
-          <div class="qs-label">累计考试</div>
+      <div class="admin-quick-grid">
+        <div class="aq-card" onclick="navigate('exams')" style="--aq-color:#8b5cf6;--aq-color2:#a78bfa">
+          <div class="aq-icon">📝</div>
+          <div class="aq-title">考试管理</div>
+          <div class="aq-desc">新建考试、设置科目分值</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${gradeSubjects}</div>
-          <div class="qs-label">学科配置</div>
+        <div class="aq-card" onclick="navigate('academic_upload_scores')" style="--aq-color:#f59e0b;--aq-color2:#fbbf24">
+          <div class="aq-icon">📥</div>
+          <div class="aq-title">上传全年级成绩</div>
+          <div class="aq-desc">上传各班成绩Excel</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${teachers}</div>
-          <div class="qs-label">年级教师</div>
+        <div class="aq-card" onclick="navigate('class_ranking')" style="--aq-color:#10b981;--aq-color2:#34d399">
+          <div class="aq-icon">🏆</div>
+          <div class="aq-title">全年级排名</div>
+          <div class="aq-desc">查看各班排名统计</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item highlight">
-          <div class="qs-value">${recentExam ? recentExam.name : '-'}</div>
-          <div class="qs-label">最近考试</div>
+        <div class="aq-card" onclick="navigate('teacher_ranking')" style="--aq-color:#ec4899;--aq-color2:#f472b6">
+          <div class="aq-icon">🎖️</div>
+          <div class="aq-title">教师排行榜</div>
+          <div class="aq-desc">各学科教师教学成绩排名</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${examStats.avg}</div>
-          <div class="qs-label">年级均分</div>
+        <div class="aq-card" onclick="navigate('academic_analysis')" style="--aq-color:#3b82f6;--aq-color2:#60a5fa">
+          <div class="aq-icon">🔍</div>
+          <div class="aq-title">全平台智能分析</div>
+          <div class="aq-desc">AI智能分析年级成绩</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('exam_compare')" style="--aq-color:#06b6d4;--aq-color2:#67e8f9">
+          <div class="aq-icon">🔄</div>
+          <div class="aq-title">多次考试对比</div>
+          <div class="aq-desc">对比多次考试成绩趋势</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('exam_arrangement')" style="--aq-color:#6366f1;--aq-color2:#818cf8">
+          <div class="aq-icon">🏛️</div>
+          <div class="aq-title">排考场系统</div>
+          <div class="aq-desc">考场安排与座位编排</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('student_roster')" style="--aq-color:#14b8a6;--aq-color2:#5eead4">
+          <div class="aq-icon">📋</div>
+          <div class="aq-title">学生名单管理</div>
+          <div class="aq-desc">管理本年级学生名单</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('users')" style="--aq-color:#d46b08;--aq-color2:#fa8c16">
+          <div class="aq-icon">👩‍🏫</div>
+          <div class="aq-title">教师名单</div>
+          <div class="aq-desc">查看本年级教师信息</div>
+          <div class="aq-go">进入 →</div>
         </div>
       </div>
-
-      ${academicModules}
     `;
   } else if (currentUser.role === "headteacher") {
     // ===== 班主任 =====
@@ -2661,163 +2584,90 @@ function renderDashboard() {
     const classNo = currentUser.classNo;
     const mySubjects = currentUser.subjects || [];
 
-    // 班级数据统计
-    const classExams = DB.exams.filter(e => e.grade === grade);
-    const classRecords = DB.records.filter(r => r.grade === grade && classNoEquals(r.classNo, classNo));
-    const totalRecs = classRecords.length;
-
-    // 最近考试数据
-    const recentExam = classExams.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    let classAvg = "-";
-    if (recentExam) {
-      const recs = classRecords.filter(r => r.examId === recentExam.id);
-      if (recs.length > 0) {
-        const avgs = recs.map(r => {
-          const vs = Object.values(r.scores || {}).filter(v => v != null);
-          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
-        }).filter(v => v != null);
-        classAvg = avgs.length ? fmt(avgs.reduce((a, b) => a + b, 0) / avgs.length) : "-";
-      }
-    }
-
-    const htModules = `
-      <div class="dashboard-modules">
-        <div class="module-card" onclick="navigate('upload_scores')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#3b82f6,#60a5fa)">📤</div>
-          <div class="mc-content">
-            <div class="mc-title">上传班级成绩</div>
-            <div class="mc-desc">批量导入学生成绩，支持Excel表格上传，自动计算总分和班级统计</div>
-            <div class="mc-tags"><span class="mc-tag">Excel导入</span><span class="mc-tag">批量上传</span><span class="mc-tag">自动统计</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('my_class_scores')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">📖</div>
-          <div class="mc-content">
-            <div class="mc-title">查看本班成绩</div>
-            <div class="mc-desc">查看班级成绩明细，支持按科目筛选，查看学生排名和分数分布</div>
-            <div class="mc-tags"><span class="mc-tag">成绩查看</span><span class="mc-tag">排名分析</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('download_scores')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#f59e0b,#fbbf24)">📥</div>
-          <div class="mc-content">
-            <div class="mc-title">下载Excel成绩单</div>
-            <div class="mc-desc">导出班级成绩到Excel，包含学生各科成绩、总分、班级排名等</div>
-            <div class="mc-tags"><span class="mc-tag">成绩导出</span><span class="mc-tag">Excel下载</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('headteacher_analysis')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#ef4444,#f87171)">🔍</div>
-          <div class="mc-content">
-            <div class="mc-title">智能对比分析</div>
-            <div class="mc-desc">AI智能分析班级成绩，对比年级数据，提供班级薄弱学科诊断和教学建议</div>
-            <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">班级对比</span><span class="mc-tag">智能诊断</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('teacher_analysis')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#ec4899,#f472b6)">📈</div>
-          <div class="mc-content">
-            <div class="mc-title">学科对比分析</div>
-            <div class="mc-desc">对比不同班级同一学科的成绩，分析任教班级的优势和改进空间</div>
-            <div class="mc-tags"><span class="mc-tag">班级对比</span><span class="mc-tag">学科分析</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-      </div>
-    `;
-
     roleSection = `
-      <div class="dashboard-quick-stats">
-        <div class="qs-item">
-          <div class="qs-value">${classNo}</div>
-          <div class="qs-label">我的班级</div>
+      <div class="admin-quick-grid">
+        <div class="aq-card" onclick="navigate('class_exams')" style="--aq-color:#3b82f6;--aq-color2:#60a5fa">
+          <div class="aq-icon">📝</div>
+          <div class="aq-title">班级考试管理</div>
+          <div class="aq-desc">创建考试、设置科目分值</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${mySubjects.length || '-'}</div>
-          <div class="qs-label">任教学科</div>
+        <div class="aq-card" onclick="navigate('upload_scores')" style="--aq-color:#10b981;--aq-color2:#34d399">
+          <div class="aq-icon">📥</div>
+          <div class="aq-title">上传班级成绩</div>
+          <div class="aq-desc">上传本班学生成绩Excel</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${totalRecs}</div>
-          <div class="qs-label">成绩记录</div>
+        <div class="aq-card" onclick="navigate('my_class_scores')" style="--aq-color:#8b5cf6;--aq-color2:#a78bfa">
+          <div class="aq-icon">📖</div>
+          <div class="aq-title">本班考试成绩</div>
+          <div class="aq-desc">查看本班学生历次成绩</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item highlight">
-          <div class="qs-value">${recentExam ? recentExam.name : '-'}</div>
-          <div class="qs-label">最近考试</div>
+        <div class="aq-card" onclick="navigate('class_ranking')" style="--aq-color:#f59e0b;--aq-color2:#fbbf24">
+          <div class="aq-icon">🏆</div>
+          <div class="aq-title">本班排名统计</div>
+          <div class="aq-desc">查看本班学生排名情况</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${classAvg}</div>
-          <div class="qs-label">班级均分</div>
+        <div class="aq-card" onclick="navigate('download_scores')" style="--aq-color:#06b6d4;--aq-color2:#67e8f9">
+          <div class="aq-icon">📤</div>
+          <div class="aq-title">下载Excel成绩单</div>
+          <div class="aq-desc">导出班级成绩到Excel</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('headteacher_analysis')" style="--aq-color:#ef4444;--aq-color2:#f87171">
+          <div class="aq-icon">🔍</div>
+          <div class="aq-title">智能对比分析</div>
+          <div class="aq-desc">AI分析班级成绩、对比年级数据</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('teacher_analysis')" style="--aq-color:#ec4899;--aq-color2:#f472b6">
+          <div class="aq-icon">📈</div>
+          <div class="aq-title">学科对比分析</div>
+          <div class="aq-desc">对比不同班级同一学科成绩</div>
+          <div class="aq-go">进入 →</div>
+        </div>
+        <div class="aq-card" onclick="navigate('group_manage')" style="--aq-color:#6366f1;--aq-color2:#818cf8">
+          <div class="aq-icon">👥</div>
+          <div class="aq-title">学习小组管理</div>
+          <div class="aq-desc">管理班级学习小组</div>
+          <div class="aq-go">进入 →</div>
         </div>
       </div>
-
-      ${htModules}
     `;
   } else {
     // ===== 任课教师 =====
     const grade = currentUser.grade;
     const mySubjects = currentUser.subjects || [];
 
-    // 计算任教数据
-    const myRecs = DB.records.filter(r => r.grade === grade && mySubjects.some(s => r.scores && r.scores[s] != null));
-    const myClasses = [...new Set(myRecs.map(r => r.classNo).filter(Boolean))];
-
-    // 最近任教成绩统计
-    const recentExam = DB.exams.filter(e => e.grade === grade).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
-    let myAvg = "-";
-    if (recentExam && mySubjects.length > 0) {
-      const recs = myRecs.filter(r => r.examId === recentExam.id);
-      const scores = recs.map(r => r.scores[mySubjects[0]]).filter(v => v != null);
-      if (scores.length > 0) myAvg = fmt(scores.reduce((a, b) => a + b, 0) / scores.length);
-    }
-
-    const teacherModules = `
-      <div class="dashboard-modules">
-        <div class="module-card" onclick="navigate('my_ranking')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#10b981,#34d399)">🏆</div>
-          <div class="mc-content">
-            <div class="mc-title">我的任教排行</div>
-            <div class="mc-desc">查看任教科目的班级排名情况，分析教学效果，激励教学提升</div>
-            <div class="mc-tags"><span class="mc-tag">班级排名</span><span class="mc-tag">教学效果</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-        <div class="module-card" onclick="navigate('teacher_analysis')">
-          <div class="mc-icon" style="background:linear-gradient(135deg,#8b5cf6,#a78bfa)">🔍</div>
-          <div class="mc-content">
-            <div class="mc-title">学科对比分析</div>
-            <div class="mc-desc">AI智能分析任教科目成绩，提供学生关注名单、薄弱知识点诊断</div>
-            <div class="mc-tags"><span class="mc-tag">AI分析</span><span class="mc-tag">智能诊断</span><span class="mc-tag">学生关注</span></div>
-          </div>
-          <div class="mc-arrow">→</div>
-        </div>
-      </div>
-    `;
-
     roleSection = `
-      <div class="dashboard-quick-stats">
-        <div class="qs-item">
-          <div class="qs-value">${mySubjects.join('、') || '-'}</div>
-          <div class="qs-label">任教学科</div>
+      <div class="admin-quick-grid">
+        <div class="aq-card" onclick="navigate('my_ranking')" style="--aq-color:#10b981;--aq-color2:#34d399">
+          <div class="aq-icon">🏆</div>
+          <div class="aq-title">我的任教排行</div>
+          <div class="aq-desc">查看任教科目的班级排名</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${myClasses.length}</div>
-          <div class="qs-label">任教班级</div>
+        <div class="aq-card" onclick="navigate('teacher_analysis')" style="--aq-color:#8b5cf6;--aq-color2:#a78bfa">
+          <div class="aq-icon">🔍</div>
+          <div class="aq-title">学科对比分析</div>
+          <div class="aq-desc">AI分析任教科目成绩</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item highlight">
-          <div class="qs-value">${recentExam ? recentExam.name : '-'}</div>
-          <div class="qs-label">最近考试</div>
+        <div class="aq-card" onclick="navigate('exam_compare')" style="--aq-color:#06b6d4;--aq-color2:#67e8f9">
+          <div class="aq-icon">🔄</div>
+          <div class="aq-title">多次考试对比</div>
+          <div class="aq-desc">对比多次考试成绩趋势</div>
+          <div class="aq-go">进入 →</div>
         </div>
-        <div class="qs-item">
-          <div class="qs-value">${myAvg}</div>
-          <div class="qs-label">任教均分</div>
+        <div class="aq-card" onclick="navigate('group_scores')" style="--aq-color:#6366f1;--aq-color2:#818cf8">
+          <div class="aq-icon">👥</div>
+          <div class="aq-title">小组成绩分析</div>
+          <div class="aq-desc">查看学习小组成绩</div>
+          <div class="aq-go">进入 →</div>
         </div>
       </div>
-
-      ${teacherModules}
     `;
   }
 
@@ -2842,12 +2692,7 @@ function renderDashboard() {
       <div class="dw-icon">🎓</div>
     </div>
 
-    ${currentUser.role === "admin" ? roleSection : `${statsCards}${roleSection}
-
-    <div class="card">
-      <div class="card-title">📢 最近公告</div>
-      <div class="ann-list">${annHtml}</div>
-    </div>`}
+    ${roleSection}
   `;
 }
 
