@@ -28,7 +28,12 @@ const GitHubService = {
     dataGistIds: []        // 业务 Gist 数组：[current, archive1, ...]
   },
   isSyncing: false,
-  CORS_PROXY: "https://corsproxy.io/?",
+  CORS_PROXIES: [
+    "https://corsproxy.io/?",
+    "https://api.allorigins.win/raw?url=",
+    "https://api.codetabs.com/v1/proxy?quest="
+  ],
+  currentProxyIndex: 0,
   useProxy: false, // 优先直连 GitHub API（原生支持 CORS），失败时自动回退到代理
   CONFIG_FILE: "smart-edu-config.json",
   DATA_META_FILE: "smart-edu-data.json",
@@ -206,16 +211,29 @@ const GitHubService = {
 
   // ========= 通用 Gist API =========
   // 策略：GitHub API 原生支持 CORS，优先直连（更快更稳定）；
-  //       直连失败（网络错误）时自动回退到 CORS 代理
-  async api(method, gistId, body = null, _isRetry = false) {
+  //       直连失败（网络错误）时自动回退到多个 CORS 代理依次尝试；
+  //       每次请求最多重试 3 次，带指数退避（1s, 2s, 4s）
+  async api(method, gistId, body = null, _attempt = 0) {
     if (!this.config.token) throw new Error("未配置 Token");
     // 兜底清理：确保 Authorization 头只含 ASCII 可见字符
     const token = String(this.config.token).replace(/[^\x20-\x7E]/g, "");
     if (!token) throw new Error("Token 为空");
     const githubUrl = `https://api.github.com/gists/${gistId || ""}`;
-    const url = this.useProxy ? `${this.CORS_PROXY}${encodeURIComponent(githubUrl)}` : githubUrl;
+    
+    // 根据尝试次数选择请求方式：0次直连，1次用代理0，2次用代理1，3次用代理2
+    let url = githubUrl;
+    let mode = "直连";
+    if (_attempt > 0) {
+      const proxyIdx = (_attempt - 1) % this.CORS_PROXIES.length;
+      url = `${this.CORS_PROXIES[proxyIdx]}${encodeURIComponent(githubUrl)}`;
+      mode = `代理${proxyIdx + 1}`;
+    }
+    
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时（缩短，避免长时间卡顿）
+    // 超时时间：第一次15秒，后续逐步增加到30秒
+    const timeoutMs = Math.min(15000 + _attempt * 5000, 30000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
     const opts = {
       method,
       headers: {
@@ -228,26 +246,57 @@ const GitHubService = {
       targetAddressSpace: "public"
     };
     if (body) opts.body = JSON.stringify(body);
+    
     try {
+      this.log(`[API] ${mode}请求: ${method} ${githubUrl.slice(-30)}... (尝试${_attempt + 1}/3, 超时${timeoutMs}ms)`);
       const res = await fetch(url, opts);
       clearTimeout(timeoutId);
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(`${err.message || "HTTP " + res.status}（${res.status}）`);
+        const errMsg = `${err.message || "HTTP " + res.status}（${res.status}）`;
+        // 认证错误不重试
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(`认证失败：${errMsg}，请检查 Token 是否正确`);
+        }
+        throw new Error(errMsg);
       }
       return res.status === 204 ? null : res.json();
     } catch (e) {
       clearTimeout(timeoutId);
+      this.log(`[API] ${mode}失败: ${e.message}`);
+      
       if (e.name === "AbortError") {
-        throw new Error("请求超时（15秒），请检查网络或稍后重试");
+        // 超时：如果还有重试机会，换方式重试
+        if (_attempt < 2) {
+          const delay = Math.pow(2, _attempt) * 1000; // 1s, 2s, 4s
+          this.log(`[API] 超时，等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
+          await new Promise(r => setTimeout(r, delay));
+          return this.api(method, gistId, body, _attempt + 1);
+        }
+        throw new Error(`请求超时（${timeoutMs}ms），请检查网络连接后重试`);
       }
-      // 网络错误时自动切换直连/代理并重试一次
-      const isNetworkError = e.message.includes("Failed to fetch") || e.message.includes("NetworkError") || e.message.includes("ERR_CONNECTION");
-      if (!_isRetry && isNetworkError) {
-        this.useProxy = !this.useProxy; // 切换模式
-        this.log(`网络错误，切换到${this.useProxy ? "代理" : "直连"}模式重试...`, "warn");
-        return this.api(method, gistId, body, true);
+      
+      // 网络错误（DNS解析失败、连接重置、网络不可达等）
+      const isNetworkError = e.message.includes("Failed to fetch") || 
+                             e.message.includes("NetworkError") || 
+                             e.message.includes("ERR_CONNECTION") ||
+                             e.message.includes("ERR_NAME_NOT_RESOLVED") ||
+                             e.message.includes("ERR_TIMED_OUT") ||
+                             e.message.includes("ECONNRESET") ||
+                             e.message.includes("ETIMEDOUT");
+      
+      if (isNetworkError && _attempt < 2) {
+        const delay = Math.pow(2, _attempt) * 1000; // 1s, 2s, 4s
+        this.log(`[API] 网络错误(${e.message.slice(0,30)}...)，等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
+        await new Promise(r => setTimeout(r, delay));
+        return this.api(method, gistId, body, _attempt + 1);
       }
+      
+      // 所有重试都失败了，给出诊断信息
+      if (isNetworkError) {
+        throw new Error(`网络连接失败：${e.message}。请检查：①网络是否正常 ②路由器DNS设置 ③是否需要切换到手机热点或其他网络`);
+      }
+      
       throw e;
     }
   },
@@ -285,24 +334,54 @@ const GitHubService = {
       if (!file) return null;
       // file.content 在 Gist 详情中直接返回（小文件）
       if (file.content) return JSON.parse(file.content);
-      // 大文件需要通过 raw_url 再 fetch（带超时，避免卡死）
+      // 大文件需要通过 raw_url 再 fetch（带重试和代理回退）
       if (file.raw_url) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
-        try {
-          const raw = await fetch(file.raw_url, { signal: controller.signal, targetAddressSpace: "public" });
-          clearTimeout(timeoutId);
-          const text = await raw.text();
-          return JSON.parse(text);
-        } catch (e) {
-          clearTimeout(timeoutId);
-          throw e;
-        }
+        return await this._fetchRawUrl(file.raw_url);
       }
       return null;
     } catch (e) {
       this.log(`读取 ${gistId}/${filename} 失败: ${e.message}`, "error");
       return null;
+    }
+  },
+
+  // 内部方法：获取 raw URL，支持重试和代理回退
+  async _fetchRawUrl(rawUrl, _attempt = 0) {
+    const controller = new AbortController();
+    const timeoutMs = Math.min(15000 + _attempt * 5000, 30000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    
+    let url = rawUrl;
+    let mode = "直连";
+    if (_attempt > 0) {
+      const proxyIdx = (_attempt - 1) % this.CORS_PROXIES.length;
+      url = `${this.CORS_PROXIES[proxyIdx]}${encodeURIComponent(rawUrl)}`;
+      mode = `代理${proxyIdx + 1}`;
+    }
+    
+    try {
+      this.log(`[Raw] ${mode}获取: ${rawUrl.slice(-30)}... (尝试${_attempt + 1}/3)`);
+      const raw = await fetch(url, { signal: controller.signal, targetAddressSpace: "public" });
+      clearTimeout(timeoutId);
+      if (!raw.ok) {
+        throw new Error(`HTTP ${raw.status}`);
+      }
+      const text = await raw.text();
+      return JSON.parse(text);
+    } catch (e) {
+      clearTimeout(timeoutId);
+      this.log(`[Raw] ${mode}失败: ${e.message}`);
+      
+      if ((e.name === "AbortError" || 
+           e.message.includes("Failed to fetch") || 
+           e.message.includes("NetworkError") ||
+           e.message.includes("ERR_CONNECTION")) && _attempt < 2) {
+        const delay = Math.pow(2, _attempt) * 1000;
+        await new Promise(r => setTimeout(r, delay));
+        return this._fetchRawUrl(rawUrl, _attempt + 1);
+      }
+      
+      throw e;
     }
   },
 
