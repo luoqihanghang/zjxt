@@ -1,5 +1,18 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* 无障碍：屏幕阅读器专用（视觉隐藏） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 :root {
   /* 主色调：深邃靛蓝 + 琥珀强调 */
   --primary: #4338ca;
@@ -480,6 +493,103 @@ body {
   left: 0;
   bottom: 0;
   z-index: 100;
+  transition: width 0.25s ease, box-shadow 0.25s ease;
+  overflow: hidden;
+}
+
+/* 自动隐藏模式：默认收起为 70px，鼠标悬停时展开覆盖内容区 */
+.sidebar.auto-hide {
+  width: 70px;
+  box-shadow: none;
+}
+.sidebar.auto-hide.sidebar-hover {
+  width: 240px;
+  box-shadow: 4px 0 20px rgba(0, 0, 0, 0.25);
+}
+/* 收起状态下隐藏文字，仅显示图标（复用 collapsed 样式） */
+.sidebar.auto-hide .brand,
+.sidebar.auto-hide .user-info .ui-name,
+.sidebar.auto-hide .user-info .ui-role,
+.sidebar.auto-hide .nav-item .nav-text,
+.sidebar.auto-hide .nav-group-title,
+.sidebar.auto-hide .nav-group-header .ng-name,
+.sidebar.auto-hide .nav-group-header .ng-arrow,
+.sidebar.auto-hide .btn-logout span {
+  display: none;
+}
+.sidebar.auto-hide .nav-item {
+  justify-content: center;
+  padding: 12px;
+}
+.sidebar.auto-hide .nav-group-items .nav-item {
+  padding: 10px 14px;
+  justify-content: center;
+}
+.sidebar.auto-hide .sidebar-header {
+  justify-content: center;
+  padding: 20px 10px;
+}
+.sidebar.auto-hide .nav-group {
+  margin: 2px 6px;
+}
+.sidebar.auto-hide .nav-group-header {
+  justify-content: center;
+  padding: 10px;
+}
+.sidebar.auto-hide .sidebar-footer {
+  padding: 12px 8px;
+}
+.sidebar.auto-hide .user-info {
+  padding: 8px;
+  text-align: center;
+}
+.sidebar.auto-hide .btn-logout {
+  padding: 8px;
+  font-size: 16px;
+}
+/* 悬停展开时恢复文字显示 */
+.sidebar.auto-hide.sidebar-hover .brand,
+.sidebar.auto-hide.sidebar-hover .user-info .ui-name,
+.sidebar.auto-hide.sidebar-hover .user-info .ui-role,
+.sidebar.auto-hide.sidebar-hover .nav-item .nav-text,
+.sidebar.auto-hide.sidebar-hover .nav-group-title,
+.sidebar.auto-hide.sidebar-hover .nav-group-header .ng-name,
+.sidebar.auto-hide.sidebar-hover .nav-group-header .ng-arrow,
+.sidebar.auto-hide.sidebar-hover .btn-logout span {
+  display: revert;
+}
+.sidebar.auto-hide.sidebar-hover .nav-item {
+  justify-content: flex-start;
+  padding: 10px 18px;
+}
+.sidebar.auto-hide.sidebar-hover .nav-group-items .nav-item {
+  padding: 10px 18px;
+  justify-content: flex-start;
+}
+.sidebar.auto-hide.sidebar-hover .sidebar-header {
+  justify-content: flex-start;
+  padding: 20px;
+}
+.sidebar.auto-hide.sidebar-hover .nav-group-header {
+  justify-content: space-between;
+  padding: 10px 18px;
+}
+.sidebar.auto-hide.sidebar-hover .sidebar-footer {
+  padding: 14px 20px;
+}
+.sidebar.auto-hide.sidebar-hover .user-info {
+  padding: 10px 14px;
+  text-align: left;
+}
+.sidebar.auto-hide.sidebar-hover .btn-logout {
+  padding: 10px 16px;
+  font-size: 14px;
+}
+.sidebar-toggle {
+  display: none !important;
+}
+.main-app.auto-hide-sidebar .content {
+  margin-left: 70px;
 }
 
 .sidebar-header {

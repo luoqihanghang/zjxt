@@ -29,7 +29,7 @@ const GitHubService = {
   },
   isSyncing: false,
   CORS_PROXY: "https://corsproxy.io/?",
-  useProxy: true,
+  useProxy: false, // 优先直连 GitHub API（原生支持 CORS），失败时自动回退到代理
   CONFIG_FILE: "smart-edu-config.json",
   DATA_META_FILE: "smart-edu-data.json",
   FILE_LIMIT: 280,         // 接近 300 时触发归档
@@ -205,7 +205,9 @@ const GitHubService = {
   },
 
   // ========= 通用 Gist API =========
-  async api(method, gistId, body = null) {
+  // 策略：GitHub API 原生支持 CORS，优先直连（更快更稳定）；
+  //       直连失败（网络错误）时自动回退到 CORS 代理
+  async api(method, gistId, body = null, _isRetry = false) {
     if (!this.config.token) throw new Error("未配置 Token");
     // 兜底清理：确保 Authorization 头只含 ASCII 可见字符
     const token = String(this.config.token).replace(/[^\x20-\x7E]/g, "");
@@ -213,7 +215,7 @@ const GitHubService = {
     const githubUrl = `https://api.github.com/gists/${gistId || ""}`;
     const url = this.useProxy ? `${this.CORS_PROXY}${encodeURIComponent(githubUrl)}` : githubUrl;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时（缩短，避免长时间卡顿）
     const opts = {
       method,
       headers: {
@@ -236,11 +238,14 @@ const GitHubService = {
     } catch (e) {
       clearTimeout(timeoutId);
       if (e.name === "AbortError") {
-        throw new Error("请求超时（30秒），请检查网络或稍后重试");
+        throw new Error("请求超时（15秒），请检查网络或稍后重试");
       }
-      if (this.useProxy && (e.message.includes("Failed to fetch") || e.message.includes("NetworkError"))) {
-        this.useProxy = false;
-        return this.api(method, gistId, body);
+      // 网络错误时自动切换直连/代理并重试一次
+      const isNetworkError = e.message.includes("Failed to fetch") || e.message.includes("NetworkError") || e.message.includes("ERR_CONNECTION");
+      if (!_isRetry && isNetworkError) {
+        this.useProxy = !this.useProxy; // 切换模式
+        this.log(`网络错误，切换到${this.useProxy ? "代理" : "直连"}模式重试...`, "warn");
+        return this.api(method, gistId, body, true);
       }
       throw e;
     }
@@ -279,11 +284,19 @@ const GitHubService = {
       if (!file) return null;
       // file.content 在 Gist 详情中直接返回（小文件）
       if (file.content) return JSON.parse(file.content);
-      // 大文件需要通过 raw_url 再 fetch
+      // 大文件需要通过 raw_url 再 fetch（带超时，避免卡死）
       if (file.raw_url) {
-        const raw = await fetch(file.raw_url);
-        const text = await raw.text();
-        return JSON.parse(text);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        try {
+          const raw = await fetch(file.raw_url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          const text = await raw.text();
+          return JSON.parse(text);
+        } catch (e) {
+          clearTimeout(timeoutId);
+          throw e;
+        }
       }
       return null;
     } catch (e) {
@@ -607,21 +620,31 @@ const GitHubService = {
   // 一次性完整写入：主 Gist 配置 + 当前业务 Gist 索引 + 每个考试的成绩文件
   // 入参 db 是完整的 DB 对象（users, subjects, exams, records, announcements, sends, rankSends, groups）
   // 【优化】changedExamIds：增量上传。只传有变化的 examId，不传则全量写入（首次/强制同步）
-  async saveRemoteDB(db, changedExamIds) {
+  // onProgress: 可选回调 (info) => void，info = {step, status, timestamp, detail, current, total}
+  async saveRemoteDB(db, changedExamIds, onProgress) {
     if (this.isSyncing) return false;
     this.isSyncing = true;
     const startTime = performance.now();
+    const report = (step, status, detail, current, total) => {
+      if (typeof onProgress === "function") {
+        try { onProgress({ step, status, timestamp: Date.now(), detail, current, total }); } catch(e) {}
+      }
+    };
     try {
       // 0. 先确保业务 Gist 容量（可能会创建新 Gist，更新 dataGistIds）
+      report("检查存储容量", "start", "检查业务 Gist 容量…");
       const activeId = await this.ensureCapacity();
       if (!activeId) {
         this.log("❌ 无可用业务 Gist（自动创建失败）", "error");
+        report("检查存储容量", "error", "无可用业务 Gist");
         this.isSyncing = false;
         return false;
       }
+      report("检查存储容量", "done", "容量检查完成");
 
       // 1. 主 Gist：配置（每次都写，因为配置变更频繁）
       // 注意：必须在 ensureCapacity 之后，因为 ensureCapacity 可能会更新 dataGistIds
+      report("上传系统配置", "start", "写入主 Gist 配置…");
       const configPart = {
         users: db.users || [],
         subjects: db.subjects || {},
@@ -637,10 +660,13 @@ const GitHubService = {
         updatedAt: Date.now()
       };
       const ok1 = await this.saveConfigDB(configPart);
+      report("上传系统配置", "done", ok1 === true ? "配置已保存" : (ok1 === 'partial' ? "配置已保存（精简）" : "配置保存异常"));
 
       // 2. 业务 Gist：索引文件（每次都写，保证 exams/sends 元数据一致）
+      report("上传业务索引", "start", "写入考试/成绩发送索引…");
       const meta = { exams: db.exams || [], sends: db.sends || [], rankSends: db.rankSends || [] };
       await this.saveDataMeta(meta);
+      report("上传业务索引", "done", `索引已保存（${meta.exams.length} 场考试）`);
 
       // 3. 业务 Gist：按 examId 分组写成绩文件
       // 【优化】增量模式：若传了 changedExamIds，只写变化的 exam；否则全量写入
@@ -660,16 +686,23 @@ const GitHubService = {
 
       // 【优化】并行写入多个 exam 文件（最多并发 5 个，避免触发 rate limit）
       const CONCURRENCY = 5;
+      const totalExams = examIdsToWrite.length;
+      let uploadedExams = 0;
+      report("上传考试成绩", "start", `开始上传 ${totalExams} 个考试文件…`, 0, totalExams);
       for (let i = 0; i < examIdsToWrite.length; i += CONCURRENCY) {
         const batch = examIdsToWrite.slice(i, i + CONCURRENCY);
         await Promise.all(
           batch.map((examId) => this.saveExamRecords(examId, byExam[examId]))
         );
+        uploadedExams += batch.length;
+        report("上传考试成绩", "progress", `已上传 ${uploadedExams}/${totalExams}`, uploadedExams, totalExams);
       }
+      report("上传考试成绩", "done", `全部 ${totalExams} 个考试文件已上传`, totalExams, totalExams);
 
       // 4. 【删除同步】删除云端存在但本地已删除的考试文件
       // 只在全量上传时检查，增量上传跳过（避免额外网络请求拖慢速度）
       if (!changedExamIds || changedExamIds.length === 0) {
+        report("清理已删除文件", "start", "检查并清理云端多余文件…");
         const localExamIds = new Set(db.exams.map(e => e.id));
         const localRecordExamIds = new Set((db.records || []).map(r => r.examId));
         const allLocalExamIds = new Set([...localExamIds, ...localRecordExamIds]);
@@ -696,13 +729,16 @@ const GitHubService = {
             this.log(`删除检查 ${gid} 失败: ${e.message}`, "error");
           }
         }
+        report("清理已删除文件", "done", deletedCount > 0 ? `已清理 ${deletedCount} 个多余文件` : "无需清理");
       }
 
       // 5. 最后再次更新主 Gist，确保 dataGistIds 是最新的
       // 这是关键修复：ensureCapacity 可能创建了新 Gist，需要确保主 Gist 中的 dataGistIds 同步
+      report("更新配置索引", "start", "最终同步配置索引…");
       configPart.dataGistIds = this.config.dataGistIds;
       configPart.updatedAt = Date.now();
       await this.saveConfigDB(configPart);
+      report("更新配置索引", "done", "配置索引已同步");
 
       const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
       this.log(`✅ 上传完成，共 ${examIdsToWrite.length} 个考试文件，dataGistIds: ${this.config.dataGistIds.length}，用时 ${elapsed} 秒`);

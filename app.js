@@ -1,7 +1,7 @@
 // ========== 网络智慧教务平台 - 主应用 ==========
 // 所有数据存储在 localStorage 中，便于本地演示和持久化
-// 版本: 20260706 - Gist 配置改为 JSON 上传导入 + 各功能模块添加使用帮助
-console.log("[智慧教务平台] v20260706 已加载");
+// 版本: 20260712 - 简化同步UI（自动拉取/退出整体上传+进度表）+ 导航栏自动隐藏 + 无障碍修复 + 网络优化
+console.log("[智慧教务平台] v20260712 已加载");
 
 // ========== 工具函数 ==========
 const $ = (id) => document.getElementById(id);
@@ -236,7 +236,10 @@ function saveDB(db, changedExamId) {
 }
 
 // 上传本地数据到云端（带传输时间提示）
-async function pushToRemote(manual) {
+// manual: 是否手动触发（显示 toast）
+// onProgress: 可选进度回调
+// forceFull: true 时强制全量上传（不使用增量）
+async function pushToRemote(manual, onProgress, forceFull) {
   if (!GitHubService.isConfigured()) {
     if (manual) showToast("未配置云端同步，无法上传", "warning");
     return false;
@@ -256,9 +259,9 @@ async function pushToRemote(manual) {
   updateSyncBadge();
   const start = performance.now();
   try {
-    // 【优化】传入 dirtyExamIds 实现增量上传
-    const useIncremental = _dirtyExamIds && _dirtyExamIds.length > 0;
-    const result = await GitHubService.saveRemoteDB(DB, useIncremental ? _dirtyExamIds : null);
+    // 【优化】传入 dirtyExamIds 实现增量上传；forceFull 时强制全量
+    const useIncremental = !forceFull && _dirtyExamIds && _dirtyExamIds.length > 0;
+    const result = await GitHubService.saveRemoteDB(DB, useIncremental ? _dirtyExamIds : null, onProgress);
     const elapsed = ((performance.now() - start) / 1000).toFixed(2);
     if (result === true) {
       _dirtyFlag = false;
@@ -358,19 +361,13 @@ async function pullFromRemote(manual) {
   }
 }
 
-// 其他端导航切换时的自动同步：先上传本地更改，再拉取最新
+// 导航切换时自动拉取最新数据（不零散上传，统一在退出时整体上传）
 async function autoSyncOnNavigate() {
   if (!GitHubService.isConfigured()) return;
   try {
-    const hasRealData = DB && DB.users && DB.users.length > 0;
-    if (_dirtyFlag && hasRealData) {
-      await pushToRemote(false);
-    } else if (_dirtyFlag && !hasRealData) {
-      console.log("[navigate] 无真实数据，跳过上传");
-    }
     await pullFromRemote(false);
   } catch (e) {
-    console.log("[navigate] 自动同步失败:", e.message);
+    console.log("[navigate] 自动拉取失败:", e.message);
   }
 }
 
@@ -647,22 +644,14 @@ async function doLogin() {
 }
 
 async function doLogout() {
-  // 退出前同步策略：
-  // - 其他端：若有未上传更改，自动上传后再退出（等待完成）
-  // - 教务端：本地操作模式，若有未上传更改提示用户选择
+  // 退出前同步策略：若有未上传更改，整体全量上传后退出（不零散上传）
   if (currentUser && GitHubService.isConfigured() && _dirtyFlag && !_syncInProgress) {
-    const isAcademic = currentUser.role === "academic";
-    if (isAcademic) {
-      // 教务端：提示是否上传（本地模式，不自动上传）
-      const choice = confirm("您有未上传的本地更改，退出后下次登录会被云端数据覆盖。\n\n点击「确定」先上传再退出；点击「取消」直接退出（更改可能丢失）。");
-      if (choice) {
-        showToast("正在上传数据，请稍候…", "info");
-        await pushToRemote(false);
+    const ok = await showUploadProgressModal();
+    if (!ok) {
+      // 上传失败或被跳过，询问是否仍要退出
+      if (!confirm("⚠️ 数据上传未完成，退出后未上传的更改可能丢失。\n\n确定要直接退出吗？")) {
+        return; // 用户选择不退出
       }
-    } else {
-      // 其他端：自动上传等待完成
-      showToast("正在上传未保存的数据，请稍候…", "info");
-      await pushToRemote(false);
     }
   }
   // 若仍在传输中，等待其完成
@@ -681,6 +670,145 @@ async function doLogout() {
   if (panel) panel.classList.add("hidden");
 }
 
+// 退出时的上传进度弹窗：全量上传，实时显示步骤进度表
+function showUploadProgressModal() {
+  return new Promise((resolve) => {
+    // 创建遮罩
+    const overlay = document.createElement("div");
+    overlay.id = "upload-progress-overlay";
+    overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:99999;display:flex;align-items:center;justify-content:center;";
+    // 弹窗内容
+    overlay.innerHTML = `
+      <div style="background:#fff;border-radius:12px;padding:28px 32px;max-width:640px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+        <div style="text-align:center;margin-bottom:18px;">
+          <div style="font-size:20px;font-weight:700;color:#1a1a1a;">⬆️ 正在上传数据到云端</div>
+          <div style="font-size:13px;color:#666;margin-top:6px;">退出账号前自动整体上传，请勿关闭页面</div>
+        </div>
+        <div id="upload-progress-bar-wrap" style="background:#f0f0f0;border-radius:8px;height:8px;overflow:hidden;margin-bottom:18px;">
+          <div id="upload-progress-bar" style="background:linear-gradient(90deg,#4f46e5,#6366f1);height:100%;width:0%;transition:width 0.3s;"></div>
+        </div>
+        <div style="max-height:320px;overflow-y:auto;border:1px solid #eee;border-radius:8px;">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead>
+              <tr style="background:#f8f9fa;position:sticky;top:0;">
+                <th style="padding:8px 10px;text-align:left;border-bottom:2px solid #eee;">步骤</th>
+                <th style="padding:8px 10px;text-align:center;border-bottom:2px solid #eee;width:80px;">状态</th>
+                <th style="padding:8px 10px;text-align:center;border-bottom:2px solid #eee;width:90px;">开始时间</th>
+                <th style="padding:8px 10px;text-align:center;border-bottom:2px solid #eee;width:70px;">用时</th>
+              </tr>
+            </thead>
+            <tbody id="upload-progress-tbody"></tbody>
+          </table>
+        </div>
+        <div id="upload-progress-summary" style="text-align:center;margin-top:14px;font-size:13px;color:#666;">正在准备…</div>
+        <div style="text-align:center;margin-top:14px;">
+          <button id="upload-progress-done-btn" style="display:none;background:#16a34a;color:#fff;border:none;padding:10px 32px;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">✅ 上传完成，点击退出</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // 步骤记录：{ name, status, startTime, endTime }
+    const stepRecords = {};
+    const stepOrder = ["检查存储容量", "上传系统配置", "上传业务索引", "上传考试成绩", "清理已删除文件", "更新配置索引"];
+    const fmtTime = (ts) => {
+      const d = new Date(ts);
+      const pad = (n) => String(n).padStart(2, "0");
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    };
+    const fmtDuration = (ms) => {
+      if (ms < 1000) return ms + "ms";
+      return (ms / 1000).toFixed(1) + "s";
+    };
+    const statusIcon = (status) => {
+      if (status === "done") return "✅";
+      if (status === "error") return "❌";
+      if (status === "progress") return "⏳";
+      return "⏳"; // start
+    };
+
+    const renderTable = () => {
+      const tbody = document.getElementById("upload-progress-tbody");
+      if (!tbody) return;
+      let html = "";
+      stepOrder.forEach((name) => {
+        const rec = stepRecords[name];
+        if (!rec) {
+          html += `<tr style="border-bottom:1px solid #f0f0f0;opacity:0.4;">
+            <td style="padding:7px 10px;">${name}</td>
+            <td style="padding:7px 10px;text-align:center;color:#999;">—</td>
+            <td style="padding:7px 10px;text-align:center;color:#999;">—</td>
+            <td style="padding:7px 10px;text-align:center;color:#999;">—</td>
+          </tr>`;
+        } else {
+          const dur = rec.endTime ? fmtDuration(rec.endTime - rec.startTime) : "进行中…";
+          html += `<tr style="border-bottom:1px solid #f0f0f0;">
+            <td style="padding:7px 10px;">${name}${rec.detail ? `<br><span style="font-size:11px;color:#999;">${esc(rec.detail)}</span>` : ""}</td>
+            <td style="padding:7px 10px;text-align:center;">${statusIcon(rec.status)}</td>
+            <td style="padding:7px 10px;text-align:center;font-family:monospace;">${fmtTime(rec.startTime)}</td>
+            <td style="padding:7px 10px;text-align:center;font-family:monospace;">${dur}</td>
+          </tr>`;
+        }
+      });
+      tbody.innerHTML = html;
+    };
+
+    const updateBar = () => {
+      const done = stepOrder.filter(n => stepRecords[n] && stepRecords[n].status === "done").length;
+      const pct = Math.round((done / stepOrder.length) * 100);
+      const bar = document.getElementById("upload-progress-bar");
+      if (bar) bar.style.width = pct + "%";
+      const summary = document.getElementById("upload-progress-summary");
+      if (summary) summary.textContent = `进度：${done}/${stepOrder.length} 步完成（${pct}%）`;
+    };
+
+    renderTable();
+
+    // 进度回调
+    const onProgress = (info) => {
+      const { step, status, timestamp, detail, current, total } = info;
+      if (status === "start") {
+        stepRecords[step] = { status: "start", startTime: timestamp, detail: detail || "" };
+      } else if (status === "progress") {
+        if (stepRecords[step]) {
+          stepRecords[step].detail = detail || "";
+        }
+      } else if (status === "done" || status === "error") {
+        if (stepRecords[step]) {
+          stepRecords[step].status = status;
+          stepRecords[step].endTime = timestamp;
+          stepRecords[step].detail = detail || stepRecords[step].detail;
+        }
+      }
+      renderTable();
+      updateBar();
+    };
+
+    // 开始全量上传
+    pushToRemote(false, onProgress, true).then((result) => {
+      const summary = document.getElementById("upload-progress-summary");
+      const doneBtn = document.getElementById("upload-progress-done-btn");
+      const bar = document.getElementById("upload-progress-bar");
+      if (result) {
+        if (bar) bar.style.width = "100%";
+        if (summary) summary.innerHTML = `✅ 上传完成！共 ${Object.keys(stepRecords).length} 个步骤已完成`;
+        if (doneBtn) {
+          doneBtn.style.display = "";
+          doneBtn.onclick = () => { overlay.remove(); resolve(true); };
+        }
+      } else {
+        if (summary) summary.innerHTML = `❌ 上传失败，请检查网络后重试`;
+        if (doneBtn) {
+          doneBtn.style.display = "";
+          doneBtn.textContent = "关闭";
+          doneBtn.style.background = "#dc2626";
+          doneBtn.onclick = () => { overlay.remove(); resolve(false); };
+        }
+      }
+    });
+  });
+}
+
 function enterApp() {
   $("loginPage").classList.add("hidden");
   $("mainApp").classList.remove("hidden");
@@ -694,63 +822,44 @@ function enterApp() {
   if (btn) btn.style.display = "flex";
 }
 
-// ========== 侧边栏折叠/展开 ==========
+// ========== 侧边栏自动隐藏/展开 ==========
+// 鼠标在右侧操作时导航栏收起（仅图标），鼠标移到导航栏时自动展开
 function initSidebarToggle() {
   const sidebar = $("sidebar");
   const mainApp = $("mainApp");
-  const toggleBtn = $("sidebarToggle");
-  if (!sidebar || !toggleBtn) return;
+  if (!sidebar || !mainApp) return;
 
-  // 从本地存储恢复状态
-  const savedCollapsed = localStorage.getItem("sidebar_collapsed");
-  if (savedCollapsed === "1") {
-    sidebar.classList.add("collapsed");
-    if (mainApp) mainApp.classList.add("collapsed-sidebar");
-    toggleBtn.textContent = "▶";
-  }
+  // 启用自动隐藏模式：默认收起 70px，鼠标悬停展开 240px（覆盖内容区，不推移内容）
+  sidebar.classList.add("auto-hide");
+  mainApp.classList.add("auto-hide-sidebar");
 
-  toggleBtn.onclick = () => {
-    const collapsed = sidebar.classList.toggle("collapsed");
-    if (mainApp) mainApp.classList.toggle("collapsed-sidebar", collapsed);
-    toggleBtn.textContent = collapsed ? "▶" : "◀";
-    localStorage.setItem("sidebar_collapsed", collapsed ? "1" : "0");
-  };
+  let hoverTimer = null;
+  // 鼠标进入导航栏：展开
+  sidebar.addEventListener("mouseenter", () => {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    sidebar.classList.add("sidebar-hover");
+  });
+  // 鼠标离开导航栏：延迟收起（避免经过间隙时闪烁）
+  sidebar.addEventListener("mouseleave", () => {
+    hoverTimer = setTimeout(() => {
+      sidebar.classList.remove("sidebar-hover");
+      hoverTimer = null;
+    }, 150);
+  });
 }
 
 // ========== GitHub 同步状态 ==========
 function renderSyncStatus() {
-  // 顶部栏右侧：状态徽标 + 上传/拉取手动按钮
+  // 顶部栏右侧：仅显示简洁状态徽标（拉取/上传全自动，无需手动按钮）
   if ($("sync-status")) { updateSyncBadge(); return; }
   const statusDiv = document.createElement("div");
   statusDiv.id = "sync-status";
   statusDiv.style.cssText = "display:flex;align-items:center;gap:8px";
   statusDiv.innerHTML = `
     <span id="sync-badge" style="font-size:12px;padding:4px 10px;background:#f0f4ff;border-radius:12px;color:#3b7ddd;white-space:nowrap">🔗 未连接</span>
-    <button id="sync-pull-btn" class="btn btn-sm btn-info" title="从云端拉取最新数据" type="button"
-      style="font-size:12px;padding:4px 10px;border-radius:12px;display:none">⬇️ 拉取</button>
-    <button id="sync-push-btn" class="btn btn-sm btn-success" title="上传本地数据到云端" type="button"
-      style="font-size:12px;padding:4px 10px;border-radius:12px;display:none">⬆️ 上传</button>
-    <button id="sync-refresh-btn" class="btn btn-sm btn-warning" title="强制刷新页面（重新加载）" type="button"
-      style="font-size:12px;padding:4px 10px;border-radius:12px;display:none">🔄 刷新</button>
   `;
   const rightBar = document.querySelector(".topbar-right");
   if (rightBar) rightBar.insertBefore(statusDiv, rightBar.firstChild);
-  const pushBtn = $("sync-push-btn"), pullBtn = $("sync-pull-btn"), refreshBtn = $("sync-refresh-btn");
-  if (pushBtn) pushBtn.onclick = () => pushToRemote(true).then(() => { const r = PAGE_RENDERERS[currentPage]; if (r) r(); });
-  if (pullBtn) pullBtn.onclick = () => pullFromRemote(true).then((ok) => { if (ok) { const r = PAGE_RENDERERS[currentPage]; if (r) r(); } });
-  if (refreshBtn) refreshBtn.onclick = () => {
-    if (_syncInProgress) {
-      showToast("正在同步数据，请稍候…", "warning");
-      return;
-    }
-    if (_dirtyFlag) {
-      if (confirm("⚠️ 当前有未上传的本地更改，刷新页面将丢失这些更改。确定要强制刷新吗？")) {
-        location.reload();
-      }
-    } else {
-      location.reload();
-    }
-  };
   updateSyncBadge();
 }
 
@@ -763,7 +872,6 @@ function updateSyncBadge() {
     badge.innerHTML = "🔗 未配置";
     badge.style.background = "#fff4e6";
     badge.style.color = "#d9480f";
-    _setSyncBtns(false, false);
     return;
   }
   // 传输中
@@ -777,7 +885,6 @@ function updateSyncBadge() {
       badge.style.background = "#e3f2fd";
       badge.style.color = "#1976d2";
     }
-    _setSyncBtns(false, false);
     return;
   }
   // 上次同步失败
@@ -785,7 +892,6 @@ function updateSyncBadge() {
     badge.innerHTML = "⚠️ 部分同步";
     badge.style.background = "#fff8e1";
     badge.style.color = "#d97706";
-    _setSyncBtns(true, true);
     return;
   }
   // 有未上传的本地更改
@@ -794,7 +900,6 @@ function updateSyncBadge() {
     badge.innerHTML = `⚠️ 有未上传更改${tip}`;
     badge.style.background = "#fff8e1";
     badge.style.color = "#d97706";
-    _setSyncBtns(true, true);
     return;
   }
   // 已同步
@@ -807,14 +912,6 @@ function updateSyncBadge() {
     badge.style.background = "#e8f7ec";
     badge.style.color = "#2b8a3e";
   }
-  _setSyncBtns(true, true);
-}
-
-function _setSyncBtns(pushOn, pullOn) {
-  const p = $("sync-push-btn"), l = $("sync-pull-btn"), r = $("sync-refresh-btn");
-  if (p) p.style.display = pushOn ? "" : "none";
-  if (l) l.style.display = pullOn ? "" : "none";
-  if (r) r.style.display = pullOn ? "" : "none";
 }
 
 function _fmtSyncTime(ts) {
@@ -875,14 +972,14 @@ function renderGithubData() {
     <div class="card">
       <div class="card-title">🔗 Gist 数据存储配置</div>
       <div class="form-row">
-        <div class="form-group"><label>GitHub Token</label><input type="password" id="gd_token" value="${cfg.token || ""}" placeholder="在此粘贴 Token" /></div>
-        <div class="form-group"><label>主 Gist ID（配置存储，永久不变）</label><input id="gd_config_id" value="${cfg.configGistId || ""}" placeholder="a1b2c3d4e5f6…" /></div>
+        <div class="form-group"><label for="gd_token">GitHub Token</label><input type="password" id="gd_token" name="gd_token" value="${cfg.token || ""}" placeholder="在此粘贴 Token" /></div>
+        <div class="form-group"><label for="gd_config_id">主 Gist ID（配置存储，永久不变）</label><input id="gd_config_id" name="gd_config_id" value="${cfg.configGistId || ""}" placeholder="a1b2c3d4e5f6…" /></div>
       </div>
       <div class="form-row">
         ${[1, 2, 3, 4, 5].map(i => `
           <div class="form-group">
-            <label>业务 Gist ID #${i}${i === 1 ? "（当前活跃）" : "（归档）"}</label>
-            <input class="gd_data_id_${i}" value="${cfg.dataGistIds[i - 1] || ""}" placeholder="留空则首次上传时自动创建" />
+            <label for="gd_data_id_${i}">业务 Gist ID #${i}${i === 1 ? "（当前活跃）" : "（归档）"}</label>
+            <input id="gd_data_id_${i}" name="gd_data_id_${i}" class="gd_data_id_${i}" value="${cfg.dataGistIds[i - 1] || ""}" placeholder="留空则首次上传时自动创建" />
           </div>
         `).join("")}
       </div>
@@ -1064,13 +1161,9 @@ async function navigate(pageId) {
   const menu = allItems.find((m) => m.id === pageId);
   $("pageTitle").textContent = menu ? menu.text : "页面";
 
-  // 角色化同步策略：
-  // - 教务端(academic)：本地操作，导航不同步（通过顶部按钮手动上传/拉取）
-  // - 其他端(admin/teacher/headteacher)：切换功能时自动「上传本地更改 + 拉取最新」
+  // 切换功能时自动拉取最新数据（所有角色统一，上传统一在退出时进行）
   if (GitHubService.isConfigured()) {
-    if (currentUser && currentUser.role !== "academic") {
-      await autoSyncOnNavigate();
-    }
+    await autoSyncOnNavigate();
   } else {
     // 未配置云端：从本地 localStorage 读取最新
     const savedDB = localStorage.getItem(DB_KEY);
@@ -1116,14 +1209,14 @@ function renderAccountProfile() {
     <div class="card">
       <div class="card-title">🔐 修改我的密码</div>
       <div class="form-row">
-        <div class="form-group"><label>当前密码</label>
-          <input id="ap_old" type="password" placeholder="输入当前密码" />
+        <div class="form-group"><label for="ap_old">当前密码</label>
+          <input id="ap_old" name="ap_old" type="password" placeholder="输入当前密码" />
         </div>
-        <div class="form-group"><label>新密码</label>
-          <input id="ap_new1" type="password" placeholder="至少 4 位" />
+        <div class="form-group"><label for="ap_new1">新密码</label>
+          <input id="ap_new1" name="ap_new1" type="password" placeholder="至少 4 位" />
         </div>
-        <div class="form-group"><label>确认新密码</label>
-          <input id="ap_new2" type="password" placeholder="再次输入新密码" />
+        <div class="form-group"><label for="ap_new2">确认新密码</label>
+          <input id="ap_new2" name="ap_new2" type="password" placeholder="再次输入新密码" />
         </div>
       </div>
       <div style="margin-top:16px; display:flex; gap:10px;">

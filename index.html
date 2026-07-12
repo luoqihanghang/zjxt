@@ -4,11 +4,11 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>网络智慧教务平台</title>
-<link rel="stylesheet" href="styles.css?v=20260710" />
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="styles.css?v=20260712" />
+<script src="xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="config.js?v=20260706"></script>
-<script src="github-service.js?v=20260706"></script>
+<script src="github-service.js?v=20260712"></script>
 </head>
 <body>
 
@@ -60,16 +60,19 @@
 
             <div class="login-fields">
               <div class="field-group">
+                <label for="loginUsername" class="sr-only">账号</label>
                 <span class="field-icon">👤</span>
-                <input type="text" id="loginUsername" placeholder="账号" autocomplete="off" />
+                <input type="text" id="loginUsername" name="username" placeholder="账号" autocomplete="off" aria-label="账号" />
               </div>
               <div class="field-group">
+                <label for="loginPassword" class="sr-only">密码</label>
                 <span class="field-icon">🔒</span>
-                <input type="password" id="loginPassword" placeholder="密码" />
+                <input type="password" id="loginPassword" name="password" placeholder="密码" aria-label="密码" />
               </div>
               <div class="field-group">
+                <label for="loginRole" class="sr-only">登录角色</label>
                 <span class="field-icon">🎭</span>
-                <select id="loginRole">
+                <select id="loginRole" name="role" aria-label="登录角色">
                   <option value="admin">管理员</option>
                   <option value="academic">教务老师</option>
                   <option value="teacher">任课教师</option>
@@ -80,7 +83,7 @@
 
             <div class="login-options">
               <label class="remember-me">
-                <input type="checkbox" id="rememberMe" />
+                <input type="checkbox" id="rememberMe" name="rememberMe" />
                 <span>记住密码</span>
               </label>
             </div>
@@ -108,7 +111,7 @@
 
             <div class="login-fields">
               <div class="gist-upload-row">
-                <input type="file" id="gist_json_file" accept=".json,application/json" style="display:none" />
+                <input type="file" id="gist_json_file" name="gist_json_file" accept=".json,application/json" style="display:none" aria-label="上传 JSON 配置文件" />
                 <button id="gistUploadBtn" class="gist-upload-btn" type="button" style="flex:1;width:100%">📂 上传 JSON 配置</button>
               </div>
 
@@ -241,8 +244,9 @@
     </div>
   </div>
   <div class="ea-input-area">
-    <input type="text" id="eaInput" class="ea-input" placeholder="输入您的问题，按Enter发送..." onkeydown="handleAssistantInput(event)" />
-    <button class="ea-send-btn" onclick="sendAssistantMessage()">➤</button>
+    <label for="eaInput" class="sr-only">输入问题</label>
+    <input type="text" id="eaInput" name="eaInput" class="ea-input" placeholder="输入您的问题，按Enter发送..." onkeydown="handleAssistantInput(event)" aria-label="输入问题" />
+    <button class="ea-send-btn" onclick="sendAssistantMessage()" aria-label="发送消息">➤</button>
   </div>
 </div>
 
@@ -257,6 +261,6 @@
   <span class="eab-badge hidden" id="eaBadge"></span>
 </button>
 
-<script src="app.js?v=20260710"></script>
+<script src="app.js?v=20260712"></script>
 </body>
 </html>
