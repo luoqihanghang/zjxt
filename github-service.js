@@ -224,7 +224,8 @@ const GitHubService = {
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28"
       },
-      signal: controller.signal
+      signal: controller.signal,
+      targetAddressSpace: "public"
     };
     if (body) opts.body = JSON.stringify(body);
     try {
@@ -289,7 +290,7 @@ const GitHubService = {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 15000);
         try {
-          const raw = await fetch(file.raw_url, { signal: controller.signal });
+          const raw = await fetch(file.raw_url, { signal: controller.signal, targetAddressSpace: "public" });
           clearTimeout(timeoutId);
           const text = await raw.text();
           return JSON.parse(text);

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>专业排考场系统</title>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="xlsx.full.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; background: #f0f2f5; color: #333; }
@@ -1142,8 +1142,8 @@ input:checked + .slider:before { transform: translateX(22px); }
                     <input type="text" class="form-input" id="roomLocation" placeholder="如：教学楼301室">
                 </div>
                 <div class="form-item">
-                    <label class="form-label">监考老师</label>
-                    <input type="text" class="form-input" id="roomInvigilator" placeholder="监考老师姓名">
+                    <label class="form-label">总座位数 *</label>
+                    <input type="number" class="form-input" id="roomTotalSeats" value="36" min="1" max="500">
                 </div>
             </div>
 
@@ -1152,75 +1152,32 @@ input:checked + .slider:before { transform: translateX(22px); }
             <div class="form-row">
                 <div class="form-item">
                     <label class="form-label">列数（横排几个）*</label>
-                    <input type="number" class="form-input" id="roomCols" value="6" min="1" max="20">
+                    <input type="number" class="form-input" id="roomCols" value="6" min="1" max="30">
                 </div>
                 <div class="form-item">
-                    <label class="form-label">行数（纵排几个）*</label>
-                    <input type="number" class="form-input" id="roomRows" value="6" min="1" max="20">
+                    <label class="form-label">行数（自动计算）</label>
+                    <input type="number" class="form-input" id="roomRows" value="6" min="1" max="100" readonly style="background: #f5f5f5;">
                 </div>
-            </div>
-
-            <div class="form-row" style="margin-bottom: 4px;">
-                <div class="form-item">
-                    <label class="form-label">
-                        <input type="checkbox" id="roomCustomLayout" style="vertical-align: middle; margin-right: 4px;">
-                        自定义每排座位数（不规则排列）
-                    </label>
-                    <div style="font-size: 12px; color: #8c8c8c; margin-top: 4px;">
-                        开启后可为每一排单独设置座位数，适用于横排/竖排人数不规整的考场
-                    </div>
-                </div>
-            </div>
-            <div id="customLayoutRow" style="display: none; margin-bottom: 14px;">
-                <div style="font-size: 13px; color: #595959; margin-bottom: 8px;">
-                    <span>每排座位数：</span>
-                    <button type="button" class="btn btn-sm" onclick="addCustomLayoutRow()">+ 增加一排</button>
-                    <button type="button" class="btn btn-sm" onclick="removeCustomLayoutRow()">− 减少一排</button>
-                </div>
-                <div id="customLayoutInputs" style="display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; background: #fafafa; border-radius: 6px; border: 1px dashed #d9d9d9;"></div>
             </div>
 
             <div class="form-row">
+                <div class="form-item">
+                    <label class="form-label">座位起始位置</label>
+                    <select class="form-select" id="roomStartPos">
+                        <option value="tl">左上角（默认）</option>
+                        <option value="tr">右上角</option>
+                        <option value="bl">左下角</option>
+                        <option value="br">右下角</option>
+                    </select>
+                </div>
                 <div class="form-item">
                     <label class="form-label">排列方向</label>
                     <select class="form-select" id="roomDirection">
                         <option value="horizontal">横向排列（行优先）</option>
-                        <option value="vertical">纵向排列（列优先）</option>
                         <option value="snakeH">蛇形横向（S形）</option>
+                        <option value="vertical">纵向排列（列优先）</option>
                         <option value="snakeV">蛇形纵向（S形）</option>
                     </select>
-                </div>
-                <div class="form-item">
-                    <label class="form-label">起始位置</label>
-                    <select class="form-select" id="roomStartPos">
-                        <option value="tl">左上角 → 向右向下</option>
-                        <option value="tr">右上角 → 向左向下</option>
-                        <option value="bl">左下角 → 向右向上</option>
-                        <option value="br">右下角 → 向左向上</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-item">
-                    <label class="form-label">
-                        <input type="checkbox" id="roomHasPodium" checked>
-                        显示讲台
-                    </label>
-                </div>
-                <div class="form-item">
-                    <label class="form-label">讲台位置</label>
-                    <select class="form-select" id="roomPodiumPos">
-                        <option value="top">上方（顶部）</option>
-                        <option value="bottom">下方（底部）</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-row">
-                <div class="form-item">
-                    <label class="form-label">禁用座位（逗号分隔，如：3,7,15）</label>
-                    <input type="text" class="form-input" id="roomDisabledSeats" placeholder="输入要禁用的座位号">
                 </div>
             </div>
 
@@ -1232,6 +1189,67 @@ input:checked + .slider:before { transform: translateX(22px); }
         <div class="modal-footer">
             <button class="btn" onclick="closeModal('roomModal')">取消</button>
             <button class="btn btn-primary" onclick="saveRoom()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 批量添加考场模态框 -->
+<div class="modal-overlay" id="batchRoomModal">
+    <div class="modal" style="width: 560px;">
+        <div class="modal-header">
+            <div class="modal-title">📋 批量添加考场</div>
+            <span class="modal-close" onclick="closeModal('batchRoomModal')">&times;</span>
+        </div>
+        <div class="modal-body">
+            <div style="font-size: 13px; color: #595959; margin-bottom: 12px; line-height: 1.8;">
+                支持自定义多种规格的考场批量添加。每行填写一种规格，格式：<br>
+                <code style="background:#f5f5f5; padding:2px 6px; border-radius:4px;">人数 × 数量</code>
+                例如：<code style="background:#f5f5f5; padding:2px 6px; border-radius:4px;">70 × 1</code> 表示 70人考场 1 个
+            </div>
+            <div id="batchRoomRows">
+            </div>
+            <div style="margin-top: 12px;">
+                <button class="btn btn-sm" onclick="addBatchRoomRow()">+ 添加一行</button>
+            </div>
+            <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #f0f0f0;">
+                <div class="form-row">
+                    <div class="form-item">
+                        <label class="form-label">每排座位数（列数）</label>
+                        <input type="number" class="form-input" id="batchRoomCols" value="6" min="1" max="30">
+                    </div>
+                    <div class="form-item">
+                        <label class="form-label">起始编号</label>
+                        <input type="number" class="form-input" id="batchRoomStartNo" value="1" min="1">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-item">
+                        <label class="form-label">座位起始位置</label>
+                        <select class="form-select" id="batchRoomStartPos">
+                            <option value="tl">左上角（默认）</option>
+                            <option value="tr">右上角</option>
+                            <option value="bl">左下角</option>
+                            <option value="br">右下角</option>
+                        </select>
+                    </div>
+                    <div class="form-item">
+                        <label class="form-label">排列方向</label>
+                        <select class="form-select" id="batchRoomDirection">
+                            <option value="horizontal">横向排列</option>
+                            <option value="snakeH">蛇形横向</option>
+                            <option value="vertical">纵向排列</option>
+                            <option value="snakeV">蛇形纵向</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div id="batchRoomSummary" style="margin-top: 14px; padding: 10px; background: #e6f7ff; border-radius: 6px; font-size: 13px; color: #096dd9;">
+                预计添加：0 个考场，共 0 个座位
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal('batchRoomModal')">取消</button>
+            <button class="btn btn-primary" onclick="confirmBatchAddRooms()">确认添加</button>
         </div>
     </div>
 </div>
@@ -1395,6 +1413,9 @@ function syncRowsFromCustom() {
 
 // 计算考场总座位数（支持自定义布局
 function calcRoomSeats(room) {
+    if (typeof room.totalSeats === 'number' && room.totalSeats > 0) {
+        return room.totalSeats;
+    }
     if (room.customLayout && Array.isArray(room.rowSeats) && room.rowSeats.length > 0) {
         return room.rowSeats.reduce((s, n) => s + (parseInt(n) || 0), 0);
     }
@@ -1669,25 +1690,28 @@ function renderRooms() {
         return;
     }
     
-    container.innerHTML = appData.rooms.map((r, i) => `
+    container.innerHTML = appData.rooms.map((r, i) => {
+        const total = calcRoomSeats(r);
+        return `
         <div class="exam-room-card">
             <div class="room-header">
                 <div class="room-name">${r.roomName || '考场' + r.roomNo}</div>
                 <span class="badge badge-primary">${r.roomNo}号</span>
             </div>
             <div class="room-info">
+                <div style="font-size: 16px; font-weight: 600; color: #1890ff; margin-bottom: 6px;">👥 共 ${total} 个座位</div>
                 <div>📍 位置：${r.location || '-'}</div>
-                <div>👨‍🏫 监考：${r.invigilator || '-'}</div>
-                <div>📐 ${r.customLayout ? '自定义' : r.rows + '行 × ' + r.cols + '列'} = ${calcRoomSeats(r)}座</div>
-                <div>🔄 排列：${getDirectionText(r.direction)}</div>
-                <div>📍 起点：${getStartPosText(r.startPos)}</div>
+                <div>📐 ${r.rows} 行 × ${r.cols} 列</div>
+                <div>🔄 排列：${getRoomDirectionText(r)}</div>
+                <div>📍 起始位置：${getStartPosText(r.startPos || 'tl')}</div>
             </div>
             <div class="room-actions">
                 <button class="btn btn-sm" onclick="editRoom(${i})">编辑</button>
                 <button class="btn btn-sm btn-danger" onclick="deleteRoom(${i})">删除</button>
             </div>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function getDirectionText(dir) {
@@ -1698,6 +1722,11 @@ function getDirectionText(dir) {
         'snakeV': '蛇形纵向'
     };
     return map[dir] || dir;
+}
+
+// 获取考场显示用的排列描述
+function getRoomDirectionText(room) {
+    return getDirectionText(room.direction || 'horizontal');
 }
 
 function getStartPosText(pos) {
@@ -1716,85 +1745,60 @@ function showAddRoomModal() {
     document.getElementById('roomNo').value = '';
     document.getElementById('roomName').value = '';
     document.getElementById('roomLocation').value = '';
-    document.getElementById('roomInvigilator').value = '';
+    document.getElementById('roomTotalSeats').value = '36';
     document.getElementById('roomCols').value = '6';
-    document.getElementById('roomRows').value = '6';
+    recalcRowsFromTotal();
     document.getElementById('roomDirection').value = 'horizontal';
     document.getElementById('roomStartPos').value = 'tl';
-    document.getElementById('roomHasPodium').checked = true;
-    document.getElementById('roomPodiumPos').value = 'top';
-    document.getElementById('roomDisabledSeats').value = '';
-    document.getElementById('roomCustomLayout').checked = false;
-    document.getElementById('customLayoutRow').style.display = 'none';
     updateRoomPreview();
     showModal('roomModal');
 }
 
 function editRoom(index) {
     const r = appData.rooms[index];
+    const totalSeats = calcRoomSeats(r);
     document.getElementById('roomModalTitle').textContent = '编辑考场';
     document.getElementById('editRoomIndex').value = index;
     document.getElementById('roomNo').value = r.roomNo;
     document.getElementById('roomName').value = r.roomName || '';
     document.getElementById('roomLocation').value = r.location || '';
-    document.getElementById('roomInvigilator').value = r.invigilator || '';
+    document.getElementById('roomTotalSeats').value = totalSeats;
     document.getElementById('roomCols').value = r.cols;
     document.getElementById('roomRows').value = r.rows;
     document.getElementById('roomDirection').value = r.direction || 'horizontal';
     document.getElementById('roomStartPos').value = r.startPos || 'tl';
-    document.getElementById('roomHasPodium').checked = r.hasPodium !== false;
-    document.getElementById('roomPodiumPos').value = r.podiumPos || 'top';
-    document.getElementById('roomDisabledSeats').value = (r.disabledSeats || []).join(',');
-    const customLayoutChk = document.getElementById('roomCustomLayout');
-    const customRow = document.getElementById('customLayoutRow');
-    const customLayout = !!r.customLayout && Array.isArray(r.rowSeats) && r.rowSeats.length > 0;
-    customLayoutChk.checked = customLayout;
-    customRow.style.display = customLayout ? 'block' : 'none';
-    if (customLayout) {
-        // 渲染自定义输入框并填入值
-        const container = document.getElementById('customLayoutInputs');
-        container.innerHTML = r.rowSeats.map((n, i) => `
-            <div style="display:flex; align-items:center; gap:4px;">
-                <span style="font-size:12px; color:#595959; min-width:36px;">第${i+1}排</span>
-                <input type="number" class="form-input custom-row-seat" data-row="${i}" value="${n}" min="0" max="30" style="width:60px; padding:4px 6px; font-size:12px;">
-                <span style="font-size:12px; color:#8c8c8c;">座</span>
-            </div>
-        `).join('');
-        container.querySelectorAll('.custom-row-seat').forEach(input => {
-            input.addEventListener('input', function() {
-                syncRowsFromCustom();
-                updateRoomPreview();
-            });
-        });
-    }
     updateRoomPreview();
     showModal('roomModal');
 }
 
+function recalcRowsFromTotal() {
+    const total = parseInt(document.getElementById('roomTotalSeats').value) || 36;
+    const cols = parseInt(document.getElementById('roomCols').value) || 6;
+    const rows = Math.ceil(total / cols);
+    document.getElementById('roomRows').value = rows;
+    return rows;
+}
+
 function saveRoom() {
     const index = document.getElementById('editRoomIndex').value;
-    const disabledStr = document.getElementById('roomDisabledSeats').value.trim();
-    const disabledSeats = disabledStr ? disabledStr.split(/[,，]/).map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [];
-    const customLayout = document.getElementById('roomCustomLayout').checked;
-    let rowSeats = null;
-    if (customLayout) {
-        rowSeats = getCurrentRowSeats();
-    }
+    const totalSeats = parseInt(document.getElementById('roomTotalSeats').value) || 36;
+    const cols = parseInt(document.getElementById('roomCols').value) || 6;
+    const rows = Math.ceil(totalSeats / cols);
     
     const room = {
         roomNo: document.getElementById('roomNo').value.trim(),
         roomName: document.getElementById('roomName').value.trim(),
         location: document.getElementById('roomLocation').value.trim(),
-        invigilator: document.getElementById('roomInvigilator').value.trim(),
-        cols: parseInt(document.getElementById('roomCols').value) || 6,
-        rows: parseInt(document.getElementById('roomRows').value) || 6,
+        cols: cols,
+        rows: rows,
+        totalSeats: totalSeats,
         direction: document.getElementById('roomDirection').value,
         startPos: document.getElementById('roomStartPos').value,
-        hasPodium: document.getElementById('roomHasPodium').checked,
-        podiumPos: document.getElementById('roomPodiumPos').value,
-        disabledSeats: disabledSeats,
-        customLayout: customLayout,
-        rowSeats: rowSeats
+        hasPodium: true,
+        podiumPos: 'top',
+        disabledSeats: [],
+        customLayout: false,
+        rowSeats: null
     };
     
     if (!room.roomNo) { alert('请输入考场号'); return; }
@@ -1831,72 +1835,133 @@ function clearAllRooms() {
 }
 
 function batchAddRooms() {
-    const count = prompt('请输入要添加的考场数量：', '5');
-    if (!count) return;
-    const n = parseInt(count);
-    if (isNaN(n) || n <= 0) { alert('请输入有效数字'); return; }
+    // 重置为两行默认值：30人×5个，40人×5个
+    const container = document.getElementById('batchRoomRows');
+    container.innerHTML = '';
+    addBatchRoomRow(40, 9);
+    addBatchRoomRow(70, 1);
+    document.getElementById('batchRoomCols').value = 6;
+    document.getElementById('batchRoomStartNo').value = (appData.rooms.length + 1);
+    updateBatchRoomSummary();
+    showModal('batchRoomModal');
+}
+
+function addBatchRoomRow(seats, count) {
+    const container = document.getElementById('batchRoomRows');
+    const row = document.createElement('div');
+    row.className = 'batch-room-row';
+    row.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+    row.innerHTML = `
+        <span style="font-size:13px; color:#595959; min-width:50px;">规格</span>
+        <input type="number" class="form-input batch-seats" value="${seats || 40}" min="1" max="500" style="width:90px;" oninput="updateBatchRoomSummary()">
+        <span style="font-size:13px; color:#8c8c8c;">人考场</span>
+        <input type="number" class="form-input batch-count" value="${count || 1}" min="1" max="100" style="width:70px;" oninput="updateBatchRoomSummary()">
+        <span style="font-size:13px; color:#8c8c8c;">个</span>
+        <button class="btn btn-sm btn-danger" onclick="this.parentElement.remove(); updateBatchRoomSummary();" style="margin-left:auto;">删除</button>
+    `;
+    container.appendChild(row);
+}
+
+function updateBatchRoomSummary() {
+    const rows = document.querySelectorAll('#batchRoomRows .batch-room-row');
+    let totalRooms = 0;
+    let totalSeats = 0;
+    rows.forEach(row => {
+        const seats = parseInt(row.querySelector('.batch-seats').value) || 0;
+        const count = parseInt(row.querySelector('.batch-count').value) || 0;
+        totalRooms += count;
+        totalSeats += seats * count;
+    });
+    document.getElementById('batchRoomSummary').textContent = `预计添加：${totalRooms} 个考场，共 ${totalSeats} 个座位`;
+}
+
+function confirmBatchAddRooms() {
+    const rows = document.querySelectorAll('#batchRoomRows .batch-room-row');
+    if (rows.length === 0) { alert('请至少添加一行规格'); return; }
     
-    const cols = parseInt(prompt('每个考场列数：', '6')) || 6;
-    const rows = parseInt(prompt('每个考场行数：', '6')) || 6;
+    const cols = parseInt(document.getElementById('batchRoomCols').value) || 6;
+    const startNo = parseInt(document.getElementById('batchRoomStartNo').value) || 1;
+    const startPos = document.getElementById('batchRoomStartPos').value;
+    const direction = document.getElementById('batchRoomDirection').value;
     
-    for (let i = 1; i <= n; i++) {
-        appData.rooms.push({
-            roomNo: String(i),
-            roomName: `第${i}考场`,
-            location: '',
-            invigilator: '',
-            cols: cols,
-            rows: rows,
-            direction: 'horizontal',
-            startPos: 'tl',
-            hasPodium: true,
-            podiumPos: 'top',
-            disabledSeats: []
-        });
-    }
+    let roomNo = startNo;
+    let addedCount = 0;
     
+    rows.forEach(row => {
+        const seats = parseInt(row.querySelector('.batch-seats').value) || 0;
+        const count = parseInt(row.querySelector('.batch-count').value) || 0;
+        if (seats <= 0 || count <= 0) return;
+        
+        const rowsCount = Math.ceil(seats / cols);
+        
+        for (let i = 0; i < count; i++) {
+            appData.rooms.push({
+                roomNo: String(roomNo),
+                roomName: `第${roomNo}考场`,
+                location: '',
+                cols: cols,
+                rows: rowsCount,
+                totalSeats: seats,
+                direction: direction,
+                startPos: startPos,
+                hasPodium: true,
+                podiumPos: 'top',
+                disabledSeats: [],
+                customLayout: false,
+                rowSeats: null
+            });
+            roomNo++;
+            addedCount++;
+        }
+    });
+    
+    if (addedCount === 0) { alert('没有可添加的考场'); return; }
+    
+    closeModal('batchRoomModal');
     renderRooms();
     updateRoomSelections();
     updateDashboard();
     autoSave();
-    alert(`成功添加 ${n} 个考场`);
+    alert(`成功添加 ${addedCount} 个考场`);
 }
 
 function initRoomPreview() {
     updateRoomPreview();
+    // 监听总座位数和列数变化时自动重算行数并更新预览
+    const totalInput = document.getElementById('roomTotalSeats');
+    const colsInput = document.getElementById('roomCols');
+    if (totalInput) totalInput.addEventListener('input', () => { recalcRowsFromTotal(); updateRoomPreview(); });
+    if (colsInput) colsInput.addEventListener('input', () => { recalcRowsFromTotal(); updateRoomPreview(); });
+    // 监听方向和起始位置变化
+    const dirInput = document.getElementById('roomDirection');
+    const posInput = document.getElementById('roomStartPos');
+    if (dirInput) dirInput.addEventListener('change', updateRoomPreview);
+    if (posInput) posInput.addEventListener('change', updateRoomPreview);
 }
 
 function updateRoomPreview() {
     const cols = parseInt(document.getElementById('roomCols').value) || 6;
     const rows = parseInt(document.getElementById('roomRows').value) || 6;
+    const totalSeats = parseInt(document.getElementById('roomTotalSeats').value) || 36;
     const direction = document.getElementById('roomDirection').value;
     const startPos = document.getElementById('roomStartPos').value;
-    const hasPodium = document.getElementById('roomHasPodium').checked;
-    const customLayoutChk = document.getElementById('roomCustomLayout');
-    const customLayout = customLayoutChk && customLayoutChk.checked;
-    let rowSeats = null;
-    if (customLayout) rowSeats = getCurrentRowSeats();
-    
-    const seatOrder = generateSeatOrder(rows, cols, direction, startPos, rowSeats);
+
+    const seatOrder = generateSeatOrder(rows, cols, direction, startPos, null);
     const seatMap = {};
     seatOrder.forEach((seat, idx) => {
-        seatMap[`${seat.row}-${seat.col}`] = idx + 1;
+        if (idx < totalSeats) {
+            seatMap[`${seat.row}-${seat.col}`] = idx + 1;
+        }
     });
     
-    const actualRows = rowSeats ? rowSeats.length : rows;
-    
     let html = '<div style="display: inline-block;">';
+    html += '<div style="background:#f0f0f0; padding:8px; text-align:center; margin-bottom:10px; border-radius:4px; font-size:11px; color:#666;">讲台</div>';
     
-    if (hasPodium) {
-        html += '<div style="background:#f0f0f0; padding:8px; text-align:center; margin-bottom:10px; border-radius:4px; font-size:11px; color:#666;">讲台</div>';
-    }
-    
-    for (let r = 0; r < actualRows; r++) {
-        const rowCount = rowSeats ? (parseInt(rowSeats[r]) || 0) : cols;
+    for (let r = 0; r < rows; r++) {
         html += '<div style="display:flex; gap:4px; margin-bottom:4px; justify-content:center;">';
-        for (let c = 0; c < rowCount; c++) {
+        for (let c = 0; c < cols; c++) {
             const seatNo = seatMap[`${r}-${c}`];
-            html += `<div style="width:36px; height:30px; border:1px solid #d9d9d9; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:11px; background:${seatNo ? '#e6f7ff' : '#fafafa'};">${seatNo || ''}</div>`;
+            html += `<div style="width:36px; height:30px; border:1px solid #d9d9d9; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:11px; background:${seatNo ? '#e6f7ff' : '#fafafa'}; color:${seatNo ? '#1890ff' : '#bfbfbf'};">${seatNo || ''}</div>`;
         }
         html += '</div>';
     }
@@ -1909,7 +1974,7 @@ function updateRoomPreview() {
 // rowSeats: 可选数组，每排座位数（为 null/undefined 则用 cols 表示统一列数）
 function generateSeatOrder(rows, cols, direction, startPos, rowSeats) {
     const seats = [];
-    
+
     const actualRows = rowSeats ? rowSeats.length : rows;
     const maxCols = rowSeats ? Math.max(...rowSeats, 0) : cols;
     
@@ -3162,7 +3227,7 @@ function previewSeatMapPrint() {
     }
     
     html += '</div>';
-    html += `<p style="margin-top:20px; text-align:right; font-size:12px; color:#666;">监考老师：${room.invigilator || '-'} &nbsp;&nbsp; 共 ${roomArrangements.length} 人</p>`;
+    html += `<p style="margin-top:20px; text-align:right; font-size:12px; color:#666;">共 ${roomArrangements.length} 人 &nbsp;&nbsp; 考场座位：${calcRoomSeats(room)} 个</p>`;
     
     document.getElementById('printPreviewArea').innerHTML = html;
 }
@@ -3342,12 +3407,12 @@ function doExport() {
         
     } else if (type === 'roomsOnly') {
         // 仅考场信息
-        const data = [['考场号', '考场名称', '位置', '监考老师', '行数', '列数', '排列方向', '起始位置', '座位数']];
+        const data = [['考场号', '考场名称', '位置', '总座位数', '行数', '列数', '排列方向', '起始位置']];
         appData.rooms.forEach(r => {
             data.push([
-                r.roomNo, r.roomName, r.location, r.invigilator,
-                r.rows, r.cols, getDirectionText(r.direction),
-                getStartPosText(r.startPos), calcRoomSeats(r)
+                r.roomNo, r.roomName, r.location, calcRoomSeats(r),
+                r.rows, r.cols, getRoomDirectionText(r),
+                getStartPosText(r.startPos)
             ]);
         });
         exportToExcel([{ name: '考场信息', data: data }], fileName + '_考场信息.' + format, format);
