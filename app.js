@@ -361,13 +361,67 @@ async function pullFromRemote(manual) {
   }
 }
 
-// 导航切换时自动拉取最新数据（不零散上传，统一在退出时整体上传）
+// 导航切换时自动同步：有本地更改先上传再拉取，没更改只拉取
+// 使用右上角小进度条展示，区别于退出时的大弹窗
 async function autoSyncOnNavigate() {
   if (!GitHubService.isConfigured()) return;
+  if (_syncInProgress) return;
+
+  const hasChanges = _dirtyFlag || (_dirtyExamIds && _dirtyExamIds.length > 0);
+  const steps = hasChanges ? ["上传本地更改", "拉取云端最新数据"] : ["拉取云端最新数据"];
+  showNavSyncProgress(steps);
+
   try {
-    await pullFromRemote(false);
+    let step = 0;
+
+    // 第1步：有更改时先上传（增量上传，不阻塞太长时间）
+    if (hasChanges) {
+      const badge = $("sync-badge");
+      if (badge) { badge.innerHTML = "⬆️ 上传中…"; badge.style.background = "#e3f2fd"; badge.style.color = "#1976d2"; }
+      _syncInProgress = true;
+      _syncAction = "upload";
+      updateSyncBadge();
+      try {
+        await pushToRemote(false, null, false);
+      } catch(e) {
+        console.log("[navigate] 自动上传失败:", e.message);
+      } finally {
+        _syncInProgress = false;
+        _syncAction = "";
+      }
+      step++;
+      updateNavSyncProgress(step);
+    }
+
+    // 第2步：拉取云端最新数据
+    const badge = $("sync-badge");
+    if (badge) { badge.innerHTML = "⬇️ 拉取中…"; badge.style.background = "#e3f2fd"; badge.style.color = "#1976d2"; }
+    _syncInProgress = true;
+    _syncAction = "pull";
+    updateSyncBadge();
+    try {
+      await pullFromRemote(false);
+    } catch(e) {
+      console.log("[navigate] 自动拉取失败:", e.message);
+    } finally {
+      _syncInProgress = false;
+      _syncAction = "";
+    }
+    step++;
+    updateNavSyncProgress(step);
+
+    finishNavSyncProgress(true);
+    updateSyncBadge();
+
+    // 拉取后刷新当前用户
+    if (currentUser && DB && DB.users) {
+      const u = DB.users.find(x => x.id === currentUser.id);
+      if (u) currentUser = u;
+    }
   } catch (e) {
-    console.log("[navigate] 自动拉取失败:", e.message);
+    console.log("[navigate] 自动同步异常:", e.message);
+    finishNavSyncProgress(false);
+    updateSyncBadge();
   }
 }
 
@@ -464,7 +518,7 @@ const NAV_MENUS = {
       group: "基础设置", icon: "⚙️", items: [
         { id: "exams", icon: "📝", text: "考试管理" },
         { id: "student_roster", icon: "📋", text: "学生名单管理" },
-        { id: "users", icon: "👩‍🏫", text: "教师名单管理" }
+        { id: "users", icon: "👩‍🏫", text: "教师名单" }
       ]
     },
     {
@@ -854,13 +908,52 @@ function renderSyncStatus() {
   if ($("sync-status")) { updateSyncBadge(); return; }
   const statusDiv = document.createElement("div");
   statusDiv.id = "sync-status";
-  statusDiv.style.cssText = "display:flex;align-items:center;gap:8px";
+  statusDiv.style.cssText = "display:flex;flex-direction:column;align-items:flex-end;gap:3px;min-width:130px;";
   statusDiv.innerHTML = `
     <span id="sync-badge" style="font-size:12px;padding:4px 10px;background:#f0f4ff;border-radius:12px;color:#3b7ddd;white-space:nowrap">🔗 未连接</span>
+    <div id="sync-nav-progress" style="display:none;width:120px;height:3px;background:#e5e7eb;border-radius:2px;overflow:hidden;">
+      <div id="sync-nav-progress-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#4f46e5,#6366f1);transition:width 0.3s ease;"></div>
+    </div>
   `;
   const rightBar = document.querySelector(".topbar-right");
   if (rightBar) rightBar.insertBefore(statusDiv, rightBar.firstChild);
   updateSyncBadge();
+}
+
+// 导航切换时的轻量同步进度条（小巧，区别于退出时的大弹窗）
+let _navSyncSteps = [];
+let _navSyncDone = 0;
+
+function showNavSyncProgress(steps) {
+  _navSyncSteps = steps || ["上传更改", "拉取最新数据"];
+  _navSyncDone = 0;
+  const bar = $("sync-nav-progress");
+  const fill = $("sync-nav-progress-bar");
+  if (bar) bar.style.display = "block";
+  if (fill) fill.style.width = "0%";
+}
+
+function updateNavSyncProgress(stepIndex) {
+  _navSyncDone = stepIndex;
+  const fill = $("sync-nav-progress-bar");
+  if (fill && _navSyncSteps.length > 0) {
+    const pct = Math.round((stepIndex / _navSyncSteps.length) * 100);
+    fill.style.width = pct + "%";
+  }
+}
+
+function finishNavSyncProgress(success) {
+  const fill = $("sync-nav-progress-bar");
+  const bar = $("sync-nav-progress");
+  if (fill) fill.style.width = "100%";
+  if (fill) fill.style.background = success ? "linear-gradient(90deg,#16a34a,#22c55e)" : "linear-gradient(90deg,#dc2626,#ef4444)";
+  setTimeout(() => {
+    if (bar) bar.style.display = "none";
+    if (fill) {
+      fill.style.width = "0%";
+      fill.style.background = "linear-gradient(90deg,#4f46e5,#6366f1)";
+    }
+  }, 800);
 }
 
 // 仅依据本地状态更新徽标，不再发起网络请求
@@ -1189,7 +1282,8 @@ async function navigate(pageId) {
   const menu = allItems.find((m) => m.id === pageId);
   $("pageTitle").textContent = menu ? menu.text : "页面";
 
-  // 切换功能时自动拉取最新数据（所有角色统一，上传统一在退出时进行）
+  // 切换功能时自动同步：有本地更改先上传再拉取，没更改只拉取
+  // 右上角显示小进度条，区别于退出时的大弹窗
   if (GitHubService.isConfigured()) {
     await autoSyncOnNavigate();
   } else {
@@ -1804,23 +1898,26 @@ const PAGE_HELPS = {
       </div>`
   },
   users: {
-    title: "教师名单管理",
+    title: "教师名单",
     html: `
       <div class="help-modal-body">
         <div class="help-section">
           <h4>📋 功能说明</h4>
-          <p>管理员/教务可在此添加、编辑、删除教师账号，设置教师的角色、所属年级、班级、任教学科等信息。</p>
+          <p><b>管理员</b>：可添加、编辑、删除教师账号，设置角色、所属年级、班级、任教学科等。</p>
+          <p><b>教务老师</b>：按学科分类查看本年级所有任课教师及班主任的任教信息。</p>
         </div>
         <div class="help-section">
-          <h4>🚀 使用方法</h4>
+          <h4>🚀 使用方法（管理员）</h4>
           <ol>
-            <li>点击「添加教师」按钮，填写教师姓名、登录账号、密码、角色（管理员/教务/任课教师/班主任）。</li>
+            <li>点击「添加教师」按钮，填写教师姓名、登录账号、密码、角色。</li>
             <li>为任课教师选择所属年级与任教学科；为班主任指定所带班级。</li>
-            <li>在教师列表中点击「编辑」可修改信息，点击「删除」可移除账号。</li>
-            <li>所有修改会自动同步到 Gist 云端（若已配置）。</li>
+            <li>支持批量导入导出，快速初始化教师名单。</li>
           </ol>
         </div>
-        <div class="help-note">💡 提示：教师账号是登录系统的凭证，账号名不可重复；删除后无法恢复，请谨慎操作。</div>
+        <div class="help-section">
+          <h4>👀 查看说明（教务）</h4>
+          <p>页面按学科分组展示，每组列出该学科的所有教师姓名和任教班级。班主任会额外标注「班主任」徽章。</p>
+        </div>
       </div>`
   },
   grades: {
@@ -2822,43 +2919,84 @@ function getRoleWelcome(role) {
 function renderUsers() {
   if (currentUser.role !== "admin" && currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
 
-  // 教务只能管理自己年级的教师
-  const myGrade = currentUser.role === "academic" ? currentUser.grade : null;
-  const allUsers = myGrade
-    ? DB.users.filter((u) => u.role !== "admin" && u.grade === myGrade)
-    : DB.users.filter((u) => u.role !== "admin");
+  // 教务端：按科目分类的只读视图
+  if (currentUser.role === "academic") {
+    renderUsersAcademicView();
+    return;
+  }
+
+  // 管理员端：年组卡片 → 学科分组人员
+  const allUsers = DB.users.filter((u) => u.role !== "admin");
+
+  // 视图状态：未选年级时显示年组卡片，选了年级后显示该年级学科分组
+  if (!window._adminTeacherGrade) {
+    renderAdminGradeCards(allUsers);
+  } else {
+    renderAdminGradeDetail(allUsers, window._adminTeacherGrade);
+  }
+}
+
+// 第一层：年组卡片展示
+function renderAdminGradeCards(allUsers) {
   const teachers = allUsers.filter((u) => u.role === "teacher");
   const headteachers = allUsers.filter((u) => u.role === "headteacher");
   const academics = allUsers.filter((u) => u.role === "academic");
 
-  const rows = allUsers.map((u) => `
-    <tr>
-      <td>${esc(u.username)}</td>
-      <td>${esc(u.name)}</td>
-      <td><span class="badge badge-primary">${esc(ROLE_NAMES[u.role])}</span></td>
-      <td>${esc(u.grade || "-")}</td>
-      <td>${esc(u.classNo || "-")}</td>
-      <td>${(u.subjects && u.subjects.length) ? esc(u.subjects.join("、")) : "-"}</td>
-      <td>${new Date(u.createdAt).toLocaleDateString()}</td>
-      <td style="display:flex;gap:6px">
-        <button class="btn btn-sm btn-info" onclick="editUser('${esc(u.id)}')">编辑</button>
-        <button class="btn btn-sm btn-warning" onclick="resetPwd('${esc(u.id)}')">重置密码</button>
-        <button class="btn btn-sm btn-danger" onclick="delUser('${esc(u.id)}')">删除</button>
-      </td>
-    </tr>
-  `).join("");
+  // 按年级分组
+  const gradeGroups = {};
+  allUsers.forEach(u => {
+    const g = u.grade || "未分年级";
+    if (!gradeGroups[g]) gradeGroups[g] = [];
+    gradeGroups[g].push(u);
+  });
+  const sortedGrades = Object.keys(gradeGroups).sort();
 
-  const summaryHtml = myGrade
-    ? `<div style="margin-bottom:12px;font-size:13px;color:var(--text-light)">
-        当前年级：<b>${myGrade}</b> ·
-        班主任 ${headteachers.length} 人 · 任课教师 ${teachers.length} 人 · 教务老师 ${academics.length} 人
-      </div>`
-    : "";
+  // 每个年级不同主题色
+  const themes = [
+    { bg: "linear-gradient(135deg, #667eea, #764ba2)", chip: "rgba(255,255,255,0.25)", text: "#fff" },
+    { bg: "linear-gradient(135deg, #f093fb, #f5576c)", chip: "rgba(255,255,255,0.25)", text: "#fff" },
+    { bg: "linear-gradient(135deg, #4facfe, #00f2fe)", chip: "rgba(255,255,255,0.25)", text: "#fff" },
+    { bg: "linear-gradient(135deg, #43e97b, #38f9d7)", chip: "rgba(255,255,255,0.25)", text: "#fff" },
+    { bg: "linear-gradient(135deg, #fa709a, #fee140)", chip: "rgba(255,255,255,0.25)", text: "#fff" },
+    { bg: "linear-gradient(135deg, #a18cd1, #fbc2eb)", chip: "rgba(255,255,255,0.25)", text: "#fff" },
+    { bg: "linear-gradient(135deg, #ffecd2, #fcb69f)", chip: "rgba(255,255,255,0.3)", text: "#5a3a2a" },
+  ];
+
+  const gradeCards = sortedGrades.map((grade, i) => {
+    const list = gradeGroups[grade];
+    const theme = themes[i % themes.length];
+    const gHeads = list.filter(u => u.role === "headteacher").length;
+    const gTeachers = list.filter(u => u.role === "teacher").length;
+    const gAcademics = list.filter(u => u.role === "academic").length;
+    // 统计学科
+    const subjSet = new Set();
+    list.forEach(u => { (u.subjects || []).forEach(s => subjSet.add(s)); });
+
+    return `
+      <div class="grade-card" style="--card-bg:${theme.bg};--card-text:${theme.text};--chip-bg:${theme.chip}" onclick="enterAdminGrade('${esc(grade)}')">
+        <div class="gc-header">
+          <span class="gc-icon">🏫</span>
+          <span class="gc-name">${esc(grade)}</span>
+        </div>
+        <div class="gc-total">
+          <span class="gc-num">${list.length}</span>
+          <span class="gc-unit">位教师</span>
+        </div>
+        <div class="gc-stats">
+          ${gHeads > 0 ? `<span class="gc-chip">班主任 ${gHeads}</span>` : ""}
+          ${gTeachers > 0 ? `<span class="gc-chip">任课 ${gTeachers}</span>` : ""}
+          ${gAcademics > 0 ? `<span class="gc-chip">教务 ${gAcademics}</span>` : ""}
+        </div>
+        <div class="gc-subjects">${subjSet.size > 0 ? `${subjSet.size} 个学科` : ""}</div>
+        <div class="gc-enter">点击查看详情 →</div>
+      </div>
+    `;
+  }).join("");
 
   $("pageContent").innerHTML = `
     <div class="card">
       <div class="card-title">
-        <span>👥 教师名单管理（共 ${allUsers.length} 人）${myGrade ? `— ${myGrade}` : ""}</span>
+        <span>👥 教师名单管理（共 ${allUsers.length} 人）</span>
         <span class="ct-actions">
           <button class="btn btn-info" onclick="exportTeacherExcel()">📥 批量导出</button>
           <button class="btn btn-primary" onclick="downloadTeacherTemplate()">📥 下载模板</button>
@@ -2866,27 +3004,428 @@ function renderUsers() {
           <button class="btn btn-success" onclick="editUser(null)">+ 添加教师</button>
         </span>
       </div>
-      ${summaryHtml}
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>账号</th><th>姓名</th><th>角色</th><th>所属年级</th><th>班级</th><th>任教学科</th><th>加入时间</th><th>操作</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="8"><div class="empty-state"><div class="es-tip">暂无教师，点击右上角添加</div></div></td></tr>`}</tbody>
-      </table></div>
+      <div style="margin-bottom:16px;font-size:13px;color:var(--text-light)">
+        共 ${sortedGrades.length} 个年级 · 班主任 ${headteachers.length} 人 · 任课教师 ${teachers.length} 人 · 教务老师 ${academics.length} 人
+      </div>
+      <div class="grade-cards-grid">
+        ${gradeCards || `<div class="empty-state"><div class="es-tip">暂无教师，点击右上角添加</div></div>`}
+      </div>
     </div>
+    <style>
+      .grade-cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 18px;
+      }
+      .grade-card {
+        background: var(--card-bg);
+        color: var(--card-text);
+        border-radius: 16px;
+        padding: 22px 20px;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        display: flex; flex-direction: column; gap: 12px;
+        position: relative; overflow: hidden;
+      }
+      .grade-card::after {
+        content: ""; position: absolute; right: -20px; top: -20px;
+        width: 80px; height: 80px; border-radius: 50%;
+        background: rgba(255,255,255,0.1);
+      }
+      .grade-card:hover {
+        transform: translateY(-4px) scale(1.02);
+        box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+      }
+      .gc-header { display: flex; align-items: center; gap: 8px; }
+      .gc-icon { font-size: 24px; }
+      .gc-name { font-size: 18px; font-weight: 700; }
+      .gc-total { display: flex; align-items: baseline; gap: 4px; }
+      .gc-num { font-size: 36px; font-weight: 800; line-height: 1; }
+      .gc-unit { font-size: 13px; opacity: 0.8; }
+      .gc-stats { display: flex; flex-wrap: wrap; gap: 6px; }
+      .gc-chip {
+        font-size: 11px; padding: 3px 10px; border-radius: 12px;
+        background: var(--chip-bg); font-weight: 500;
+      }
+      .gc-subjects { font-size: 12px; opacity: 0.7; }
+      .gc-enter {
+        font-size: 12px; opacity: 0.6;
+        border-top: 1px solid rgba(255,255,255,0.2);
+        padding-top: 10px; margin-top: 4px;
+      }
+    </style>
+  `;
+}
+
+// 第二层：年级详情 — 按学科分组展示教师
+function renderAdminGradeDetail(allUsers, gradeName) {
+  const gradeUsers = allUsers.filter(u => (u.grade || "未分年级") === gradeName);
+
+  // 按学科分组
+  const subjectGroups = {};
+  gradeUsers.forEach(u => {
+    const subjects = (u.subjects && u.subjects.length) ? u.subjects : ["未设置学科"];
+    subjects.forEach(subj => {
+      if (!subjectGroups[subj]) subjectGroups[subj] = [];
+      subjectGroups[subj].push(u);
+    });
+  });
+  const sortedSubjects = Object.keys(subjectGroups).sort();
+
+  const subjColors = [
+    { bg: "#e8f4fd", border: "#bae0ff", head: "#1890ff" },
+    { bg: "#f6ffed", border: "#d9f7be", head: "#52c41a" },
+    { bg: "#fff7e6", border: "#ffe7ba", head: "#d46b08" },
+    { bg: "#fff0f6", border: "#ffd6e7", head: "#c41d7f" },
+    { bg: "#f9f0ff", border: "#efdbff", head: "#722ed1" },
+    { bg: "#e6fffb", border: "#b5f5ec", head: "#13c2c2" },
+    { bg: "#fcffe6", border: "#eaff8f", head: "#a0d911" },
+  ];
+
+  const subjSections = sortedSubjects.map((subj, i) => {
+    const list = subjectGroups[subj];
+    const sc = subjColors[i % subjColors.length];
+
+    const cards = list.map(u => {
+      const allClasses = u.classNo
+        ? String(u.classNo).split(/[,，]/).map(s => s.trim()).filter(Boolean)
+        : [];
+      let classHtml = "";
+      if (u.role === "headteacher") {
+        const headClass = allClasses[0] || "-";
+        const teachClasses = allClasses.length > 1 ? allClasses.slice(1) : [headClass];
+        classHtml = `
+          <div class="td-info"><span class="td-label td-label-head">班主任</span><span class="td-value td-value-head">${esc(headClass)}</span></div>
+          <div class="td-info"><span class="td-label">任教</span><span class="td-value">${esc(teachClasses.join("、"))}</span></div>
+        `;
+      } else if (u.role === "teacher") {
+        const classText = allClasses.length === 0 ? "全年级" : allClasses.join("、");
+        classHtml = `<div class="td-info"><span class="td-label">任教</span><span class="td-value">${esc(classText)}</span></div>`;
+      }
+
+      const roleBadge = u.role === "headteacher"
+        ? '<span class="td-badge td-badge-head">班主任</span>'
+        : u.role === "teacher"
+        ? '<span class="td-badge td-badge-teacher">任课</span>'
+        : '<span class="td-badge td-badge-academic">教务</span>';
+
+      return `
+        <div class="td-card ${u.role === 'headteacher' ? 'td-card-head' : ''}">
+          <div class="td-card-top">
+            <span class="td-name">${esc(u.name)}</span>
+            ${roleBadge}
+          </div>
+          <div class="td-card-mid">
+            ${classHtml}
+            <div class="td-info"><span class="td-label">账号</span><span class="td-value">@${esc(u.username)}</span></div>
+          </div>
+          <div class="td-card-btns">
+            <button class="btn btn-sm btn-info" onclick="editUser('${esc(u.id)}')">✏️ 编辑</button>
+            <button class="btn btn-sm btn-warning" onclick="resetPwd('${esc(u.id)}')">🔑 重置</button>
+            <button class="btn btn-sm btn-danger" onclick="delUser('${esc(u.id)}')">🗑 删除</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    return `
+      <div class="subj-section" style="--sc-bg:${sc.bg};--sc-border:${sc.border};--sc-head:${sc.head}">
+        <div class="subj-section-header">
+          <span class="ssh-icon">📚</span>
+          <span class="ssh-name">${esc(subj)}</span>
+          <span class="ssh-count">${list.length} 人</span>
+        </div>
+        <div class="subj-section-cards">${cards}</div>
+      </div>
+    `;
+  }).join("");
+
+  const headCount = gradeUsers.filter(u => u.role === "headteacher").length;
+  const teacherCount = gradeUsers.filter(u => u.role === "teacher").length;
+  const academicCount = gradeUsers.filter(u => u.role === "academic").length;
+
+  $("pageContent").innerHTML = `
+    <div class="card">
+      <div class="card-title">
+        <span>
+          <button class="btn btn-sm btn-light" onclick="exitAdminGrade()" style="margin-right:10px">← 返回年组</button>
+          🏫 ${esc(gradeName)}（共 ${gradeUsers.length} 人）
+        </span>
+        <span class="ct-actions">
+          <button class="btn btn-success" onclick="editUser(null)">+ 添加教师</button>
+        </span>
+      </div>
+      <div style="margin-bottom:16px;font-size:13px;color:var(--text-light)">
+        共 ${sortedSubjects.length} 个学科 · 班主任 ${headCount} 人 · 任课教师 ${teacherCount} 人 · 教务老师 ${academicCount} 人
+      </div>
+      ${subjSections || `<div class="empty-state"><div class="es-tip">该年级暂无教师</div></div>`}
+    </div>
+    <style>
+      .subj-section {
+        background: var(--sc-bg);
+        border: 1px solid var(--sc-border);
+        border-radius: 14px;
+        padding: 16px 18px;
+        margin-bottom: 18px;
+      }
+      .subj-section-header {
+        display: flex; align-items: center; gap: 8px;
+        padding-bottom: 12px; margin-bottom: 14px;
+        border-bottom: 2px solid var(--sc-border);
+      }
+      .ssh-icon { font-size: 20px; }
+      .ssh-name { font-size: 17px; font-weight: 700; color: var(--sc-head); }
+      .ssh-count {
+        font-size: 12px; font-weight: 600; color: var(--sc-head);
+        background: #fff; padding: 3px 12px; border-radius: 10px;
+      }
+      .subj-section-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 12px;
+      }
+      .td-card {
+        background: #fff; border: 1px solid #e8ecf5; border-radius: 10px;
+        padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+        transition: box-shadow 0.2s, transform 0.15s;
+      }
+      .td-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.1); transform: translateY(-2px); }
+      .td-card.td-card-head { background: #fffbf2; border-color: #ffe7ba; }
+      .td-card-top { display: flex; justify-content: space-between; align-items: center; }
+      .td-name { font-size: 15px; font-weight: 600; color: #1a1a2e; }
+      .td-badge { font-size: 10px; padding: 2px 8px; border-radius: 8px; font-weight: 500; }
+      .td-badge-head { background: #fff7e6; color: #d46b08; }
+      .td-badge-teacher { background: #e6f7ff; color: #1890ff; }
+      .td-badge-academic { background: #f6ffed; color: #52c41a; }
+      .td-card-mid { display: flex; flex-direction: column; gap: 4px; }
+      .td-info { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+      .td-label { color: #888; min-width: 38px; }
+      .td-label-head { color: #d46b08; font-weight: 500; }
+      .td-value { color: #333; flex: 1; }
+      .td-value-head { color: #d46b08; font-weight: 500; }
+      .td-card-btns {
+        display: flex; gap: 5px; padding-top: 8px; border-top: 1px solid #f0f2f7;
+      }
+      .td-card-btns .btn-sm { font-size: 11px; padding: 3px 8px; }
+    </style>
+  `;
+}
+
+// 进入年级详情
+window.enterAdminGrade = function(grade) {
+  window._adminTeacherGrade = grade;
+  renderUsers();
+};
+
+// 返回年组卡片
+window.exitAdminGrade = function() {
+  window._adminTeacherGrade = null;
+  renderUsers();
+};
+
+// 教务端教师名单视图：按科目分类，只读
+function renderUsersAcademicView() {
+  const myGrade = currentUser.grade;
+  if (!myGrade) {
+    $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">未设置所属年级</div></div>`;
+    return;
+  }
+
+  // 获取本年级所有教师（任课教师+班主任，因为班主任也有任教学科）
+  const gradeTeachers = DB.users.filter(u => u.grade === myGrade && (u.role === "teacher" || u.role === "headteacher"));
+
+  // 按学科分组
+  const subjectGroups = {};
+  gradeTeachers.forEach(u => {
+    const subjects = u.subjects && u.subjects.length ? u.subjects : ["未设置学科"];
+    subjects.forEach(subj => {
+      if (!subjectGroups[subj]) subjectGroups[subj] = [];
+      subjectGroups[subj].push(u);
+    });
+  });
+
+  // 按学科名称排序
+  const sortedSubjects = Object.keys(subjectGroups).sort();
+  const totalTeachers = gradeTeachers.length;
+
+  let subjectHtml = sortedSubjects.map(subj => {
+    const teachers = subjectGroups[subj];
+    const teacherList = teachers.map(u => {
+      const isHead = u.role === "headteacher";
+      const allClasses = u.classNo
+        ? String(u.classNo).split(/[,，]/).map(s => s.trim()).filter(Boolean)
+        : [];
+      
+      let classHtml = "";
+      if (isHead) {
+        const headClass = allClasses[0] || "-";
+        const teachClasses = allClasses.length > 1 ? allClasses.slice(1) : [headClass];
+        classHtml = `
+          <div class="teacher-class-row">
+            <span class="class-label head-label">班主任</span>
+            <span class="class-value head-value">${esc(headClass)}</span>
+          </div>
+          <div class="teacher-class-row">
+            <span class="class-label">任教</span>
+            <span class="class-value">${esc(teachClasses.join("、"))}</span>
+          </div>
+        `;
+      } else {
+        const classText = allClasses.length === 0 ? "全年级" : allClasses.join("、");
+        classHtml = `
+          <div class="teacher-class-row">
+            <span class="class-label">任教</span>
+            <span class="class-value">${esc(classText)}</span>
+          </div>
+        `;
+      }
+      
+      const headBadge = isHead ? '<span class="badge head-badge">班主任</span>' : '';
+      return `
+        <div class="teacher-item ${isHead ? 'teacher-item-head' : ''}">
+          <div class="teacher-name-row">
+            <span class="teacher-name">${esc(u.name)}</span>
+            ${headBadge}
+          </div>
+          <div class="teacher-classes">${classHtml}</div>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="subject-group">
+        <div class="subject-header">
+          <span class="subject-icon">📚</span>
+          <span class="subject-name">${esc(subj)}</span>
+          <span class="subject-count">${teachers.length} 位教师</span>
+        </div>
+        <div class="teacher-list">${teacherList}</div>
+      </div>
+    `;
+  }).join("");
+
+  $("pageContent").innerHTML = `
+    <div class="card">
+      <div class="card-title">
+        <span>👩‍🏫 ${myGrade} 教师名单（共 ${totalTeachers} 人）</span>
+        <span class="ct-actions">
+          <span style="font-size:13px;color:var(--text-light);">共 ${sortedSubjects.length} 个学科</span>
+        </span>
+      </div>
+      <div class="subjects-grid">
+        ${subjectHtml || `<div class="empty-state"><div class="es-tip">暂无教师数据</div></div>`}
+      </div>
+    </div>
+    <style>
+      .subjects-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+        gap: 16px;
+        margin-top: 8px;
+      }
+      .subject-group {
+        background: #fafbff;
+        border: 1px solid #e8ecf5;
+        border-radius: 10px;
+        padding: 16px 18px;
+      }
+      .subject-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #eaeef7;
+        margin-bottom: 12px;
+      }
+      .subject-icon { font-size: 20px; }
+      .subject-name {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1a1a2e;
+        flex: 1;
+      }
+      .subject-count {
+        font-size: 12px;
+        color: #667;
+        background: #eef2ff;
+        padding: 3px 10px;
+        border-radius: 10px;
+      }
+      .teacher-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .teacher-item {
+        padding: 10px 14px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #f0f2f7;
+      }
+      .teacher-item.teacher-item-head {
+        background: #fffbf2;
+        border-color: #ffe7ba;
+      }
+      .teacher-name-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .teacher-name {
+        font-size: 14px;
+        font-weight: 600;
+        color: #1a1a2e;
+      }
+      .head-badge {
+        background: #fff7e6;
+        color: #d46b08;
+        font-size: 11px;
+        padding: 1px 8px;
+        border-radius: 10px;
+        font-weight: 500;
+      }
+      .teacher-classes {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .teacher-class-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+      }
+      .class-label {
+        color: #888;
+        min-width: 42px;
+      }
+      .class-label.head-label {
+        color: #d46b08;
+        font-weight: 500;
+      }
+      .class-value {
+        color: #333;
+        flex: 1;
+      }
+      .class-value.head-value {
+        color: #d46b08;
+        font-weight: 500;
+      }
+    </style>
   `;
 }
 
 // 下载教师批量上传模板
 window.downloadTeacherTemplate = function () {
   const data = [
-    ["账号", "姓名", "角色", "所属年级", "班级", "任教学科"],
-    ["zhangsan", "张三", "班主任", "高一年级", "1班", ""],
-    ["lisi", "李四", "任课教师", "高一年级", "", "数学,物理"],
-    ["wangwu", "王五", "教务老师", "高一年级", "", ""]
+    ["账号", "姓名", "角色", "所属年级", "班主任班级", "任教班级", "任教学科"],
+    ["zhangsan", "张三", "班主任", "高一年级", "1班", "2班,3班", "语文"],
+    ["lisi", "李四", "任课教师", "高一年级", "", "1班,2班,3班", "数学,物理"],
+    ["wangwu", "王五", "教务老师", "高一年级", "", "", ""]
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(data);
-  // 设置列宽
-  ws["!cols"] = [{ wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 20 }];
+  ws["!cols"] = [{ wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 20 }];
   XLSX.utils.book_append_sheet(wb, ws, "教师名单");
   XLSX.writeFile(wb, "教师批量上传模板.xlsx");
   showToast("模板已下载", "success");
@@ -2900,20 +3439,34 @@ window.exportTeacherExcel = function () {
     : DB.users.filter((u) => u.role !== "admin");
   const roleNameMap = { "headteacher": "班主任", "teacher": "任课教师", "academic": "教务老师" };
   const data = [
-    ["账号", "姓名", "角色", "所属年级", "班级", "任教学科", "加入时间"],
-    ...allUsers.map((u) => [
-      u.username,
-      u.name,
-      roleNameMap[u.role] || u.role,
-      u.grade || "",
-      u.classNo || "",
-      (u.subjects && u.subjects.length) ? u.subjects.join(",") : "",
-      new Date(u.createdAt).toLocaleDateString()
-    ])
+    ["账号", "姓名", "角色", "所属年级", "班主任班级", "任教班级", "任教学科", "加入时间"],
+    ...allUsers.map((u) => {
+      let headClass = "";
+      let teachClasses = "";
+      if (u.classNo) {
+        const classes = String(u.classNo).split(/[,，]/).map(s => s.trim()).filter(Boolean);
+        if (u.role === "headteacher") {
+          headClass = classes[0] || "";
+          teachClasses = classes.slice(1).join(",");
+        } else if (u.role === "teacher") {
+          teachClasses = classes.join(",");
+        }
+      }
+      return [
+        u.username,
+        u.name,
+        roleNameMap[u.role] || u.role,
+        u.grade || "",
+        headClass,
+        teachClasses,
+        (u.subjects && u.subjects.length) ? u.subjects.join(",") : "",
+        new Date(u.createdAt).toLocaleDateString()
+      ];
+    })
   ];
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(data);
-  ws["!cols"] = [{ wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 12 }];
+  ws["!cols"] = [{ wch: 15 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 12 }];
   XLSX.utils.book_append_sheet(wb, ws, "教师名单");
   const dateStr = new Date().toLocaleDateString().replace(/\//g, "-");
   XLSX.writeFile(wb, `教师名单_${dateStr}.xlsx`);
@@ -2925,10 +3478,11 @@ window.showBatchUploadModal = function () {
   showModal("📤 批量上传教师", `
     <div style="margin-bottom:16px;padding:16px;background:#f0f7ff;border-radius:8px;font-size:13px">
       <p style="margin-bottom:8px"><b>📋 Excel 格式要求：</b></p>
-      <p style="color:#666">• 第一行为表头：账号、姓名、角色、所属年级、班级、任教学科</p>
+      <p style="color:#666">• 第一行为表头：账号、姓名、角色、所属年级、班主任班级、任教班级、任教学科</p>
       <p style="color:#666">• 角色可选：<b>班主任</b>、<b>任课教师</b>、<b>教务老师</b></p>
-      <p style="color:#666">• 班级：仅班主任需要填写，如 1班、2班</p>
-      <p style="color:#666">• 任教学科：仅任课教师需要填写，多个用逗号分隔，如 数学,物理</p>
+      <p style="color:#666">• 班主任班级：仅班主任需要填写，如 1班</p>
+      <p style="color:#666">• 任教班级：多班用逗号分隔，如 1班,2班,3班；不填则教全年级</p>
+      <p style="color:#666">• 任教学科：多个用逗号分隔，如 数学,物理</p>
       <p style="color:#666">• 默认密码：<b>123456</b></p>
     </div>
     <div class="form-group">
@@ -2947,7 +3501,6 @@ window.showBatchUploadModal = function () {
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-        // 解析数据
         if (json.length < 2) { showToast("文件内容为空或格式不正确", "error"); return false; }
         const headers = json[0].map((h) => String(h || "").trim());
         const requiredCols = ["账号", "姓名", "角色"];
@@ -2957,6 +3510,10 @@ window.showBatchUploadModal = function () {
         const roleMap = { "班主任": "headteacher", "任课教师": "teacher", "教务老师": "academic" };
         const grades = Object.keys(DB.subjects);
         let added = 0, skipped = 0, errors = [];
+        const hasHeadClassCol = headers.includes("班主任班级");
+        const hasTeachClassCol = headers.includes("任教班级");
+        const hasOldClassCol = headers.includes("班级");
+
         for (let i = 1; i < json.length; i++) {
           const row = json[i];
           if (!row[idx("账号")] || !row[idx("姓名")] || !row[idx("角色")]) { skipped++; continue; }
@@ -2966,9 +3523,30 @@ window.showBatchUploadModal = function () {
           const role = roleMap[roleKey];
           if (!role) { errors.push(`第${i + 1}行：角色"${roleKey}"不正确`); skipped++; continue; }
           const grade = String(row[idx("所属年级")] || "").trim();
-          const classNo = String(row[idx("班级")] || "").trim();
           const subjectsStr = String(row[idx("任教学科")] || "").trim();
           const subjects = subjectsStr ? subjectsStr.split(/[,，]/).map((s) => s.trim()).filter(Boolean) : [];
+
+          let classNo = "";
+          if (hasHeadClassCol || hasTeachClassCol) {
+            const headClass = hasHeadClassCol ? String(row[idx("班主任班级")] || "").trim() : "";
+            const teachClasses = hasTeachClassCol ? String(row[idx("任教班级")] || "").trim() : "";
+            if (role === "headteacher") {
+              if (!headClass) { errors.push(`第${i + 1}行：班主任需要填写班主任班级`); skipped++; continue; }
+              const allClasses = [headClass];
+              if (teachClasses) {
+                teachClasses.split(/[,，]/).forEach(c => {
+                  const trimmed = c.trim();
+                  if (trimmed && !allClasses.includes(trimmed)) allClasses.push(trimmed);
+                });
+              }
+              classNo = allClasses.join(",");
+            } else if (role === "teacher") {
+              classNo = teachClasses;
+            }
+          } else if (hasOldClassCol) {
+            classNo = String(row[idx("班级")] || "").trim();
+          }
+
           if (DB.users.some((u) => u.username === username)) { errors.push(`第${i + 1}行：账号"${username}"已存在`); skipped++; continue; }
           DB.users.push({ id: uid(), username, password: "123456", name, role, grade: grade || null, classNo: classNo || null, subjects, createdAt: Date.now() });
           added++;
@@ -2977,7 +3555,6 @@ window.showBatchUploadModal = function () {
           showToast("没有可添加的用户", "warning");
           return;
         }
-        // 等待同步完成后再提示
         const syncResult = await saveDB(DB);
         if (syncResult === true) {
           showToast(`✅ 成功添加 ${added} 人${skipped > 0 ? `，跳过 ${skipped} 行` : ""}，已同步到云端`, "success");
@@ -3000,6 +3577,20 @@ window.showBatchUploadModal = function () {
 window.editUser = function (id) {
   const u = id ? DB.users.find((x) => x.id === id) : null;
   const grades = Object.keys(DB.subjects);
+  
+  // 解析班级：班主任的第一个是班主任班级，其余是任教班级
+  let headClass = "";
+  let teachClasses = "";
+  if (u && u.classNo) {
+    const classes = String(u.classNo).split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    if (u.role === "headteacher") {
+      headClass = classes[0] || "";
+      teachClasses = classes.slice(1).join(",");
+    } else {
+      teachClasses = classes.join(",");
+    }
+  }
+  
   const html = `
     <div class="edit-user-form">
       <div class="user-form-row">
@@ -3013,7 +3604,7 @@ window.editUser = function (id) {
 
       <div class="user-form-row">
         <div class="form-group"><label>角色</label>
-          <select id="m_role">
+          <select id="m_role" onchange="toggleUserFormClassFields()">
             <option value="academic" ${u?.role === "academic" ? "selected" : ""}>教务老师</option>
             <option value="teacher" ${u?.role === "teacher" ? "selected" : ""}>任课教师</option>
             <option value="headteacher" ${u?.role === "headteacher" ? "selected" : ""}>班主任</option>
@@ -3028,8 +3619,19 @@ window.editUser = function (id) {
         <div class="form-group"><label>所属年级</label>
           <select id="m_grade">${grades.map((g) => `<option ${u?.grade === g ? "selected" : ""}>${esc(g)}</option>`).join("")}${grades.length === 0 ? `<option>请先添加年级</option>` : ""}</select>
         </div>
-        <div class="form-group"><label>班级（班主任必填；任课教师可填，多班用逗号分隔，如 1班,2班）</label>
-          <input id="m_class" value="${esc(u?.classNo || "")}" placeholder="如 1班 / 1班,2班" />
+        <div id="m_class_field_teacher" class="form-group" style="display:none;">
+          <label>任教班级（多班用逗号分隔，不填则全年级）</label>
+          <input id="m_teach_classes" value="${esc(teachClasses)}" placeholder="如 1班,2班,3班（不填则教全年级）" />
+        </div>
+        <div id="m_class_field_head" class="form-group" style="display:none;">
+          <label>班主任班级（必填）</label>
+          <input id="m_head_class" value="${esc(headClass)}" placeholder="如 1班" />
+        </div>
+      </div>
+      <div id="m_head_teach_row" class="user-form-row" style="display:none;">
+        <div class="form-group" style="width:100%;">
+          <label>同时任教的其他班级（多班用逗号分隔，可留空）</label>
+          <input id="m_head_teach_classes" value="${esc(teachClasses)}" placeholder="如 2班,3班（仅填除班主任班级外的任教班级）" />
         </div>
       </div>
 
@@ -3049,9 +3651,26 @@ window.editUser = function (id) {
     const password = $("m_password").value.trim();
     const role = $("m_role").value;
     const grade = $("m_grade").value.trim();
-    const classNo = $("m_class").value.trim();
     const subjects = $("m_subjects").value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
     const isAcademic = currentUser.role === "academic";
+
+    // 根据角色组装 classNo
+    let classNo = "";
+    if (role === "headteacher") {
+      const headClass = $("m_head_class").value.trim();
+      const teachClasses = $("m_head_teach_classes").value.trim();
+      if (!headClass) { showToast("请填写班主任班级", "error"); return false; }
+      const allClasses = [headClass];
+      if (teachClasses) {
+        teachClasses.split(/[,，]/).forEach(c => {
+          const trimmed = c.trim();
+          if (trimmed && !allClasses.includes(trimmed)) allClasses.push(trimmed);
+        });
+      }
+      classNo = allClasses.join(",");
+    } else if (role === "teacher") {
+      classNo = $("m_teach_classes").value.trim();
+    }
 
     if (!username || !name) { showToast("账号和姓名不能为空", "error"); return false; }
     if (!u && DB.users.some((x) => x.username === username)) { showToast("账号已存在", "error"); return false; }
@@ -3073,6 +3692,32 @@ window.editUser = function (id) {
     }
     renderUsers();
   });
+  // 初始化班级字段显示
+  setTimeout(() => toggleUserFormClassFields(u?.role || "teacher"), 50);
+};
+
+// 根据角色切换教师编辑表单中的班级字段显示
+window.toggleUserFormClassFields = function(role) {
+  const r = role || $("m_role")?.value;
+  const teacherField = $("m_class_field_teacher");
+  const headField = $("m_class_field_head");
+  const headTeachRow = $("m_head_teach_row");
+  if (!teacherField || !headField) return;
+  
+  if (r === "headteacher") {
+    teacherField.style.display = "none";
+    headField.style.display = "block";
+    headTeachRow.style.display = "flex";
+  } else if (r === "teacher") {
+    teacherField.style.display = "block";
+    headField.style.display = "none";
+    headTeachRow.style.display = "none";
+  } else {
+    // 教务老师不需要班级字段
+    teacherField.style.display = "none";
+    headField.style.display = "none";
+    headTeachRow.style.display = "none";
+  }
 };
 
 window.resetPwd = async function (id) {
@@ -5773,7 +6418,7 @@ function drawTeacherRanking(examId, grade, subjectFilter) {
   if (rows.length === 0) {
     $("tr_result").innerHTML = `<div class="empty-state">
       <div class="es-title">暂无数据</div>
-      <div class="es-tip">请先上传成绩，或在「教师名单管理」中确认教师任教学科和班级已正确设置</div>
+      <div class="es-tip">请先上传成绩，或确认教师任教学科和班级已在「教师名单」中正确设置</div>
     </div>`;
     return;
   }
@@ -5784,7 +6429,7 @@ function drawTeacherRanking(examId, grade, subjectFilter) {
 
   const noTeacherWarning = noTeacherRows.length > 0
     ? `<div style="padding:10px 12px;background:#fff8e6;border-left:3px solid #e6a000;border-radius:4px;font-size:12px;margin-bottom:12px">
-        ⚠️ 有 <b>${noTeacherRows.length}</b> 个班级未分配任课教师（系统显示为灰色行），请在「教师名单管理」中为相关教师设置任教班级和学科
+        ⚠️ 有 <b>${noTeacherRows.length}</b> 个班级未分配任课教师（系统显示为灰色行），请联系管理员在「教师名单」中为相关教师设置任教班级和学科
       </div>`
     : "";
 
@@ -5798,7 +6443,7 @@ function drawTeacherRanking(examId, grade, subjectFilter) {
   const noTeacherTrs = noTeacherRows.map((r) => `<tr style="background:#f5f5f5;color:#999">
     <td>—</td><td><b>${r.subject}</b></td><td>—</td><td>${r.classNo}</td>
     <td>${r.total}</td><td>${fmt(r.avg)}</td>
-    <td colspan="5"><i>未分配教师，请在「教师名单管理」中添加任课教师并设置任教班级</i></td>
+    <td colspan="5"><i>未分配教师，请联系管理员在「教师名单」中添加任课教师并设置任教班级</i></td>
   </tr>`).join("");
 
   $("tr_result").innerHTML = `
