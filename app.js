@@ -1018,7 +1018,7 @@ function renderGithubData() {
     </div>
   `;
 
-  $("gd_save").onclick = () => {
+  $("gd_save").onclick = async () => {
     const token = $("gd_token").value.trim();
     const configGistId = $("gd_config_id").value.trim();
     gs.saveGistConfig(token, configGistId, null);
@@ -1033,6 +1033,34 @@ function renderGithubData() {
     showToast("配置已保存", "success");
     updateSyncBadge();
     renderGithubData();
+
+    // 配置保存成功后自动拉取云端数据，这样其他端账号也能直接登录
+    if (gs.isConfigured()) {
+      const saveBtn = $("gd_save");
+      const originalText = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = "正在拉取数据…";
+      try {
+        const ok = await pullFromRemote(false);
+        if (ok) {
+          showToast(`✅ 已自动拉取云端数据，共 ${DB.users.length} 个账号可用`, "success");
+          // 如果当前在配置页面，刷新显示
+          if (currentPage === "githubData") renderGithubData();
+          // 若已有登录用户，刷新当前用户信息
+          if (currentUser) {
+            const u = DB.users.find((x) => x.id === currentUser.id);
+            if (u) currentUser = u;
+          }
+        } else {
+          showToast("云端暂无数据，这是首次配置，上传后其他端即可登录", "info");
+        }
+      } catch (e) {
+        showToast(`拉取失败：${e.message}，可稍后手动重试`, "warning");
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = originalText;
+      }
+    }
   };
 
   $("gd_sync_now").onclick = async () => {
