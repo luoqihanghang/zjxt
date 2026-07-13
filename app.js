@@ -640,34 +640,51 @@ async function doLogin() {
     return;
   }
 
-  // 确保 DB 已加载
-  if (!DB) {
-    $("loginError").textContent = "正在加载数据...";
-    try {
+  $("loginError").textContent = "正在加载数据...";
+  $("loginBtn").disabled = true;
+  $("loginBtn").textContent = "登录中...";
+
+  try {
+    if (!DB) {
       DB = await loadDB();
-    } catch (e) {
-      $("loginError").textContent = "数据加载失败，请刷新重试";
+    } else if (GitHubService.isConfigured()) {
+      try {
+        const remote = await GitHubService.loadRemoteDB();
+        if (remote && remote.users && remote.users.length > 0) {
+          DB = remote;
+          localStorage.setItem(DB_KEY, JSON.stringify(DB));
+          console.log("[登录] ✅ 已从云端同步最新数据");
+        }
+      } catch (e) {
+        console.log("[登录] ⚠️ 云端同步失败，使用本地数据:", e.message);
+      }
+    }
+
+    const user = DB.users.find((u) => u.username === username && u.password === password && u.role === role);
+    if (!user) {
+      $("loginError").textContent = "账号、密码或角色不正确";
+      $("loginBtn").disabled = false;
+      $("loginBtn").textContent = "登 录";
       return;
     }
-  }
+    $("loginError").textContent = "";
+    currentUser = user;
+    sessionStorage.setItem("current_user_id", user.id);
 
-  const user = DB.users.find((u) => u.username === username && u.password === password && u.role === role);
-  if (!user) {
-    $("loginError").textContent = "账号、密码或角色不正确";
-    return;
-  }
-  $("loginError").textContent = "";
-  currentUser = user;
-  sessionStorage.setItem("current_user_id", user.id);
+    if ($("rememberMe").checked) {
+      localStorage.setItem("saved_user", JSON.stringify({ username, password, role }));
+    } else {
+      localStorage.removeItem("saved_user");
+    }
 
-  // 记住密码
-  if ($("rememberMe").checked) {
-    localStorage.setItem("saved_user", JSON.stringify({ username, password, role }));
-  } else {
-    localStorage.removeItem("saved_user");
+    $("loginBtn").disabled = false;
+    $("loginBtn").textContent = "登 录";
+    enterApp();
+  } catch (e) {
+    $("loginError").textContent = "数据加载失败：" + e.message;
+    $("loginBtn").disabled = false;
+    $("loginBtn").textContent = "登 录";
   }
-
-  enterApp();
 }
 
 async function doLogout() {
@@ -847,6 +864,43 @@ function enterApp() {
   navigate("dashboard");
   const btn = $("eduAssistantBtn");
   if (btn) btn.style.display = "flex";
+
+  startPeriodicSync();
+  setupBeforeUnloadWarning();
+}
+
+let _periodicSyncTimer = null;
+
+function startPeriodicSync() {
+  if (_periodicSyncTimer) clearInterval(_periodicSyncTimer);
+  _periodicSyncTimer = setInterval(() => {
+    if (currentUser && GitHubService.isConfigured() && _dirtyFlag && !_syncInProgress) {
+      console.log("[自动同步] 检测到未上传更改，触发定时同步...");
+      pushToRemote(false);
+    }
+  }, 2 * 60 * 1000);
+}
+
+function setupBeforeUnloadWarning() {
+  window.addEventListener("beforeunload", (e) => {
+    if (currentUser && _dirtyFlag) {
+      e.preventDefault();
+      e.returnValue = "您有未上传的数据更改，关闭页面后可能丢失。确定要离开吗？";
+      return e.returnValue;
+    }
+  });
+
+  window.addEventListener("unload", () => {
+    if (currentUser && GitHubService.isConfigured() && _dirtyFlag && !_syncInProgress) {
+      try {
+        const dbStr = localStorage.getItem(DB_KEY);
+        if (dbStr && navigator.sendBeacon) {
+          const blob = new Blob([dbStr], { type: "application/json" });
+          console.log("[页面卸载] 有未上传更改，已保留在本地缓存中");
+        }
+      } catch (e) {}
+    }
+  });
 }
 
 // ========== 侧边栏自动隐藏/展开 ==========
@@ -1509,6 +1563,7 @@ function collectRosterStudentsForExam() {
           classRank: classRank,
           gradeRank: gradeRank,
           gender: "",
+          score: totalScore,
           remark: totalScore > 0 ? `总分:${totalScore}` : ""
         });
       }
@@ -1718,7 +1773,8 @@ function doImportRosterToExam({ grade, selectedClasses, mode, examId }) {
             classRank: classRank,
             gradeRank: gradeRank,
             gender: "",
-            remark: totalScore > 0 ? `总分:${totalScore}` : ""
+            score: totalScore,
+          remark: totalScore > 0 ? `总分:${totalScore}` : ""
           });
         }
       });
@@ -5423,6 +5479,8 @@ function aggregateStats(records, subjects) {
     const low = validScores.filter((v) => v <= s.low).length;
     const maxCount = validScores.filter((v) => v === max).length;
     const minCount = validScores.filter((v) => v === min).length;
+    const variance = n > 0 ? validScores.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / n : 0;
+    const stdDev = Math.sqrt(variance);
     stats[s.name] = {
       total: n, sum, avg, max, min,
       excellent, good, low, passCount,
@@ -5430,7 +5488,7 @@ function aggregateStats(records, subjects) {
       goodPct: n > 0 ? good / n : 0,
       passPct: n > 0 ? passCount / n : 0,
       lowPct: n > 0 ? low / n : 0,
-      maxCount, minCount, fullScore: s.fullScore
+      maxCount, minCount, fullScore: s.fullScore, stdDev
     };
   });
   const totals = records.map((r) => r.total).filter((v) => typeof v === "number" && !isNaN(v));
@@ -5440,6 +5498,8 @@ function aggregateStats(records, subjects) {
   const totalGoodLine = subjects.reduce((s, x) => s + x.good, 0);
   const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
   const totalLowLine = subjects.reduce((s, x) => s + x.low, 0);
+  const totalAvg = n > 0 ? totals.reduce((a, b) => a + b, 0) / n : 0;
+  const totalVariance = n > 0 ? totals.reduce((a, b) => a + Math.pow(b - totalAvg, 2), 0) / n : 0;
   const excellent = totals.filter((v) => v >= totalExcellentLine).length;
   const good = totals.filter((v) => v >= totalGoodLine && v < totalExcellentLine).length;
   const passCount = totals.filter((v) => v >= totalPassLine).length;
@@ -5449,7 +5509,7 @@ function aggregateStats(records, subjects) {
   stats["总分"] = {
     total: n,
     sum: totals.reduce((a, b) => a + b, 0),
-    avg: n > 0 ? totals.reduce((a, b) => a + b, 0) / n : 0,
+    avg: totalAvg,
     max, min,
     excellent, good, low, passCount,
     excellentPct: n > 0 ? excellent / n : 0,
@@ -5458,7 +5518,8 @@ function aggregateStats(records, subjects) {
     lowPct: n > 0 ? low / n : 0,
     maxCount: n > 0 ? totals.filter((v) => v === max).length : 0,
     minCount: n > 0 ? totals.filter((v) => v === min).length : 0,
-    fullScore: totalFullScore
+    fullScore: totalFullScore,
+    stdDev: Math.sqrt(totalVariance)
   };
   return stats;
 }
@@ -6941,12 +7002,13 @@ function renderOverview(records, stats, subjects, totalFullScore) {
   }
   const totalAvg = stats["总分"].avg || 0;
   const avgRate = totalFullScore > 0 ? (totalAvg / totalFullScore * 100).toFixed(1) : "0.0";
+  const validCount = stats["总分"].total || records.length;
 
   let bestSubject = null, bestRate = 0;
   let worstSubject = null, worstRate = 100;
   subjects.forEach((s) => {
-    if (s.fullScore > 0) {
-      const rate = (stats[s.name]?.avg || 0) / s.fullScore * 100;
+    if (s.fullScore > 0 && stats[s.name] && stats[s.name].total > 0) {
+      const rate = stats[s.name].avg / s.fullScore * 100;
       if (rate > bestRate) { bestRate = rate; bestSubject = s.name; }
       if (rate < worstRate) { worstRate = rate; worstSubject = s.name; }
     }
@@ -6956,15 +7018,18 @@ function renderOverview(records, stats, subjects, totalFullScore) {
   records.forEach((r) => { classCounts[r.classNo] = (classCounts[r.classNo] || 0) + 1; });
   const classCount = Object.keys(classCounts).length;
 
-  const passCount = records.filter((r) => {
-    return subjects.every((s) => (r.scores[s.name] ?? 0) >= s.pass);
+  const allPassCount = records.filter((r) => {
+    return subjects.every((s) => {
+      const score = r.scores[s.name];
+      return typeof score === "number" && !isNaN(score) && score >= s.pass;
+    });
   }).length;
 
   $("aa_overview").innerHTML = `
     <div class="overview-grid">
       <div class="overview-card">
         <div class="oc-label">参考人数</div>
-        <div class="oc-value">${records.length}<span class="oc-unit">人</span></div>
+        <div class="oc-value">${validCount}<span class="oc-unit">人</span></div>
         <div class="oc-sub">${classCount} 个班级</div>
       </div>
       <div class="overview-card info">
@@ -6984,8 +7049,8 @@ function renderOverview(records, stats, subjects, totalFullScore) {
       </div>
       <div class="overview-card success">
         <div class="oc-label">全部及格人数</div>
-        <div class="oc-value">${passCount}<span class="oc-unit">人</span></div>
-        <div class="oc-sub">占比 ${(records.length > 0 ? (passCount / records.length * 100) : 0).toFixed(1)}%</div>
+        <div class="oc-value">${allPassCount}<span class="oc-unit">人</span></div>
+        <div class="oc-sub">占比 ${(validCount > 0 ? (allPassCount / validCount * 100) : 0).toFixed(1)}%</div>
       </div>
       <div class="overview-card warning">
         <div class="oc-label">优势学科</div>
