@@ -38,17 +38,19 @@ function buildPagination(totalPages, currentPage, onchange, pageInfo = "") {
   `;
 }
 
-// 根据用户角色过滤记录：学术用户可见所有记录，班主任可见本班所有记录，任课教师仅可见已确认记录
+// 根据用户角色过滤记录，并排除草稿/无效状态记录
 const getVisibleRecords = (records) => {
-  if (!currentUser || currentUser.role === "academic") return records;
-  // 班主任：可以看到自己班级的所有记录（包括待审核和已确认）
+  // 先过滤掉草稿/无效记录（所有角色都适用）
+  const validRecords = records.filter((r) => !r.status || r.status === "confirmed" || r.status === "pending");
+  if (!currentUser || currentUser.role === "academic") return validRecords;
+  // 班主任：可以看到自己班级的所有有效记录
   if (currentUser.role === "headteacher") {
-    const filtered = records.filter((r) => classNoEquals(r.classNo, currentUser.classNo));
-    console.log("[getVisibleRecords] 班主任过滤", { role: currentUser.role, classNo: currentUser.classNo, inputRecords: records.length, outputRecords: filtered.length });
+    const filtered = validRecords.filter((r) => classNoEquals(r.classNo, currentUser.classNo));
+    console.log("[getVisibleRecords] 班主任过滤", { role: currentUser.role, classNo: currentUser.classNo, inputRecords: validRecords.length, outputRecords: filtered.length });
     return filtered;
   }
-  // 任课教师：可以看到已确认和待审核的记录（及时获取最新数据）
-  return records.filter((r) => r.status === "confirmed" || r.status === "pending");
+  // 任课教师：返回已确认和待审核的有效记录
+  return validRecords;
 };
 
 // 获取某场考试的科目配置
@@ -517,9 +519,7 @@ const NAV_MENUS = {
       ]
     },
     {
-      group: "考务与名单", icon: "📋", items: [
-        { id: "exam_arrangement", icon: "🏛️", text: "排考场系统" },
-        { id: "student_roster", icon: "📋", text: "学生名单管理" },
+      group: "教务管理", icon: "📋", items: [
         { id: "users", icon: "👩‍🏫", text: "教师名单" }
       ]
     },
@@ -1426,428 +1426,8 @@ function renderAccountProfile() {
   };
 }
 
-// ========== 排考场系统 ==========
-function renderExamArrangement() {
-  // 仅教务端可见
-  if (currentUser.role !== "academic" && currentUser.role !== "admin") {
-    $("pageContent").innerHTML = `<div class="empty-state"><div class="es-icon">🔒</div><div class="es-title">无权限</div><div class="es-tip">仅教务老师可使用排考场功能</div></div>`;
-    return;
-  }
-
-  const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
-  const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
-  const rosterClassCount = Object.keys(roster).length;
-  const rosterStudentCount = Object.values(roster).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
-  const examCount = (DB.exams || []).filter((e) => e.grade === grade).length;
-
-  $("pageContent").innerHTML = `
-    <div class="card" style="padding:0;overflow:hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:linear-gradient(135deg,#1890ff,#096dd9);color:#fff">
-        <div>
-          <div style="font-size:18px;font-weight:600">📋 排考场系统</div>
-          <div style="font-size:13px;opacity:0.9;margin-top:4px">支持调取教务端考试数据 / 学生名单，便捷导入考生与考场信息</div>
-        </div>
-        <div style="display:flex;gap:10px">
-          <button class="btn btn-light" onclick="openExamImportPicker()" style="background:#fff;color:#1890ff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
-            📥 便捷导入
-          </button>
-          <button class="btn btn-light" onclick="window.open('exam_arrangement.html', '_blank')" style="background:#fff;color:#1890ff;border:none;padding:8px 16px;border-radius:8px;cursor:pointer;font-weight:600">
-            🚀 新窗口打开
-          </button>
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;padding:16px 20px;background:#fafafa;border-bottom:1px solid #f0f0f0">
-        <div class="stat-card" style="padding:14px">
-          <div class="label">当前年级</div>
-          <div class="value primary" style="font-size:20px">${esc(grade)}</div>
-        </div>
-        <div class="stat-card" style="padding:14px">
-          <div class="label">已建班级</div>
-          <div class="value" style="font-size:20px">${rosterClassCount}</div>
-        </div>
-        <div class="stat-card" style="padding:14px">
-          <div class="label">学生总数</div>
-          <div class="value success" style="font-size:20px">${rosterStudentCount}</div>
-        </div>
-        <div class="stat-card" style="padding:14px">
-          <div class="label">关联考试</div>
-          <div class="value warning" style="font-size:20px">${examCount}</div>
-        </div>
-      </div>
-
-      <div style="padding:0">
-        <iframe id="examArrangementFrame" src="exam_arrangement.html" style="width:100%;height:calc(100vh - 320px);border:none;display:block;min-height:540px"></iframe>
-      </div>
-    </div>
-  `;
-}
-
-// 收集教务端的学生名单数据，转成排考场系统期望的格式
-function collectRosterStudentsForExam() {
-  const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
-  const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
-  
-  let scoreMap = {};
-  let classRankMap = {};
-  let gradeRankMap = {};
-  const examsForGrade = (DB.exams || []).filter((e) => e.grade === grade);
-  let targetExam = null;
-  
-  if (examsForGrade.length > 0) {
-    examsForGrade.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    targetExam = examsForGrade[0];
-    // 与教务端 drawRanking 一致：使用 r.total 字段，按 r.grade 过滤
-    const allRecords = (DB.records || []).filter((r) => r.examId === targetExam.id && r.grade === grade);
-    
-    // 全校排名（与 drawRanking 完全一致：按 total 降序，key 用 studentId_studentName）
-    const sortedAll = [...allRecords].sort((a, b) => (b.total || 0) - (a.total || 0));
-    const schoolRankMap = new Map();
-    sortedAll.forEach((r, idx) => {
-      const key = `${r.studentId}_${r.studentName}`;
-      if (!schoolRankMap.has(key)) schoolRankMap.set(key, idx + 1);
-    });
-    
-    // 班级排名（与 drawRanking 完全一致）
-    const classRecordsMap = {};
-    allRecords.forEach((r) => {
-      if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
-      classRecordsMap[r.classNo].push(r);
-    });
-    Object.keys(classRecordsMap).forEach((cls) => {
-      const classRecords = [...classRecordsMap[cls]].sort((a, b) => (b.total || 0) - (a.total || 0));
-      classRecords.forEach((r, idx) => {
-        const key = `${r.studentId}_${r.studentName}`;
-        if (!classRankMap[`${key}`]) classRankMap[`${key}`] = idx + 1;
-      });
-    });
-    
-    // 同时建立以 classNo|studentName 为 key 的映射，方便后续查找
-    allRecords.forEach((r) => {
-      const sKey = `${r.studentId}_${r.studentName}`;
-      const cKey = `${r.classNo}|${r.studentName}`;
-      scoreMap[cKey] = r.total || 0;
-      gradeRankMap[cKey] = schoolRankMap.get(sKey) || 0;
-      if (!classRankMap[cKey]) classRankMap[cKey] = classRankMap[sKey] || 0;
-    });
-  }
-  
-  const students = [];
-  const classNames = Object.keys(roster).sort((a, b) => {
-    const na = parseInt(a) || 0, nb = parseInt(b) || 0;
-    return na - nb;
-  });
-  
-  const rosterEmpty = classNames.length === 0 || classNames.every((c) => (roster[c] || []).length === 0);
-  
-  if (rosterEmpty && targetExam) {
-    const examRecords = (DB.records || []).filter((r) => r.examId === targetExam.id);
-    const classStudentMap = {};
-    
-    examRecords.forEach((r) => {
-      const cls = r.classNo;
-      if (!classStudentMap[cls]) classStudentMap[cls] = new Map();
-      if (!classStudentMap[cls].has(r.studentName)) {
-        const classNumMatch = String(cls).match(/(\d+)/);
-        const classNum = classNumMatch ? classNumMatch[1] : "1";
-        const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
-        const totalScore = scoreMap[`${cls}|${r.studentName}`] || 0;
-        const classRank = classRankMap[`${cls}|${r.studentName}`] || 0;
-        const gradeRank = gradeRankMap[`${cls}|${r.studentName}`] || 0;
-        
-        classStudentMap[cls].set(r.studentName, {
-          name: r.studentName,
-          studentId: r.studentId || "",
-          className: cls,
-          classCode: classCode,
-          classRank: classRank,
-          gradeRank: gradeRank,
-          gender: "",
-          score: totalScore,
-          remark: totalScore > 0 ? `总分:${totalScore}` : ""
-        });
-      }
-    });
-    
-    const newClassNames = Object.keys(classStudentMap).sort((a, b) => {
-      const na = parseInt(a) || 0, nb = parseInt(b) || 0;
-      return na - nb;
-    });
-    
-    newClassNames.forEach((cls) => {
-      students.push(...classStudentMap[cls].values());
-    });
-    
-    return { grade, students, classNames: newClassNames };
-  }
-  
-  classNames.forEach((classNo) => {
-    const list = roster[classNo] || [];
-    const classNumMatch = String(classNo).match(/(\d+)/);
-    const classNum = classNumMatch ? classNumMatch[1] : "1";
-    const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
-    list.forEach((s, idx) => {
-      const name = s.studentName || s.name || "";
-      const totalScore = scoreMap[`${classNo}|${name}`] || 0;
-      const classRank = classRankMap[`${classNo}|${name}`] || 0;
-      const gradeRank = gradeRankMap[`${classNo}|${name}`] || 0;
-      students.push({
-        name: name,
-        studentId: s.studentId || "",
-        className: classNo,
-        classCode: classCode,
-        classRank: classRank,
-        gradeRank: gradeRank,
-        gender: s.gender || "",
-        remark: totalScore > 0 ? `总分:${totalScore}` : ""
-      });
-    });
-  });
-  return { grade, students, classNames };
-}
-
-// 收集教务端的考试数据（用于命名 / 关联）
-function collectExamListForExamArrangement() {
-  const grade = currentUser.grade || (DB.subjects && Object.keys(DB.subjects)[0]) || "高一年级";
-  const exams = (DB.exams || [])
-    .filter((e) => e.grade === grade)
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-    .map((e) => ({ id: e.id, name: e.name, date: e.date, subjects: e.subjects || [] }));
-  return { grade, exams };
-}
-
-// 打开导入选择器：选考试（可选，用于带成绩排序） / 选考生范围
-window.openExamImportPicker = function () {
-  const { grade, students, classNames } = collectRosterStudentsForExam();
-  const { exams } = collectExamListForExamArrangement();
-  
-  if (students.length === 0) {
-    showModal("暂无可导入的考生", `
-      <div class="alert alert-warning">
-        当前年级 <b>${esc(grade)}</b> 还没有学生名单数据，也没有考试记录。<br>
-        请先在【学生名单管理】或【考试管理】中导入数据，再使用排考场。
-      </div>
-    `, "我知道了");
-    return;
-  }
-
-  const examOptions = exams.length > 0
-    ? `<div class="form-group"><label>关联考试（从成绩汇总获取班级排名，支持"成绩蛇形"排考，可选）</label>
-         <select id="imp_exam"><option value="">不关联</option>${exams.map((e) => `<option value="${esc(e.id)}">${esc(e.name)}（${esc(e.date || "")}）</option>`).join("")}</select>
-       </div>`
-    : "";
-
-  const dataSource = students.some(s => s.gender) ? "学生名单" : "考试记录";
-
-  const body = `
-    <div class="alert alert-info">
-      💡 将读取 <b>${esc(grade)}</b> 的 <b>${students.length}</b> 名考生，
-      涵盖 <b>${classNames.length}</b> 个班级，一键导入到排考场系统。
-      <br><span style="font-size:12px;color:#666;">数据来源：${dataSource}。选择关联考试后，将自动计算班级排名。</span>
-    </div>
-    <div class="form-group">
-      <label>选择要导入的班级（不选则导入全部）</label>
-      <div class="checkbox-group" style="max-height:160px;overflow-y:auto;border:1px solid #f0f0f0;padding:8px;border-radius:6px">
-        <label class="checkbox-item"><input type="checkbox" id="imp_all" checked /> <b>全选</b></label>
-        ${classNames.map((c) => {
-          const cnt = students.filter((s) => s.className === c).length;
-          return `<label class="checkbox-item"><input type="checkbox" class="imp_cls" value="${esc(c)}" checked /> ${esc(c)}（${cnt} 人）</label>`;
-        }).join("")}
-      </div>
-    </div>
-    ${examOptions}
-    <div class="form-group">
-      <label>导入方式</label>
-      <select id="imp_mode">
-        <option value="replace">替换现有考生（清空再导入）</option>
-        <option value="append" selected>追加（保留已有考生，仅新增缺失的）</option>
-      </select>
-    </div>
-  `;
-
-  showModal("📥 从教务端便捷导入", body, "开始导入", () => {
-    const selected = Array.from(document.querySelectorAll(".imp_cls:checked")).map((el) => el.value);
-    const mode = $("imp_mode").value;
-    const examId = $("imp_exam") ? $("imp_exam").value : "";
-    doImportRosterToExam({ grade, selectedClasses: selected, mode, examId });
-    return false; // 自己关闭
-  });
-
-  // 绑定全选联动
-  setTimeout(() => {
-    const all = $("imp_all");
-    if (!all) return;
-    all.onchange = () => {
-      document.querySelectorAll(".imp_cls").forEach((el) => (el.checked = all.checked));
-    };
-    document.querySelectorAll(".imp_cls").forEach((el) => {
-      el.onchange = () => {
-        const total = document.querySelectorAll(".imp_cls").length;
-        const checked = document.querySelectorAll(".imp_cls:checked").length;
-        all.checked = total === checked;
-        all.indeterminate = checked > 0 && checked < total;
-      };
-    });
-  }, 50);
-};
-
-// 执行导入：收集数据 → 通过 postMessage 推送给 iframe
-function doImportRosterToExam({ grade, selectedClasses, mode, examId }) {
-  const roster = DB.studentRoster && DB.studentRoster[grade] ? DB.studentRoster[grade] : {};
-  const students = [];
-  let classNames = (selectedClasses && selectedClasses.length > 0) ? selectedClasses : Object.keys(roster);
-
-  // 提取考试总分作为 classRank 依据（供"成绩蛇形"用）
-  let scoreMap = {};
-  let classRankMap = {};
-  let gradeRankMap = {};
-  
-  let targetExamId = examId;
-  if (!targetExamId) {
-    const examsForGrade = (DB.exams || []).filter((e) => e.grade === grade);
-    if (examsForGrade.length > 0) {
-      examsForGrade.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      targetExamId = examsForGrade[0].id;
-    }
-  }
-  
-  if (targetExamId) {
-    // 与教务端 drawRanking 一致：使用 r.total 字段，按 r.grade 过滤
-    const allRecords = (DB.records || []).filter((r) => r.examId === targetExamId && r.grade === grade);
-    
-    // 全校排名（与 drawRanking 完全一致：按 total 降序，key 用 studentId_studentName）
-    const sortedAll = [...allRecords].sort((a, b) => (b.total || 0) - (a.total || 0));
-    const schoolRankMap = new Map();
-    sortedAll.forEach((r, idx) => {
-      const key = `${r.studentId}_${r.studentName}`;
-      if (!schoolRankMap.has(key)) schoolRankMap.set(key, idx + 1);
-    });
-    
-    // 班级排名（与 drawRanking 完全一致）
-    const classRecordsMap = {};
-    allRecords.forEach((r) => {
-      if (!classRecordsMap[r.classNo]) classRecordsMap[r.classNo] = [];
-      classRecordsMap[r.classNo].push(r);
-    });
-    const classRankBySKey = {};
-    Object.keys(classRecordsMap).forEach((cls) => {
-      const classRecords = [...classRecordsMap[cls]].sort((a, b) => (b.total || 0) - (a.total || 0));
-      classRecords.forEach((r, idx) => {
-        const key = `${r.studentId}_${r.studentName}`;
-        if (!classRankBySKey[key]) classRankBySKey[key] = idx + 1;
-      });
-    });
-    
-    // 同时建立以 classNo|studentName 为 key 的映射，方便后续查找
-    allRecords.forEach((r) => {
-      const sKey = `${r.studentId}_${r.studentName}`;
-      const cKey = `${r.classNo}|${r.studentName}`;
-      scoreMap[cKey] = r.total || 0;
-      gradeRankMap[cKey] = schoolRankMap.get(sKey) || 0;
-      if (!classRankMap[cKey]) classRankMap[cKey] = classRankBySKey[sKey] || 0;
-    });
-  }
-
-  const rosterEmpty = Object.keys(roster).length === 0 || classNames.every((c) => (roster[c] || []).length === 0);
-  
-  if (rosterEmpty && targetExamId) {
-    const examRecords = (DB.records || []).filter((r) => r.examId === targetExamId);
-    if (examRecords.length > 0) {
-      const classStudentMap = {};
-      examRecords.forEach((r) => {
-        if (selectedClasses && selectedClasses.length > 0 && !selectedClasses.includes(r.classNo)) return;
-        const cls = r.classNo;
-        if (!classStudentMap[cls]) classStudentMap[cls] = new Map();
-        if (!classStudentMap[cls].has(r.studentName)) {
-          const classNumMatch = String(cls).match(/(\d+)/);
-          const classNum = classNumMatch ? classNumMatch[1] : "1";
-          const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
-          const totalScore = scoreMap[`${cls}|${r.studentName}`] || 0;
-          const classRank = classRankMap[`${cls}|${r.studentName}`] || 0;
-          const gradeRank = gradeRankMap[`${cls}|${r.studentName}`] || 0;
-          classStudentMap[cls].set(r.studentName, {
-            name: r.studentName,
-            studentId: r.studentId || "",
-            className: cls,
-            classCode: classCode,
-            classRank: classRank,
-            gradeRank: gradeRank,
-            gender: "",
-            score: totalScore,
-          remark: totalScore > 0 ? `总分:${totalScore}` : ""
-          });
-        }
-      });
-      if (!selectedClasses || selectedClasses.length === 0) {
-        classNames = Object.keys(classStudentMap).sort((a, b) => {
-          const na = parseInt(a) || 0, nb = parseInt(b) || 0;
-          return na - nb;
-        });
-      }
-      classNames.forEach((cls) => {
-        if (classStudentMap[cls]) students.push(...classStudentMap[cls].values());
-      });
-    }
-  } else {
-    classNames.forEach((classNo) => {
-    const list = roster[classNo] || [];
-    const classNumMatch = String(classNo).match(/(\d+)/);
-    const classNum = classNumMatch ? classNumMatch[1] : "1";
-    const classCode = String(parseInt(classNum) || 1).padStart(2, "0");
-    list.forEach((s) => {
-      const name = s.studentName || s.name || "";
-      const totalScore = scoreMap[`${classNo}|${name}`] || 0;
-      const classRank = classRankMap[`${classNo}|${name}`] || 0;
-      const gradeRank = gradeRankMap[`${classNo}|${name}`] || 0;
-      students.push({
-        name: name,
-        studentId: s.studentId || "",
-        className: classNo,
-        classCode: classCode,
-        classRank: classRank,
-        gradeRank: gradeRank,
-        gender: s.gender || "",
-        remark: totalScore > 0 ? `总分:${totalScore}` : ""
-      });
-    });
-  });
-  } // end else
-
-  // 关联考试名（写入 settings.examName 提示）
-  let examName = "";
-  if (examId) {
-    const exam = (DB.exams || []).find((e) => e.id === examId);
-    if (exam) examName = exam.name;
-  }
-
-  // 推送到 iframe
-  const frame = document.getElementById("examArrangementFrame");
-  if (frame && frame.contentWindow) {
-    frame.contentWindow.postMessage({
-      type: "eduImportStudents",
-      mode,
-      students,
-      examName,
-      grade
-    }, "*");
-    showToast(`已发送 ${students.length} 名考生到排考场系统`, "success", 2000);
-  } else {
-    showToast("iframe 未就绪，请稍后再试", "warning");
-  }
-
-  // 同步开新窗口场景：通过 localStorage 共享（仅"替换"模式覆盖一次）
-  try {
-    localStorage.setItem("eduExamArrangementImport", JSON.stringify({
-      ts: Date.now(),
-      mode,
-      students,
-      examName,
-      grade
-    }));
-  } catch (e) {}
-
-  closeModal();
-}
+// ========== 排考场系统（已移除） ==========
+/* function renderExamArrangement() { ... } 已移除 */
 
 // ========== 公告 ==========
 function renderAnnouncement() {
@@ -1886,7 +1466,6 @@ const PAGE_RENDERERS = {
   announcements_all: renderAnnouncementMgr,
   academic_analysis: renderAcademicAnalysis,
   score_review: renderScoreReview,
-  student_roster: renderStudentRoster,
   class_exams: renderClassExams,
   upload_scores: renderUploadScores,
   my_class_scores: renderMyClassScores,
@@ -1899,8 +1478,7 @@ const PAGE_RENDERERS = {
   group_manage: renderGroupManage,
   group_scores: renderGroupScores,
   custom_analysis: renderCustomAnalysis,
-  account_profile: renderAccountProfile,
-  exam_arrangement: renderExamArrangement
+  account_profile: renderAccountProfile
 };
 
 // ========== 各功能模块使用帮助 ==========
@@ -1915,15 +1493,123 @@ const PAGE_HELPS = {
           <p>平台概览是登录后的默认页面，集中展示当前平台的整体数据情况，包括教师总数、考试次数、成绩记录数、公告数量等核心指标，并展示近期活跃数据。</p>
         </div>
         <div class="help-section">
-          <h4>🚀 使用方法</h4>
-          <ul>
-            <li>登录后自动进入此页面，无需额外操作。</li>
-            <li>查看顶部统计卡片，了解平台数据规模。</li>
-            <li>点击左侧导航菜单中的任意功能项，进入对应模块。</li>
-            <li>页面会显示最近 30 天的活跃考试与成绩记录。</li>
-          </ul>
+          <h4>🚀 快捷入口</h4>
+          <p>页面提供常用功能的快捷卡片，点击即可快速进入对应功能模块。</p>
         </div>
-        <div class="help-note">💡 提示：不同角色（管理员 / 教务 / 任课教师 / 班主任）看到的概览内容会根据权限自动调整。</div>
+        <div class="help-note">💡 提示：您可以通过左侧导航栏访问所有功能模块。</div>
+      </div>`
+  },
+  users: {
+    title: "教师名单",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理本年级所有教师的账号信息，包括添加、编辑、删除教师，以及为教师分配班级权限。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「添加教师」按钮创建新教师账号。</li>
+            <li>设置教师的姓名、账号、密码、任教班级等信息。</li>
+            <li>教师登录后可查看自己所带班级的成绩数据。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：教师账号创建后，教师可以使用账号密码登录平台查看班级成绩。</div>
+      </div>`
+  },
+  grades: {
+    title: "班级管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理本年级的所有班级，包括添加新班级、编辑班级信息、删除班级等操作。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「添加班级」按钮创建新班级。</li>
+            <li>设置班级名称（如：高三(1)班）和班级代码。</li>
+            <li>班级创建后可在教师名单中为教师分配该班级。</li>
+          </ol>
+        </div>
+      </div>`
+  },
+  exams: {
+    title: "考试管理",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>管理本年级的所有考试，包括创建考试、设置考试科目、上传成绩、查看成绩分析等。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>点击「添加考试」按钮创建新考试。</li>
+            <li>设置考试名称、考试时间、考试科目等信息。</li>
+            <li>在考试详情页可以上传成绩或查看成绩分析。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：创建考试后，教师可以在「成绩上传」模块上传该考试的成绩。</div>
+      </div>`
+  },
+  academic_upload_scores: {
+    title: "教务端成绩上传",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>教务端专用功能，支持全年级全学科统一上传成绩，支持Excel导入和在线编辑。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择要上传成绩的考试。</li>
+            <li>下载Excel模板，按模板格式填写成绩数据。</li>
+            <li>上传Excel文件，系统自动解析并导入成绩。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：上传前请确保考试科目已正确设置。</div>
+      </div>`
+  },
+  academic_analysis: {
+    title: "全平台智能分析",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>对全年级成绩数据进行多维度智能分析，包括年级总览、分数段分布、班级学科热力图、学生进退步分析等。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>选择要分析的考试和年级。</li>
+            <li>系统将自动生成分析报告。</li>
+            <li>可以切换不同的分析维度查看详细数据。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：分析结果支持导出Excel，方便存档和分享。</div>
+      </div>`
+  },
+  account_profile: {
+    title: "修改我的密码",
+    html: `
+      <div class="help-modal-body">
+        <div class="help-section">
+          <h4>📋 功能说明</h4>
+          <p>修改当前登录账号的密码。</p>
+        </div>
+        <div class="help-section">
+          <h4>🚀 使用方法</h4>
+          <ol>
+            <li>输入当前密码进行验证。</li>
+            <li>输入新密码并确认。</li>
+            <li>点击「保存修改」完成密码更新。</li>
+          </ol>
+        </div>
+        <div class="help-note">💡 提示：建议定期更换密码，不要使用过于简单的密码（如 123456）。</div>
       </div>`
   },
   users: {
@@ -2197,26 +1883,6 @@ const PAGE_HELPS = {
         <div class="help-note">💡 提示：如需上传成绩，请前往「上传全年级成绩」页面。</div>
       </div>`
   },
-  student_roster: {
-    title: "学生名单管理",
-    html: `
-      <div class="help-modal-body">
-        <div class="help-section">
-          <h4>📋 功能说明</h4>
-          <p>教务老师维护各年级、各班级的学生名单，包括学号、姓名、班级，是成绩录入和排名的基础数据。</p>
-        </div>
-        <div class="help-section">
-          <h4>🚀 使用方法</h4>
-          <ol>
-            <li>选择年级和班级。</li>
-            <li>点击「新增学生」填写学号、姓名；或通过 Excel 批量导入。</li>
-            <li>可编辑、删除学生信息。</li>
-            <li>学号格式可在系统设置中配置（如年份前缀+班级+序号）。</li>
-          </ol>
-        </div>
-        <div class="help-note">💡 提示：学生名单建立后，成绩录入时系统会自动匹配学号，避免重名混淆。</div>
-      </div>`
-  },
   upload_scores: {
     title: "上传班级成绩",
     html: `
@@ -2449,26 +2115,6 @@ const PAGE_HELPS = {
         <div class="help-note">💡 提示：建议定期更换密码，不要使用过于简单的密码（如 123456）。</div>
       </div>`
   },
-  exam_arrangement: {
-    title: "排考场系统",
-    html: `
-      <div class="help-modal-body">
-        <div class="help-section">
-          <h4>📋 功能说明</h4>
-          <p>排考场系统支持调取教务端考试数据与学生名单，便捷导入考生与考场信息，生成考场安排表；可在新窗口全屏使用。</p>
-        </div>
-        <div class="help-section">
-          <h4>🚀 使用方法</h4>
-          <ol>
-            <li>页面顶部显示当前年级、已建班级、学生总数、关联考试等概览数据。</li>
-            <li>点击「📥 便捷导入」可调取教务端的考试数据与学生名单。</li>
-            <li>点击「🚀 新窗口打开」全屏使用排考场系统。</li>
-            <li>在排考场系统中设置考场、座位数，自动分配考生。</li>
-          </ol>
-        </div>
-        <div class="help-note">💡 提示：使用前请先在「学生名单管理」中建立学生数据，或确保已有考试成绩可供导入。</div>
-      </div>`
-  }
 };
 
 // 显示当前页面的帮助弹窗
@@ -2612,18 +2258,6 @@ function renderDashboard() {
           <div class="aq-icon">🔄</div>
           <div class="aq-title">多次考试对比</div>
           <div class="aq-desc">对比多次考试成绩趋势</div>
-          <div class="aq-go">进入 →</div>
-        </div>
-        <div class="aq-card" onclick="navigate('exam_arrangement')" style="--aq-color:#6366f1;--aq-color2:#818cf8">
-          <div class="aq-icon">🏛️</div>
-          <div class="aq-title">排考场系统</div>
-          <div class="aq-desc">考场安排与座位编排</div>
-          <div class="aq-go">进入 →</div>
-        </div>
-        <div class="aq-card" onclick="navigate('student_roster')" style="--aq-color:#14b8a6;--aq-color2:#5eead4">
-          <div class="aq-icon">📋</div>
-          <div class="aq-title">学生名单管理</div>
-          <div class="aq-desc">管理本年级学生名单</div>
           <div class="aq-go">进入 →</div>
         </div>
         <div class="aq-card" onclick="navigate('users')" style="--aq-color:#d46b08;--aq-color2:#fa8c16">
@@ -5547,7 +5181,7 @@ function renderGradeSummary() {
 
 function drawSummary(examId, grade) {
   const subjects = DB.subjects[grade] || [];
-  const records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  const records = DB.records.filter((r) => r.examId === examId && r.grade === grade && (!r.status || r.status === "confirmed" || r.status === "pending"));
   if (records.length === 0) {
     $("summary_result").innerHTML = `<div class="empty-state"><div class="es-icon">📭</div><div class="es-title">本考试暂无成绩数据</div><div class="es-tip">请等待班主任上传班级成绩</div></div>`;
     return;
@@ -5602,7 +5236,7 @@ function drawSummary(examId, grade) {
 function exportSummaryExcel(examId, grade) {
   const exam = DB.exams.find((e) => e.id === examId);
   const subjects = DB.subjects[grade] || [];
-  const records = DB.records.filter((r) => r.examId === examId && r.grade === grade);
+  const records = DB.records.filter((r) => r.examId === examId && r.grade === grade && (!r.status || r.status === "confirmed" || r.status === "pending"));
   if (records.length === 0) { showToast("没有数据", "error"); return; }
 
   const totalStats = aggregateStats(records, subjects);
@@ -6930,7 +6564,7 @@ function refreshAcademicAnalysis() {
   const exams = getSortedExams(grade);
   const selectedExam = exams.find((e) => e.id === examId) || exams[exams.length - 1];
   const subjects = DB.subjects[grade] || [];
-  const allRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade);
+  const allRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade && (!r.status || r.status === "confirmed" || r.status === "pending"));
 
   if (allRecs.length === 0 || subjects.length === 0) {
     const msg = allRecs.length === 0 ? "本次考试暂无成绩数据" : "请先在「学科/分值设置」中配置学科";
@@ -7452,7 +7086,7 @@ function renderProgressDistribution(exams, selectedExam, grade, currentRecs) {
   }
 
   const prevExam = exams[examIdx - 1];
-  const prevRecs = DB.records.filter((r) => r.examId === prevExam.id && r.grade === grade);
+  const prevRecs = DB.records.filter((r) => r.examId === prevExam.id && r.grade === grade && (!r.status || r.status === "confirmed" || r.status === "pending"));
 
   if (prevRecs.length === 0) {
     wrap.innerHTML = `<div class="empty-state"><div class="es-tip">上一次考试暂无成绩数据</div></div>`;
@@ -7615,7 +7249,7 @@ function renderStudentsToWatch(records, exams, selectedExam, grade, subjects) {
 
   const examIdx = exams.findIndex((e) => e.id === selectedExam.id);
   const prevExam = examIdx > 0 ? exams[examIdx - 1] : null;
-  const prevRecs = prevExam ? DB.records.filter((r) => r.examId === prevExam.id && r.grade === grade) : [];
+  const prevRecs = prevExam ? DB.records.filter((r) => r.examId === prevExam.id && r.grade === grade && (!r.status || r.status === "confirmed" || r.status === "pending")) : [];
   const prevMap = {};
   prevRecs.forEach((r) => { prevMap[r.studentId] = r; });
 
@@ -12491,634 +12125,6 @@ window.downloadCustomAnalysis = function () {
   showToast("报告已下载", "success");
 };
 
-// ========== 教务端：学号格式设置 ==========
-window.openStudentIdFormatSettings = function () {
-  const format = DB.studentIdFormat || { enabled: false, pattern: "YYYYNNN##" };
-  
-  showModal("📑 学号格式设置", `
-    <div style="max-width:500px">
-      <div style="margin-bottom:16px;padding:12px;background:#fff3cd;border-radius:6px;font-size:13px">
-        <b>学号格式说明：</b><br/>
-        • <code>YYYY</code> = 4位入学年份（如 2026）<br/>
-        • <code>NNN</code> = 3位班级号（不足补0，如 001）<br/>
-        • <code>##</code> = 2位序号（不足补0，如 10）<br/>
-        <br/>
-        <b>示例：</b><code>20260110</code> → 翻译为 <b>2026级1班第10位学生</b>
-      </div>
-      
-      <div class="form-group">
-        <label style="display:flex;align-items:center;gap:8px">
-          <input type="checkbox" id="id_format_enabled" ${format.enabled ? "checked" : ""} />
-          启用自定义学号格式
-        </label>
-      </div>
-      
-      <div class="form-group" style="margin-top:12px">
-        <label>学号格式</label>
-        <input type="text" id="id_format_pattern" value="${format.pattern}" placeholder="如 YYYYNNN##"
-               style="width:100%;padding:8px;border:1px solid var(--border);border-radius:4px" />
-        <div style="font-size:12px;color:var(--text-light);margin-top:4px">
-          提示：YYYY=年份 NNN=班级号 ##=序号
-        </div>
-      </div>
-      
-      <div style="margin-top:16px;padding:12px;background:var(--bg-light);border-radius:6px">
-        <b>格式预览：</b>
-        <div style="margin-top:8px;font-size:13px">
-          <div>2026级1班第1位学生 → <code>20260101</code></div>
-          <div>2026级1班第10位学生 → <code>20260110</code></div>
-          <div>2026级2班第5位学生 → <code>20260205</code></div>
-          <div>2026级12班第100位学生 → <code>202612100</code></div>
-        </div>
-      </div>
-    </div>
-  `, "保存", () => {
-    const enabled = document.getElementById("id_format_enabled").checked;
-    const pattern = document.getElementById("id_format_pattern").value.trim();
-    
-    if (enabled && !pattern) {
-      showToast("请输入学号格式", "warning");
-      return false;
-    }
-    
-    DB.studentIdFormat = {
-      enabled,
-      pattern: enabled ? pattern : "YYYYNNN##",
-      description: enabled ? `学号格式：${pattern}` : "使用默认格式"
-    };
-    saveDB(DB);
-    showToast("学号格式设置已保存", "success");
-    renderStudentRoster();
-  });
-};
-
-// ========== 教务端：学生名单管理 ==========
-function renderStudentRoster() {
-  if (currentUser.role !== "academic") { $("pageContent").innerHTML = `<div class="empty-state"><div class="es-tip">无权限</div></div>`; return; }
-  const grade = currentUser.grade;
-  if (!DB.studentRoster) DB.studentRoster = {};
-  if (!DB.studentRoster[grade]) DB.studentRoster[grade] = {};
-
-  const classes = [...new Set(DB.users.filter((u) => u.role === "headteacher" && u.grade === grade).map((u) => u.classNo).filter(Boolean))].sort((a, b) => {
-    const na = parseInt(a) || 0, nb = parseInt(b) || 0;
-    return na - nb;
-  });
-
-  // 获取已上传学生名单的班级
-  const rosterClasses = Object.keys(DB.studentRoster[grade] || {}).sort();
-  const totalStudents = rosterClasses.reduce((sum, c) => sum + (DB.studentRoster[grade][c] || []).length, 0);
-
-  const idFormat = DB.studentIdFormat || { enabled: false, pattern: "YYYYNNN##" };
-  const formatStatus = idFormat.enabled 
-    ? `<span style="color:#1a7f37">✓ 已启用</span> - 格式：${idFormat.pattern}` 
-    : `<span style="color:var(--text-light)">未启用（使用默认格式）</span>`;
-
-  $("pageContent").innerHTML = `
-    <div class="card">
-      <div class="card-title">📋 ${grade} 学生名单管理</div>
-      <div style="margin-bottom:16px;padding:12px;background:var(--bg-light);border-radius:6px">
-        <div style="display:flex;gap:20px;flex-wrap:wrap">
-          <div>✅ <b>批量上传</b>：Excel 包含 学号、姓名、班级 三列，自动识别多班级</div>
-          <div>✅ <b>数据编辑</b>：上传后可直接修改学生信息、添加或删除</div>
-          <div>✅ <b>双模式保存</b>：合并模式（保留原有）或 替换模式（完全覆盖）</div>
-        </div>
-        <div style="margin-top:10px;color:var(--text-light);font-size:13px">
-          📊 已上传 ${rosterClasses.length} 个班级，共 ${totalStudents} 名学生。已上传的名单可在每次考试中直接提取使用。
-        </div>
-      </div>
-      <div style="margin-bottom:16px;padding:12px;background:#e3f2fd;border-left:3px solid #1976d2;border-radius:4px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
-          <div>
-            <b>📑 学号格式设置</b>：${formatStatus}
-            <div style="font-size:12px;color:var(--text-light);margin-top:4px">
-              格式示例：如 <code>20260110</code> → 翻译为 <b>2026级1班第10位学生</b>
-            </div>
-          </div>
-          <button class="btn btn-sm btn-primary" onclick="window.openStudentIdFormatSettings()">⚙️ 设置学号格式</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="window.downloadRosterTemplate()">⬇ 下载 Excel 模板</button>
-        <button class="btn btn-success" onclick="document.getElementById('sr_file').click()">📤 上传名单（支持多选）</button>
-        <input type="file" id="sr_file" accept=".xlsx,.xls" multiple style="display:none" onchange="handleRosterUpload(this)" />
-        ${rosterClasses.length > 0 ? `<button class="btn btn-info" onclick="downloadAllRoster()">📤 下载所有名单</button>` : ''}
-      </div>
-    </div>
-
-    <div id="sr_preview" style="margin-top:20px"></div>
-
-    <div class="card" style="margin-top:20px">
-      <div class="card-title">📊 已上传学生名单（${rosterClasses.length} 个班级，共 ${totalStudents} 人）</div>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th>班级</th><th>人数</th><th>学生名单（前5名）</th><th>操作</th></tr></thead>
-        <tbody>
-          ${rosterClasses.length === 0 ? `<tr><td colspan="4"><div class="empty-state"><div class="es-tip">🗂️ 暂无已上传的名单，请先上传学生名单</div></div></td></tr>` : rosterClasses.map((c) => {
-            const students = DB.studentRoster[grade][c] || [];
-            const previewNames = students.slice(0, 5).map((s) => esc(s.studentName)).join("、");
-            return `<tr>
-              <td><b>${esc(c)}</b></td>
-              <td>${students.length} 人</td>
-              <td style="color:var(--text-light);font-size:12px">${esc(previewNames)}${students.length > 5 ? `等 ${students.length} 名学生` : ''}</td>
-              <td>
-                <button class="btn btn-sm btn-primary" onclick="extractRosterToExam('${esc(c)}')">📥 提取到考试</button>
-                <button class="btn btn-sm btn-info" onclick="viewRosterClass('${esc(c)}')">👁️ 查看</button>
-                <button class="btn btn-sm btn-warning" onclick="editRosterClass('${esc(c)}')">✏️ 编辑</button>
-                <button class="btn btn-sm btn-danger" onclick="deleteRosterClass('${esc(c)}')">🗑️ 删除</button>
-              </td>
-            </tr>`;
-          }).join("")}
-        </tbody>
-      </table></div>
-    </div>
-  `;
-
-  // 绑定班级切换事件
-  if (classes.length > 0) viewRosterClass(classes[0]);
-}
-
-window.downloadAllRoster = function () {
-  const grade = currentUser.grade;
-  const rosterClasses = Object.keys(DB.studentRoster[grade] || {}).sort();
-  if (rosterClasses.length === 0) {
-    showToast("暂无已上传的名单", "warning");
-    return;
-  }
-
-  const rows = [["学号", "姓名", "班级"]];
-  rosterClasses.forEach((c) => {
-    const students = DB.studentRoster[grade][c] || [];
-    students.forEach((s) => {
-      rows.push([s.studentId || "", s.studentName || "", c]);
-    });
-  });
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "学生名单");
-  XLSX.writeFile(wb, `${grade}_学生名单_${new Date().toISOString().slice(0, 10)}.xlsx`);
-  showToast("下载成功", "success");
-};
-
-window.downloadRosterTemplate = function () {
-  const grade = currentUser.grade;
-  const headers = ["学号", "姓名", "班级"];
-  const rows = [headers, ["001", "张三", "1班"], ["002", "李四", "1班"], ["003", "王五", "2班"]];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), "学生名单");
-  XLSX.writeFile(wb, `${grade}_学生名单模板.xlsx`);
-  showToast("模板已下载", "success");
-};
-
-function handleRosterUpload(input) {
-  const files = Array.from(input.files);
-  if (files.length === 0) return;
-
-  if (files.length > 1) {
-    showToast(`正在处理 ${files.length} 个文件...`, "info");
-  }
-
-  const grade = currentUser.grade;
-  if (!DB.studentRoster) DB.studentRoster = {};
-  if (!DB.studentRoster[grade]) DB.studentRoster[grade] = {};
-
-  // 解析单个文件的函数
-  const parseFile = (file) => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target.result);
-          const wb = XLSX.read(data, { type: "array" });
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-          const classGroups = {};
-          for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const studentId = String(row["学号"] || row["id"] || row["学生学号"] || "").trim();
-            const studentName = String(row["姓名"] || row["name"] || row["学生姓名"] || "").trim();
-            let classNoRaw = String(row["班级"] || row["class"] || row["classNo"] || "").trim();
-            const classNo = displayClassNo(classNoRaw) || classNoRaw;
-
-            if (!studentName || !classNo) continue;
-            if (!classGroups[classNo]) classGroups[classNo] = [];
-            classGroups[classNo].push({
-              studentId: studentId || `${classNo}-${classGroups[classNo].length + 1}`,
-              studentName,
-              classNo,
-              _sourceFile: file.name // 记录来源文件
-            });
-          }
-          resolve({ fileName: file.name, classGroups, totalRows: rows.length });
-        } catch (err) {
-          resolve({ fileName: file.name, classGroups: {}, totalRows: 0, error: err.message });
-        }
-      };
-      reader.onerror = () => resolve({ fileName: file.name, classGroups: {}, totalRows: 0, error: "读取文件失败" });
-      reader.readAsArrayBuffer(file);
-    });
-  };
-
-  // 并行处理所有文件
-  Promise.all(files.map(parseFile)).then((results) => {
-    // 合并所有文件的数据
-    const allClassGroups = {};
-    let totalSkipped = 0;
-    let totalValidRows = 0;
-
-    results.forEach(({ fileName, classGroups, totalRows, error }) => {
-      if (error) {
-        showToast(`文件 "${fileName}" 解析失败：${error}`, "error");
-        return;
-      }
-      const validRows = Object.values(classGroups).reduce((sum, arr) => sum + arr.length, 0);
-      totalSkipped += totalRows - validRows;
-      totalValidRows += validRows;
-
-      Object.keys(classGroups).forEach((c) => {
-        if (!allClassGroups[c]) allClassGroups[c] = [];
-        allClassGroups[c].push(...classGroups[c]);
-      });
-    });
-
-    if (totalValidRows === 0) {
-      showToast("未解析到任何有效数据，请检查文件格式", "warning");
-      return;
-    }
-
-    const classList = Object.keys(allClassGroups).sort();
-
-    let html = `<div class="card">
-      <div class="card-title">📋 上传预览与编辑（共 ${totalValidRows} 人，${classList.length} 个班级${totalSkipped > 0 ? "，跳过 " + totalSkipped + " 行无效数据" : ""}）</div>
-      <div style="margin-bottom:12px;padding:12px;background:var(--bg-light);border-radius:6px">
-        <b>💡 操作提示：</b>已选择 <b>${files.length}</b> 个文件。您可以直接编辑表格中的学号和姓名，或添加/删除学生。确认无误后选择保存模式进行保存。
-      </div>
-      <div id="roster_edit_accordion">`;
-
-    classList.forEach((c, classIdx) => {
-      const newStudents = allClassGroups[c];
-      const existingStudents = DB.studentRoster[grade]?.[c] || [];
-      const isUpdate = existingStudents.length > 0;
-
-      html += `<div class="accordion-item" style="margin-bottom:10px;border:1px solid var(--border-color);border-radius:8px">
-        <div class="accordion-header" onclick="toggleAccordion(${classIdx})" style="padding:12px;cursor:pointer;background:var(--bg-light);border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center">
-          <div>
-            <span class="badge ${isUpdate ? 'badge-info' : 'badge-success'}">${isUpdate ? '更新' : '新增'}</span>
-            <b style="margin-left:8px">${esc(c)}</b>
-            <span style="color:var(--text-light);font-size:12px;margin-left:8px">${isUpdate ? `原有 ${existingStudents.length} 人，本次新增/更新 ${newStudents.length} 人` : `${newStudents.length} 名学生`}</span>
-          </div>
-          <span id="acc_arrow_${classIdx}" style="font-size:12px">▼</span>
-        </div>
-        <div id="acc_content_${classIdx}" class="accordion-content" style="padding:12px;display:${classIdx === 0 ? 'block' : 'none'}">
-          <div style="margin-bottom:8px">
-            <button class="btn btn-sm btn-primary" onclick="addPendingStudent('${esc(c)}')">➕ 添加学生</button>
-          </div>
-          <div class="table-wrap"><table class="data-table">
-            <thead><tr><th style="width:40%">学号</th><th style="width:45%">姓名</th><th style="width:15%">操作</th></tr></thead>
-            <tbody id="roster_pending_tbody_${esc(c)}">
-              ${newStudents.map((s, i) => `
-                <tr>
-                  <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-class="${esc(c)}" data-index="${i}" data-field="studentId" oninput="updatePendingStudent(this)" /></td>
-                  <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-class="${esc(c)}" data-index="${i}" data-field="studentName" oninput="updatePendingStudent(this)" /></td>
-                  <td><button class="btn btn-sm btn-danger" onclick="deletePendingStudent('${esc(c)}', ${i})">🗑️ 删除</button></td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table></div>
-        </div>
-      </div>`;
-    });
-
-    html += `</div>
-      <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-color);display:flex;gap:10px;justify-content:flex-end;align-items:center">
-        <div style="margin-right:auto">
-          <label style="margin-right:8px"><input type="radio" name="roster_save_mode" value="merge" checked /> 合并模式（保留原有学生，新增学号）</label>
-          <label><input type="radio" name="roster_save_mode" value="replace" /> 替换模式（覆盖所有班级的现有名单）</label>
-        </div>
-        <button class="btn btn-secondary" onclick="renderStudentRoster()">取消</button>
-        <button class="btn btn-success" onclick="confirmRosterUpload()">✓ 确认保存</button>
-      </div>
-    </div>`;
-
-    $("sr_preview").innerHTML = html;
-    window._pendingRosterData = allClassGroups;
-    showToast(`成功解析 ${totalValidRows} 名学生数据（${files.length} 个文件）`, "success");
-  });
-}
-
-function toggleAccordion(idx) {
-  const content = $(`acc_content_${idx}`);
-  const arrow = $(`acc_arrow_${idx}`);
-  if (content) {
-    content.style.display = content.style.display === "none" ? "block" : "none";
-    if (arrow) arrow.innerHTML = content.style.display === "none" ? "▶" : "▼";
-  }
-}
-
-function updatePendingStudent(input) {
-  const classNo = input.dataset.class;
-  const index = parseInt(input.dataset.index);
-  const field = input.dataset.field;
-  const value = input.value.trim();
-  if (window._pendingRosterData && window._pendingRosterData[classNo] && window._pendingRosterData[classNo][index]) {
-    window._pendingRosterData[classNo][index][field] = value || `${classNo}-${index + 1}`;
-  }
-}
-
-function deletePendingStudent(classNo, index) {
-  if (window._pendingRosterData && window._pendingRosterData[classNo]) {
-    window._pendingRosterData[classNo].splice(index, 1);
-    const tbody = $(`roster_pending_tbody_${classNo}`);
-    if (tbody) {
-      tbody.innerHTML = window._pendingRosterData[classNo].map((s, i) => `
-        <tr>
-          <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentId" oninput="updatePendingStudent(this)" /></td>
-          <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentName" oninput="updatePendingStudent(this)" /></td>
-          <td><button class="btn btn-sm btn-danger" onclick="deletePendingStudent('${esc(classNo)}', ${i})">🗑️ 删除</button></td>
-        </tr>
-      `).join("");
-    }
-    showToast("已删除", "success");
-  }
-}
-
-function addPendingStudent(classNo) {
-  if (!window._pendingRosterData) return;
-  if (!window._pendingRosterData[classNo]) window._pendingRosterData[classNo] = [];
-  const students = window._pendingRosterData[classNo];
-  students.push({
-    studentId: `${classNo}-${students.length + 1}`,
-    studentName: "",
-    classNo
-  });
-  const tbody = $(`roster_pending_tbody_${classNo}`);
-  if (tbody) {
-    tbody.innerHTML = students.map((s, i) => `
-      <tr>
-        <td><input type="text" class="form-control" value="${esc(s.studentId)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentId" oninput="updatePendingStudent(this)" /></td>
-        <td><input type="text" class="form-control" value="${esc(s.studentName)}" data-class="${esc(classNo)}" data-index="${i}" data-field="studentName" oninput="updatePendingStudent(this)" /></td>
-        <td><button class="btn btn-sm btn-danger" onclick="deletePendingStudent('${esc(classNo)}', ${i})">🗑️ 删除</button></td>
-      </tr>
-    `).join("");
-  }
-  showToast("已添加", "success");
-}
-
-// 合并学生名单：保留原有用学号匹配，新增的学号添加
-function mergeRosterStudents(existing, newStudents) {
-  const merged = [...existing];
-  const existingIds = new Set(existing.map((s) => s.studentId));
-
-  newStudents.forEach((s) => {
-    if (!existingIds.has(s.studentId)) {
-      merged.push(s);
-    }
-  });
-
-  return merged;
-}
-
-function confirmRosterUpload() {
-  const grade = currentUser.grade;
-  const classGroups = window._pendingRosterData || {};
-
-  // 获取用户选择的保存模式
-  let saveMode = "merge";
-  const modeInputs = document.querySelectorAll('input[name="roster_save_mode"]');
-  modeInputs.forEach((input) => {
-    if (input.checked) saveMode = input.value;
-  });
-
-  // 验证数据
-  let totalStudents = 0;
-  const validClasses = [];
-  Object.keys(classGroups).forEach((c) => {
-    const students = classGroups[c].filter((s) => s.studentName && s.studentName.trim());
-    if (students.length > 0) {
-      validClasses.push({ classNo: c, students });
-      totalStudents += students.length;
-    }
-  });
-
-  if (totalStudents === 0) {
-    showToast("请至少填写一名学生的姓名", "warning");
-    return;
-  }
-
-  const modeText = saveMode === "replace" ? "替换模式" : "合并模式";
-
-  showModal("确认保存", `
-    <p>即将以 <b style="color:${saveMode === 'replace' ? '#dc3545' : '#28a745'}">${modeText}</b> 保存 <b>${totalStudents}</b> 名学生（涉及 ${validClasses.length} 个班级）：</p>
-    <div style="margin:12px 0;padding:10px;background:var(--bg-light);border-radius:6px">
-      ${validClasses.map(({ classNo, students }) => `<div style="padding:4px 0"><b>${esc(classNo)}</b>：${students.length} 名学生</div>`).join("")}
-    </div>
-    ${saveMode === "replace" ? `<p style="color:#dc3545;font-size:12px">⚠️ 替换模式将覆盖这些班级的所有现有学生名单！</p>` : `<p style="color:var(--text-light);font-size:12px">💡 合并模式将保留原有学生，仅新增新学号的学生。</p>`}
-  `, "✓ 确认保存", () => {
-    validClasses.forEach(({ classNo, students }) => {
-      const existingStudents = DB.studentRoster[grade]?.[classNo] || [];
-
-      if (saveMode === "replace") {
-        // 替换模式：直接覆盖
-        DB.studentRoster[grade][classNo] = students;
-      } else if (existingStudents.length > 0) {
-        // 合并模式：保留原有，新增学号
-        DB.studentRoster[grade][classNo] = mergeRosterStudents(existingStudents, students);
-      } else {
-        DB.studentRoster[grade][classNo] = students;
-      }
-    });
-
-    saveDB(DB);
-    window._pendingRosterData = null;
-    showToast(`成功保存 ${totalStudents} 名学生（${modeText}）`, "success");
-    renderStudentRoster();
-  }, "取消");
-}
-
-function viewRosterClass(classNo) {
-  const grade = currentUser.grade;
-  const students = DB.studentRoster[grade]?.[classNo] || [];
-
-  $("sr_preview").innerHTML = `
-    <div class="card">
-      <div class="card-title">👥 ${esc(classNo)} 学生名单（${students.length}人）
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn btn-sm btn-info" onclick="downloadRosterClass('${esc(classNo)}')">⬇ 下载名单</button>
-          <button class="btn btn-sm btn-warning" onclick="editRosterClass('${esc(classNo)}')">✏️ 编辑</button>
-          <button class="btn btn-sm btn-primary" onclick="extractRosterToExam('${esc(classNo)}')">📥 提取到考试</button>
-        </div>
-      </div>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th style="width:10%">序号</th><th style="width:30%">学号</th><th style="width:40%">姓名</th><th style="width:20%">班级</th></tr></thead>
-        <tbody>
-          ${students.length === 0 ? `<tr><td colspan="4"><div class="empty-state"><div class="es-tip">暂无数据，请上传名单或编辑添加学生</div></div></td></tr>` : students.map((s, i) => `<tr>
-            <td>${i + 1}</td><td>${esc(s.studentId)}</td><td><b>${esc(s.studentName)}</b></td><td>${esc(s.classNo)}</td>
-          </tr>`).join("")}
-        </tbody>
-      </table></div>
-    </div>
-  `;
-}
-
-function downloadRosterClass(classNo) {
-  const grade = currentUser.grade;
-  const students = DB.studentRoster[grade]?.[classNo] || [];
-  if (students.length === 0) {
-    showToast("该班级暂无学生数据", "warning");
-    return;
-  }
-  const rows = [["学号", "姓名", "班级"]];
-  students.forEach((s) => rows.push([s.studentId || "", s.studentName || "", classNo]));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), classNo);
-  XLSX.writeFile(wb, `${grade}_${classNo}_学生名单.xlsx`);
-  showToast("已下载名单", "success");
-}
-
-function editRosterClass(classNo) {
-  const grade = currentUser.grade;
-  const students = DB.studentRoster[grade]?.[classNo] || [];
-
-  $("sr_preview").innerHTML = `
-    <div class="card">
-      <div class="card-title">✏️ 编辑 ${esc(classNo)} 学生名单（共 ${students.length} 人）</div>
-      <div style="margin-bottom:12px;padding:10px;background:var(--bg-light);border-radius:6px">
-        <b>💡 操作提示：</b>直接修改学号和姓名，点击右侧按钮删除学生，或点击下方按钮添加新学生。
-      </div>
-      <div class="table-wrap"><table class="data-table">
-        <thead><tr><th style="width:35%">学号</th><th style="width:40%">姓名</th><th style="width:25%">操作</th></tr></thead>
-        <tbody id="roster_edit_tbody">
-          ${students.map((s, i) => `<tr>
-            <td><input type="text" class="form-control" value="${esc(s.studentId)}" placeholder="学号" /></td>
-            <td><input type="text" class="form-control" value="${esc(s.studentName)}" placeholder="姓名" /></td>
-            <td><button class="btn btn-sm btn-danger" onclick="deleteRosterStudentInline(this)">🗑️ 删除</button></td>
-          </tr>`).join("")}
-        </tbody>
-      </table></div>
-      <div style="margin-top:16px;display:flex;gap:10px">
-        <button class="btn btn-secondary" onclick="addRosterStudentInline()">➕ 添加学生</button>
-        <button class="btn btn-success" onclick="saveRosterEdit('${esc(classNo)}')">✓ 保存修改</button>
-        <button class="btn btn-secondary" onclick="viewRosterClass('${esc(classNo)}')">取消</button>
-      </div>
-    </div>
-  `;
-}
-
-function addRosterStudentInline() {
-  const tbody = $("roster_edit_tbody");
-  const tr = document.createElement("tr");
-  tr.innerHTML = `<td><input type="text" class="form-control" value="" placeholder="学号" /></td>
-    <td><input type="text" class="form-control" value="" placeholder="姓名" /></td>
-    <td><button class="btn btn-sm btn-danger" onclick="deleteRosterStudentInline(this)">🗑️ 删除</button></td>`;
-  tbody.appendChild(tr);
-  showToast("已添加一行", "success");
-}
-
-function deleteRosterStudentInline(btn) {
-  const row = btn.closest("tr");
-  if (row) row.remove();
-  showToast("已删除", "success");
-}
-
-function saveRosterEdit(classNo) {
-  const grade = currentUser.grade;
-  const tbody = $("roster_edit_tbody");
-  const rows = tbody.querySelectorAll("tr");
-  const newStudents = [];
-
-  rows.forEach((row) => {
-    const inputs = row.querySelectorAll("input");
-    if (inputs.length < 2) return;
-    const studentId = inputs[0].value.trim();
-    const studentName = inputs[1].value.trim();
-    if (studentName) {
-      newStudents.push({
-        studentId: studentId || `auto-${newStudents.length + 1}`,
-        studentName,
-        classNo
-      });
-    }
-  });
-
-  if (newStudents.length === 0) {
-    showToast("名单不能为空，请至少添加一名学生", "warning");
-    return;
-  }
-
-  DB.studentRoster[grade][classNo] = newStudents;
-  saveDB(DB);
-  showToast(`已保存 ${newStudents.length} 名学生`, "success");
-  viewRosterClass(classNo);
-}
-
-function extractRosterToExam(classNo) {
-  const grade = currentUser.grade;
-  const exams = DB.exams.filter((e) => e.grade === grade);
-  if (exams.length === 0) {
-    showToast("请先创建考试", "warning");
-    return;
-  }
-
-  showModal("提取名单到考试", `
-    <p>选择要将 <b>${classNo}</b> 的学生名单提取到哪个考试：</p>
-    <select id="extract_exam" class="form-control" style="margin-top:12px">
-      ${exams.map((e) => `<option value="${e.id}">${esc(e.name)}</option>`).join("")}
-    </select>
-  `, "确认提取", () => {
-    const examId = $("extract_exam").value;
-    const students = DB.studentRoster[grade]?.[classNo] || [];
-    const subjects = DB.subjects[grade] || [];
-    const subjectNames = subjects.map((s) => s.name);
-
-    // 获取该班级已有的学号映射
-    const existingKeyToId = {};
-    DB.records.filter((r) => r.grade === grade && r.classNo === classNo).forEach((r) => {
-      existingKeyToId[r.studentName] = r.studentId;
-    });
-
-    // 检查该考试是否已有该班级的学生
-    const existingIds = new Set(DB.records.filter((r) => r.examId === examId && r.classNo === classNo).map((r) => r.studentId));
-
-    let added = 0;
-    students.forEach((s) => {
-      const studentId = existingIds.has(s.studentId) ? s.studentId : (existingKeyToId[s.studentName] || s.studentId);
-      if (!existingIds.has(studentId)) {
-        DB.records.push({
-          id: uid(),
-          examId,
-          grade,
-          classNo,
-          studentId,
-          studentName: s.studentName,
-          scores: {},
-          total: 0,
-          uploadedBy: currentUser.id,
-          uploadedAt: Date.now(),
-          // 成绩审核已移除：上传即生效，直接设为已确认
-          status: "confirmed",
-          confirmedAt: Date.now(),
-          confirmedBy: currentUser.id
-        });
-        added++;
-      }
-    });
-
-    saveDB(DB, examId);
-    showToast(`已提取 ${added} 名学生到「${exams.find((e) => e.id === examId)?.name}」`, "success");
-  });
-}
-
-function deleteRosterClass(classNo) {
-  showModal("确认删除", `<p>确定要删除 <b>${classNo}</b> 的学生名单吗？</p>`, "删除", () => {
-    const grade = currentUser.grade;
-    if (DB.studentRoster[grade]?.[classNo]) {
-      delete DB.studentRoster[grade][classNo];
-      saveDB(DB);
-      showToast("已删除", "success");
-      renderStudentRoster();
-    }
-  }, "取消");
-}
-
 // ========== 教务端：成绩审核 ==========
 function renderScoreReview() {
   // 成绩审核功能已移除：上传成绩直接生效为已确认状态，无需复审
@@ -13298,27 +12304,6 @@ window.clearAllScores = function() {
     showToast(`已清空 ${targets.length} 条成绩记录`, "success");
     renderScoreReview();
   });
-};
-
-// 保存学号格式设置
-window.saveStudentIdFormat = function() {
-  const yearPrefix = $("yearPrefixInput")?.value?.trim();
-  
-  if (!yearPrefix || !/^\d{4}$/.test(yearPrefix)) {
-    showToast("年份前缀必须是4位数字（如2026）", "error");
-    return;
-  }
-  
-  DB.studentIdFormat = {
-    enabled: true,
-    pattern: "YYYYNN##",
-    yearPrefix: yearPrefix,
-    description: `学号格式：${yearPrefix}（年份前缀）+ NN（两位班级号）+ ##（两位班级人数顺序）`
-  };
-  
-  saveDB(DB);
-  showToast(`学号格式已保存：${yearPrefix}NN##`, "success");
-  renderScoreReview();
 };
 
 // 一键全确认某考试
