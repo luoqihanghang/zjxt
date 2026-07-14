@@ -31,7 +31,11 @@ const GitHubService = {
   CORS_PROXIES: [
     "https://corsproxy.io/?",
     "https://api.allorigins.win/raw?url=",
-    "https://api.codetabs.com/v1/proxy?quest="
+    "https://api.codetabs.com/v1/proxy?quest=",
+    "https://proxy.cors.sh/",
+    "https://cors-anywhere.herokuapp.com/",
+    "https://thingproxy.freeboard.io/fetch/",
+    "https://api.allorigins.work/raw?url="
   ],
   currentProxyIndex: 0,
   useProxy: false, // 优先直连 GitHub API（原生支持 CORS），失败时自动回退到代理
@@ -220,7 +224,8 @@ const GitHubService = {
     if (!token) throw new Error("Token 为空");
     const githubUrl = `https://api.github.com/gists/${gistId || ""}`;
     
-    // 根据尝试次数选择请求方式：0次直连，1次用代理0，2次用代理1，3次用代理2
+    const MAX_ATTEMPTS = this.CORS_PROXIES.length + 1;
+    
     let url = githubUrl;
     let mode = "直连";
     if (_attempt > 0) {
@@ -230,8 +235,8 @@ const GitHubService = {
     }
     
     const controller = new AbortController();
-    // 超时时间：第一次15秒，后续逐步增加到30秒
-    const timeoutMs = Math.min(15000 + _attempt * 5000, 30000);
+    // 超时时间：第一次15秒，后续逐步增加到45秒
+    const timeoutMs = Math.min(15000 + _attempt * 5000, 45000);
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     const opts = {
@@ -242,13 +247,12 @@ const GitHubService = {
         "Content-Type": "application/json",
         "X-GitHub-Api-Version": "2022-11-28"
       },
-      signal: controller.signal,
-      targetAddressSpace: "public"
+      signal: controller.signal
     };
     if (body) opts.body = JSON.stringify(body);
     
     try {
-      this.log(`[API] ${mode}请求: ${method} ${githubUrl.slice(-30)}... (尝试${_attempt + 1}/3, 超时${timeoutMs}ms)`);
+      this.log(`[API] ${mode}请求: ${method} ${githubUrl.slice(-30)}... (尝试${_attempt + 1}/${MAX_ATTEMPTS}, 超时${timeoutMs}ms)`);
       const res = await fetch(url, opts);
       clearTimeout(timeoutId);
       if (!res.ok) {
@@ -258,6 +262,12 @@ const GitHubService = {
         if (res.status === 401 || res.status === 403) {
           throw new Error(`认证失败：${errMsg}，请检查 Token 是否正确`);
         }
+        if ((res.status === 413 || res.status === 429) && _attempt < MAX_ATTEMPTS - 1) {
+          const delay = Math.pow(2, _attempt) * 1000;
+          this.log(`[API] ${mode}返回 ${res.status}（${res.status === 413 ? "内容过大" : "限流"}），等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
+          await new Promise(r => setTimeout(r, delay));
+          return this.api(method, gistId, body, _attempt + 1);
+        }
         throw new Error(errMsg);
       }
       return res.status === 204 ? null : res.json();
@@ -265,29 +275,19 @@ const GitHubService = {
       clearTimeout(timeoutId);
       this.log(`[API] ${mode}失败: ${e.message}`);
       
-      if (e.name === "AbortError") {
-        // 超时：如果还有重试机会，换方式重试
-        if (_attempt < 2) {
-          const delay = Math.pow(2, _attempt) * 1000; // 1s, 2s, 4s
-          this.log(`[API] 超时，等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
-          await new Promise(r => setTimeout(r, delay));
-          return this.api(method, gistId, body, _attempt + 1);
-        }
-        throw new Error(`请求超时（${timeoutMs}ms），请检查网络连接后重试`);
-      }
-      
-      // 网络错误（DNS解析失败、连接重置、网络不可达等）
+      const isTimeout = e.name === "AbortError";
       const isNetworkError = e.message.includes("Failed to fetch") || 
                              e.message.includes("NetworkError") || 
                              e.message.includes("ERR_CONNECTION") ||
                              e.message.includes("ERR_NAME_NOT_RESOLVED") ||
                              e.message.includes("ERR_TIMED_OUT") ||
                              e.message.includes("ECONNRESET") ||
-                             e.message.includes("ETIMEDOUT");
+                             e.message.includes("ETIMEDOUT") ||
+                             e.message.includes("CORS");
       
-      if (isNetworkError && _attempt < 2) {
-        const delay = Math.pow(2, _attempt) * 1000; // 1s, 2s, 4s
-        this.log(`[API] 网络错误(${e.message.slice(0,30)}...)，等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
+      if ((isTimeout || isNetworkError) && _attempt < MAX_ATTEMPTS - 1) {
+        const delay = Math.pow(2, _attempt) * 1000;
+        this.log(`[API] ${isTimeout ? "超时" : "网络错误"}(${e.message.slice(0,30)}...)，等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
         await new Promise(r => setTimeout(r, delay));
         return this.api(method, gistId, body, _attempt + 1);
       }
@@ -327,14 +327,12 @@ const GitHubService = {
   },
 
   // 读取 Gist 中某个文件的 JSON 内容
-  async readGistFile(gistId, filename) {
+  async readGistFile(gistId, filename, infoCache = null) {
     try {
-      const info = await this.getGistInfo(gistId);
+      const info = infoCache || await this.getGistInfo(gistId);
       const file = info.files[filename];
       if (!file) return null;
-      // file.content 在 Gist 详情中直接返回（小文件）
       if (file.content) return JSON.parse(file.content);
-      // 大文件需要通过 raw_url 再 fetch（带重试和代理回退）
       if (file.raw_url) {
         return await this._fetchRawUrl(file.raw_url);
       }
@@ -347,8 +345,9 @@ const GitHubService = {
 
   // 内部方法：获取 raw URL，支持重试和代理回退
   async _fetchRawUrl(rawUrl, _attempt = 0) {
+    const MAX_ATTEMPTS = this.CORS_PROXIES.length + 1;
     const controller = new AbortController();
-    const timeoutMs = Math.min(15000 + _attempt * 5000, 30000);
+    const timeoutMs = Math.min(15000 + _attempt * 5000, 45000);
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     let url = rawUrl;
@@ -360,10 +359,15 @@ const GitHubService = {
     }
     
     try {
-      this.log(`[Raw] ${mode}获取: ${rawUrl.slice(-30)}... (尝试${_attempt + 1}/3)`);
-      const raw = await fetch(url, { signal: controller.signal, targetAddressSpace: "public" });
+      this.log(`[Raw] ${mode}获取: ${rawUrl.slice(-30)}... (尝试${_attempt + 1}/${MAX_ATTEMPTS})`);
+      const raw = await fetch(url, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (!raw.ok) {
+        if ((raw.status === 413 || raw.status === 429) && _attempt < MAX_ATTEMPTS - 1) {
+          const delay = Math.pow(2, _attempt) * 1000;
+          await new Promise(r => setTimeout(r, delay));
+          return this._fetchRawUrl(rawUrl, _attempt + 1);
+        }
         throw new Error(`HTTP ${raw.status}`);
       }
       const text = await raw.text();
@@ -372,10 +376,13 @@ const GitHubService = {
       clearTimeout(timeoutId);
       this.log(`[Raw] ${mode}失败: ${e.message}`);
       
-      if ((e.name === "AbortError" || 
-           e.message.includes("Failed to fetch") || 
-           e.message.includes("NetworkError") ||
-           e.message.includes("ERR_CONNECTION")) && _attempt < 2) {
+      const isTimeout = e.name === "AbortError";
+      const isNetworkError = e.message.includes("Failed to fetch") || 
+                             e.message.includes("NetworkError") ||
+                             e.message.includes("ERR_CONNECTION") ||
+                             e.message.includes("CORS");
+      
+      if ((isTimeout || isNetworkError) && _attempt < MAX_ATTEMPTS - 1) {
         const delay = Math.pow(2, _attempt) * 1000;
         await new Promise(r => setTimeout(r, delay));
         return this._fetchRawUrl(rawUrl, _attempt + 1);
@@ -608,26 +615,26 @@ const GitHubService = {
   },
 
   // 从所有业务 Gist 读取所有 exam-*.json → records 数组
-  // 【优化】并行读取：先批量获取所有 Gist 的文件列表，再批量并发读取（限制并发数）
   async loadAllRecords() {
     const records = [];
-    // 1. 并行获取所有 Gist 的文件列表
+    // 1. 并行获取所有 Gist 的文件列表（缓存完整 info 对象）
     const gistInfos = await Promise.all(
       this.config.dataGistIds.map(async (gid) => {
         try {
           const info = await this.getGistInfo(gid);
-          return { gid, files: Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json")) };
+          const examFiles = Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json"));
+          return { gid, info, files: examFiles };
         } catch (e) {
           this.log(`读取 ${gid} 文件列表失败: ${e.message}`, "error");
-          return { gid, files: [] };
+          return { gid, info: null, files: [] };
         }
       })
     );
-    // 2. 收集所有待读取的文件路径
+    // 2. 收集所有待读取的文件路径（带上 info 缓存）
     const allFiles = [];
-    gistInfos.forEach(({ gid, files }) => {
+    gistInfos.forEach(({ gid, info, files }) => {
       files.forEach((fname) => {
-        allFiles.push({ gid, fname });
+        allFiles.push({ gid, fname, infoCache: info });
       });
     });
     // 3. 批量并发读取（最多 5 个并发，避免超时）
@@ -635,8 +642,8 @@ const GitHubService = {
     for (let i = 0; i < allFiles.length; i += CONCURRENCY) {
       const batch = allFiles.slice(i, i + CONCURRENCY);
       const batchResults = await Promise.all(
-        batch.map(({ gid, fname }) =>
-          this.readGistFile(gid, fname).catch((e) => {
+        batch.map(({ gid, fname, infoCache }) =>
+          this.readGistFile(gid, fname, infoCache).catch((e) => {
             this.log(`读取 ${gid}/${fname} 失败: ${e.message}`, "error");
             return null;
           })
@@ -870,6 +877,12 @@ const GitHubService = {
       // 如果主 Gist 里指定了业务 Gist，也读回来
       const meta = await this.loadAllDataMeta();
       const records = await this.loadAllRecords();
+      this.log(`远程数据加载完成：${meta.exams?.length || 0} 考试，${records.length} 成绩记录`);
+      
+      if (cfg.dataGistIds.length > 0 && meta.exams.length === 0 && records.length === 0) {
+        this.log("⚠️ 业务 Gist 配置存在但数据为空，可能是网络加载失败或 Gist 中确实没有数据", "warn");
+      }
+      
       // 学生名单可能在业务 Gist 中（被自动剥离）
       let studentRoster = cfg.studentRoster || {};
       if (!studentRoster || Object.keys(studentRoster).length === 0) {
@@ -878,8 +891,6 @@ const GitHubService = {
           studentRoster = rosterFromData;
         }
       }
-
-      this.log(`远程数据加载完成：${meta.exams?.length || 0} 考试，${records.length} 成绩记录`);
 
       // 合并成一个 DB 对象（与原有 initDefaultDB 结构一致）
       return {
