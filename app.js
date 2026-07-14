@@ -172,14 +172,44 @@ const DB_KEY = "smart_edu_platform_db_v1";
 let _skipGitHubSync = false; // 防止循环
 
 async function loadDB() {
-  // 1. 优先从双 Gist 加载（主 Gist 配置 + 业务 Gist 成绩）
+  // 1. 先读取本地缓存
+  let localDB = null;
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.users && parsed.users.length > 0) {
+        localDB = parsed;
+        console.log("[loadDB] 📤 本地缓存有效（", parsed.users.length, "个用户，", parsed.exams?.length || 0, "场考试，", parsed.records?.length || 0, "条记录）");
+      }
+    }
+  } catch (e) {
+    console.log("[loadDB] ⚠️ 本地缓存解析失败:", e.message);
+  }
+
+  // 2. 如果云端已配置，尝试加载云端数据
   if (GitHubService.isConfigured()) {
     try {
       const remote = await GitHubService.loadRemoteDB();
       if (remote && remote.users && remote.users.length > 0) {
-        // 成功从 Gist 拉到了真实数据（至少有用户账号）
+        // 比较本地和云端数据，保留更更新的版本
+        if (localDB) {
+          const localExamCount = localDB.exams?.length || 0;
+          const localRecordCount = localDB.records?.length || 0;
+          const remoteExamCount = remote.exams?.length || 0;
+          const remoteRecordCount = remote.records?.length || 0;
+          const localTimestamp = localDB._lastModified || 0;
+          const remoteTimestamp = remote._lastModified || 0;
+
+          // 本地数据更丰富 或 本地时间戳更新 → 保留本地
+          if (localExamCount > remoteExamCount || localRecordCount > remoteRecordCount || localTimestamp > remoteTimestamp) {
+            console.log("[loadDB] ⏭️ 本地数据更新（本地:", localExamCount, "场考试/", localRecordCount, "条记录 vs 云端:", remoteExamCount, "场/", remoteRecordCount, "条），保留本地");
+            return localDB;
+          }
+        }
+        // 云端数据更新或本地无数据 → 使用云端
         localStorage.setItem(DB_KEY, JSON.stringify(remote));
-        console.log("[loadDB] ✅ 成功从云端加载数据（", remote.users.length, "个用户）");
+        console.log("[loadDB] ✅ 使用云端数据（", remote.exams?.length || 0, "场考试，", remote.records?.length || 0, "条记录）");
         return remote;
       }
       console.log("[loadDB] ⚠️ 云端数据为空或无效");
@@ -187,32 +217,17 @@ async function loadDB() {
       console.log("[loadDB] ❌ Gist 加载失败:", e.message);
     }
   }
-  // 2. 回退到本地浏览器缓存
-  let db = localStorage.getItem(DB_KEY);
-  if (!db) {
-    // 本地也没有缓存，创建默认数据（本地优先：不再自动推送到云端）
-    db = initDefaultDB();
-    localStorage.setItem(DB_KEY, JSON.stringify(db));
-    console.log("[loadDB] 📦 创建默认数据");
-  } else {
-    try {
-      const parsed = JSON.parse(db);
-      // 检查本地缓存是否包含真实数据（至少有用户账号）
-      if (parsed.users && parsed.users.length > 0) {
-        db = parsed;
-        console.log("[loadDB] 📤 从本地缓存加载数据（", parsed.users.length, "个用户）");
-      } else {
-        // 本地缓存是空的初始化数据
-        db = initDefaultDB();
-        localStorage.setItem(DB_KEY, JSON.stringify(db));
-        console.log("[loadDB] 📦 本地缓存无效，创建默认数据");
-      }
-    } catch (e) {
-      db = initDefaultDB();
-      localStorage.setItem(DB_KEY, JSON.stringify(db));
-      console.log("[loadDB] 📦 本地缓存解析失败，创建默认数据:", e.message);
-    }
+
+  // 3. 有本地数据则使用本地
+  if (localDB) {
+    console.log("[loadDB] 📤 使用本地缓存数据");
+    return localDB;
   }
+
+  // 4. 本地和云端都没有 → 创建默认数据
+  const db = initDefaultDB();
+  localStorage.setItem(DB_KEY, JSON.stringify(db));
+  console.log("[loadDB] 📦 创建默认数据");
   return db;
 }
 
@@ -228,6 +243,7 @@ let _lastSyncPartial = false; // 上次同步是否部分成功
 // 本地保存：仅写入 localStorage 并标记为「有未上传更改」，不再自动推送云端
 // 【优化】可选传入 changedExamId，记录增量变化的考试
 function saveDB(db, changedExamId) {
+  db._lastModified = Date.now();
   localStorage.setItem(DB_KEY, JSON.stringify(db));
   _dirtyFlag = true;
   if (changedExamId && !_dirtyExamIds.includes(changedExamId)) {
@@ -605,47 +621,12 @@ const NAV_MENUS = {
 // ========== 登录 ==========
 // 自动登录：优先从 sessionStorage 恢复登录状态，其次从 localStorage「记住我」自动登录
 async function initAutoLogin() {
-  let loadedFromLocal = false;
-
-  // 1. 优先从 localStorage 加载数据（确保 DB 不为 null）
-  if (!DB) {
-    const savedDB = localStorage.getItem(DB_KEY);
-    if (savedDB) {
-      try {
-        DB = JSON.parse(savedDB);
-        loadedFromLocal = true;
-        console.log("[自动登录] ✅ 从 localStorage 加载数据");
-      } catch (e) {
-        DB = null;
-        console.log("[自动登录] ⚠️ localStorage 数据解析失败:", e.message);
-      }
-    }
-  }
-
-  // 2. 如果本地没有数据，再从云端加载（避免云端空数据覆盖本地）
+  // 加载数据（loadDB 已内置本地优先 + 云端比较逻辑）
   if (!DB) {
     DB = await loadDB();
-    console.log("[自动登录] 📦 从云端或默认数据初始化");
-  } else if (!loadedFromLocal && GitHubService.isConfigured()) {
-    try {
-      const remote = await GitHubService.loadRemoteDB();
-      if (remote && remote.users && remote.users.length > 0) {
-        const remoteExamCount = remote.exams?.length || 0;
-        const localExamCount = DB.exams?.length || 0;
-        if (remoteExamCount > localExamCount) {
-          DB = remote;
-          localStorage.setItem(DB_KEY, JSON.stringify(DB));
-          console.log("[自动登录] ✅ 云端数据更新，已同步（云端考试数:", remoteExamCount, "> 本地:", localExamCount, ")");
-        } else {
-          console.log("[自动登录] ⏭️ 跳过云端同步（本地数据更新）");
-        }
-      }
-    } catch (e) {
-      console.log("[自动登录] ⚠️ 云端同步失败，使用本地数据:", e.message);
-    }
   }
 
-  // 3. 尝试从 sessionStorage 恢复登录状态
+  // 1. 尝试从 sessionStorage 恢复登录状态
   const sessionUserId = sessionStorage.getItem("current_user_id");
   if (sessionUserId && DB && DB.users) {
     const user = DB.users.find((u) => u.id === sessionUserId);
@@ -716,27 +697,6 @@ async function doLogin() {
   try {
     if (!DB) {
       DB = await loadDB();
-    } else if (GitHubService.isConfigured()) {
-      try {
-        const remote = await GitHubService.loadRemoteDB();
-        if (remote && remote.users && remote.users.length > 0) {
-          const localExamCount = DB.exams?.length || 0;
-          const remoteExamCount = remote.exams?.length || 0;
-          const localRecordCount = DB.records?.length || 0;
-          const remoteRecordCount = remote.records?.length || 0;
-          
-          if (remoteExamCount > localExamCount || 
-              (remoteExamCount === localExamCount && remoteRecordCount > localRecordCount)) {
-            DB = remote;
-            localStorage.setItem(DB_KEY, JSON.stringify(DB));
-            console.log("[登录] ✅ 云端数据更新，已同步");
-          } else {
-            console.log("[登录] ⏭️ 跳过云端同步（本地数据更新）");
-          }
-        }
-      } catch (e) {
-        console.log("[登录] ⚠️ 云端同步失败，使用本地数据:", e.message);
-      }
     }
 
     const user = DB.users.find((u) => u.username === username && u.password === password && u.role === role);
@@ -769,6 +729,7 @@ async function doLogin() {
 async function doLogout() {
   // 关键修复：退出前先保存到 localStorage，确保数据不会丢失
   if (DB) {
+    DB._lastModified = DB._lastModified || Date.now();
     localStorage.setItem(DB_KEY, JSON.stringify(DB));
     console.log("[退出] ✅ 数据已保存到本地缓存");
   }
@@ -5496,7 +5457,13 @@ function drawRanking(examId, grade, classFilter = "") {
 window.downloadAllRankingExcel = function (examId, grade) {
   const exam = DB.exams.find((e) => e.id === examId);
   if (!exam) { showToast("考试不存在", "error"); return; }
-  const subjects = DB.subjects[grade] || [];
+  const subjects = getExamSubjects(examId).map((s) => ({
+    ...s,
+    pass: s.pass != null ? s.pass : Math.round((s.fullScore || 100) * 0.6),
+    excellent: s.excellent != null ? s.excellent : Math.round((s.fullScore || 100) * 0.9),
+    good: s.good != null ? s.good : Math.round((s.fullScore || 100) * 0.75),
+    low: s.low != null ? s.low : Math.round((s.fullScore || 100) * 0.4)
+  }));
   let records = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   if (records.length === 0) { showToast("无数据", "error"); return; }
 
@@ -5559,7 +5526,13 @@ window.downloadAllRankingExcel = function (examId, grade) {
 window.downloadEachClassRankingExcel = function (examId, grade) {
   const exam = DB.exams.find((e) => e.id === examId);
   if (!exam) { showToast("考试不存在", "error"); return; }
-  const subjects = DB.subjects[grade] || [];
+  const subjects = getExamSubjects(examId).map((s) => ({
+    ...s,
+    pass: s.pass != null ? s.pass : Math.round((s.fullScore || 100) * 0.6),
+    excellent: s.excellent != null ? s.excellent : Math.round((s.fullScore || 100) * 0.9),
+    good: s.good != null ? s.good : Math.round((s.fullScore || 100) * 0.75),
+    low: s.low != null ? s.low : Math.round((s.fullScore || 100) * 0.4)
+  }));
   let records = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   if (records.length === 0) { showToast("无数据", "error"); return; }
 
@@ -5611,7 +5584,13 @@ window.downloadEachClassRankingExcel = function (examId, grade) {
 
 window.downloadRankingExcel = function (examId, grade, classFilter) {
   const exam = DB.exams.find((e) => e.id === examId);
-  const subjects = DB.subjects[grade] || [];
+  const subjects = getExamSubjects(examId).map((s) => ({
+    ...s,
+    pass: s.pass != null ? s.pass : Math.round((s.fullScore || 100) * 0.6),
+    excellent: s.excellent != null ? s.excellent : Math.round((s.fullScore || 100) * 0.9),
+    good: s.good != null ? s.good : Math.round((s.fullScore || 100) * 0.75),
+    low: s.low != null ? s.low : Math.round((s.fullScore || 100) * 0.4)
+  }));
   let allRecords = getVisibleRecords(DB.records.filter((r) => r.examId === examId && r.grade === grade));
   let records = allRecords;
   if (classFilter) records = records.filter((r) => classNoEquals(r.classNo, classFilter));
@@ -7045,11 +7024,13 @@ function renderScoreSegments(records, subjects, totalFullScore) {
   const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
   const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
   const totalGoodLine = subjects.reduce((s, x) => s + x.good, 0);
+  const totalLowLine = subjects.reduce((s, x) => s + x.low, 0);
   const segments = [
     { name: `优秀（≥${totalExcellentLine}分）`, minLine: totalExcellentLine, color: "#28a745" },
     { name: `良好（${totalGoodLine}~${totalExcellentLine}分）`, minLine: totalGoodLine, maxLine: totalExcellentLine, color: "#17a2b8" },
-    { name: `及格（${totalPassLine}~${totalGoodLine}分）`, minLine: totalPassLine, maxLine: totalGoodLine, color: "#3b7ddd" },
-    { name: `不及格（<${totalPassLine}分）`, maxLine: totalPassLine, color: "#dc3545" }
+    { name: `中等（${totalPassLine}~${totalGoodLine}分）`, minLine: totalPassLine, maxLine: totalGoodLine, color: "#ffc107" },
+    { name: `及格（${totalLowLine}~${totalPassLine}分）`, minLine: totalLowLine, maxLine: totalPassLine, color: "#fd7e14" },
+    { name: `不及格（<${totalLowLine}分）`, maxLine: totalLowLine, color: "#dc3545" }
   ];
 
   const classList = [...new Set(records.map((r) => r.classNo))].sort();
@@ -7809,7 +7790,7 @@ window.downloadAcademicAnalysis = function () {
     good: s.good != null ? s.good : Math.round((s.fullScore || 100) * 0.75),
     low: s.low != null ? s.low : Math.round((s.fullScore || 100) * 0.4)
   }));
-  const allRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade);
+  const allRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade));
 
   const wb = XLSX.utils.book_new();
 
@@ -7854,11 +7835,13 @@ window.downloadAcademicAnalysis = function () {
   const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
   const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
   const totalGoodLine = subjects.reduce((s, x) => s + x.good, 0);
+  const totalLowLine = subjects.reduce((s, x) => s + x.low, 0);
   const segDefs = [
     { name: `优秀（≥${totalExcellentLine}分）`, minLine: totalExcellentLine },
     { name: `良好（${totalGoodLine}~${totalExcellentLine}分）`, minLine: totalGoodLine, maxLine: totalExcellentLine },
-    { name: `及格（${totalPassLine}~${totalGoodLine}分）`, minLine: totalPassLine, maxLine: totalGoodLine },
-    { name: `不及格（<${totalPassLine}分）`, maxLine: totalPassLine }
+    { name: `中等（${totalPassLine}~${totalGoodLine}分）`, minLine: totalPassLine, maxLine: totalGoodLine },
+    { name: `及格（${totalLowLine}~${totalPassLine}分）`, minLine: totalLowLine, maxLine: totalPassLine },
+    { name: `不及格（<${totalLowLine}分）`, maxLine: totalLowLine }
   ];
   const segHeader = ["分数段", "全年级人数", "占比", ...classList.map(c => c + "人数")];
   const segData = segDefs.map((seg) => {
@@ -8286,18 +8269,22 @@ function renderHeadteacherHistogram(classRecs, totalFullScore, subjects) {
 }
 
 function renderHeadteacherScoreSegments(classRecs, gradeRecs, subjects, totalFullScore, classNo) {
+  const totalPassLine = subjects.reduce((s, x) => s + x.pass, 0);
+  const totalExcellentLine = subjects.reduce((s, x) => s + x.excellent, 0);
+  const totalGoodLine = subjects.reduce((s, x) => s + x.good, 0);
+  const totalLowLine = subjects.reduce((s, x) => s + x.low, 0);
+
   const segments = [
-    { name: "优秀", min: 0.9, max: 1.01, color: "#28a745" },
-    { name: "良好", min: 0.8, max: 0.9, color: "#17a2b8" },
-    { name: "中等", min: 0.7, max: 0.8, color: "#ffc107" },
-    { name: "及格", min: 0.6, max: 0.7, color: "#fd7e14" },
-    { name: "不及格", min: 0, max: 0.6, color: "#dc3545" }
+    { name: "优秀", min: totalExcellentLine, max: totalFullScore + 1, color: "#28a745" },
+    { name: "良好", min: totalGoodLine, max: totalExcellentLine, color: "#17a2b8" },
+    { name: "中等", min: totalPassLine, max: totalGoodLine, color: "#ffc107" },
+    { name: "及格", min: totalLowLine, max: totalPassLine, color: "#fd7e14" },
+    { name: "不及格", min: 0, max: totalLowLine, color: "#dc3545" }
   ];
 
   function count(recs) {
     return segments.map((seg) => recs.filter((r) => {
-      const rate = r.total / totalFullScore;
-      return rate >= seg.min && rate < seg.max;
+      return r.total >= seg.min && r.total < seg.max;
     }).length);
   }
 
@@ -8642,18 +8629,30 @@ window.downloadHeadteacherAnalysis = function () {
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([perfHeader, ...perfData]), "科目表现");
 
-  // Sheet 3: 分数段分布
+  // Sheet 3: 分数段分布（使用学科配置的分数线）
+  const totalGoodLine = subjects.reduce((s, x) => s + x.good, 0);
+  const totalLowLine = subjects.reduce((s, x) => s + x.low, 0);
   const segments = [
-    { name: "优秀（≥90%）", min: 0.9, max: 1.01 },
-    { name: "良好（80-90%）", min: 0.8, max: 0.9 },
-    { name: "中等（70-80%）", min: 0.7, max: 0.8 },
-    { name: "及格（60-70%）", min: 0.6, max: 0.7 },
-    { name: "不及格（<60%）", min: 0, max: 0.6 }
+    { name: `优秀（≥${totalExcellentLine}分）`, min: totalExcellentLine, max: totalFullScore + 1 },
+    { name: `良好（${totalGoodLine}-${totalExcellentLine}分）`, min: totalGoodLine, max: totalExcellentLine },
+    { name: `中等（${totalPassLine}-${totalGoodLine}分）`, min: totalPassLine, max: totalGoodLine },
+    { name: `及格（${totalLowLine}-${totalPassLine}分）`, min: totalLowLine, max: totalPassLine },
+    { name: `不及格（<${totalLowLine}分）`, max: totalLowLine }
   ];
   const segHeader = ["分数段", "本班人数", "本班占比", "年级人数", "年级占比"];
   const segData = segments.map((seg) => {
-    const cCnt = classRecs.filter((r) => { const rate = r.total / totalFullScore; return rate >= seg.min && rate < seg.max; }).length;
-    const gCnt = gradeRecs.filter((r) => { const rate = r.total / totalFullScore; return rate >= seg.min && rate < seg.max; }).length;
+    const cCnt = classRecs.filter((r) => {
+      if (seg.min != null && seg.max != null) return r.total >= seg.min && r.total < seg.max;
+      if (seg.min != null) return r.total >= seg.min;
+      if (seg.max != null) return r.total < seg.max;
+      return false;
+    }).length;
+    const gCnt = gradeRecs.filter((r) => {
+      if (seg.min != null && seg.max != null) return r.total >= seg.min && r.total < seg.max;
+      if (seg.min != null) return r.total >= seg.min;
+      if (seg.max != null) return r.total < seg.max;
+      return false;
+    }).length;
     return [seg.name, cCnt, fmt(cCnt / Math.max(classRecs.length, 1) * 100, 1) + "%", gCnt, fmt(gCnt / Math.max(gradeRecs.length, 1) * 100, 1) + "%"];
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([segHeader, ...segData]), "分数段分布");
@@ -9317,8 +9316,10 @@ function refreshTeacherAnalysis() {
   const subject = (DB.subjects[grade] || []).find((s) => s.name === subjectName);
   if (!subject) return;
   const fullScore = subject.fullScore || 100;
-  const passLine = subject.pass || (fullScore * 0.6);
-  const excellentLine = subject.excellent || (fullScore * 0.9);
+  const passLine = subject.pass != null ? subject.pass : Math.round(fullScore * 0.6);
+  const excellentLine = subject.excellent != null ? subject.excellent : Math.round(fullScore * 0.9);
+  const goodLine = subject.good != null ? subject.good : Math.round(fullScore * 0.75);
+  const lowLine = subject.low != null ? subject.low : Math.round(fullScore * 0.4);
 
   myClassNos = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, subjectName));
   const allExamRecs = DB.records.filter((r) => r.examId === selectedExam.id && r.grade === grade && (r.status === "confirmed" || r.status === "pending"));
@@ -9393,7 +9394,7 @@ function refreshTeacherAnalysis() {
   renderTeacherOverview(myRecs, gradeVals, myClassNos, subjectName, fullScore, passLine, excellentLine);
   renderTeacherActions(myRecs, gradeRecs, myClassNos, subjectName, fullScore, passLine, excellentLine, exams, selectedExam, grade);
   renderTeacherHistogram(myRecs, subjectName, fullScore, passLine, excellentLine);
-  renderTeacherScoreSegments(myRecs, myClassNos, subjectName, fullScore, gradeRecs);
+  renderTeacherScoreSegments(myRecs, myClassNos, subjectName, fullScore, gradeRecs, passLine, excellentLine, goodLine, lowLine);
   renderTeacherHeatmap(myRecs, myClassNos, subjectName, gradeAvg);
   renderTeacherProgress(exams, selectedExam, grade, myClassNos, subjectName, myRecs);
   renderTeacherSubjectPerf(myRecs, myClassNos, subjectName, fullScore, passLine, excellentLine, gradeAvg);
@@ -9622,23 +9623,23 @@ function renderTeacherHistogram(myRecs, subjectName, fullScore, passLine, excell
   `;
 }
 
-function renderTeacherScoreSegments(myRecs, myClassNos, subjectName, fullScore, gradeRecs) {
+function renderTeacherScoreSegments(myRecs, myClassNos, subjectName, fullScore, gradeRecs, passLine, excellentLine, goodLine, lowLine) {
   const segments = [
-    { name: "优秀", min: 0.9, max: 1.01, color: "#28a745" },
-    { name: "良好", min: 0.8, max: 0.9, color: "#17a2b8" },
-    { name: "中等", min: 0.7, max: 0.8, color: "#ffc107" },
-    { name: "及格", min: 0.6, max: 0.7, color: "#fd7e14" },
-    { name: "不及格", min: 0, max: 0.6, color: "#dc3545" }
+    { name: "优秀", min: excellentLine, max: fullScore + 1, color: "#28a745" },
+    { name: "良好", min: goodLine, max: excellentLine, color: "#17a2b8" },
+    { name: "中等", min: passLine, max: goodLine, color: "#ffc107" },
+    { name: "及格", min: lowLine, max: passLine, color: "#fd7e14" },
+    { name: "不及格", min: 0, max: lowLine, color: "#dc3545" }
   ];
 
   function countByClass(recs, classNo) {
     const cRecs = recs.filter((r) => classNoEquals(r.classNo, classNo));
     const vals = cRecs.map((r) => r.scores[subjectName]).filter((v) => v != null);
-    return segments.map((seg) => vals.filter((v) => { const rate = v / fullScore; return rate >= seg.min && rate < seg.max; }).length);
+    return segments.map((seg) => vals.filter((v) => v >= seg.min && v < seg.max).length);
   }
 
   const gradeVals = gradeRecs.map((r) => r.scores[subjectName]).filter((v) => v != null);
-  const gradeCounts = segments.map((seg) => gradeVals.filter((v) => { const rate = v / fullScore; return rate >= seg.min && rate < seg.max; }).length);
+  const gradeCounts = segments.map((seg) => gradeVals.filter((v) => v >= seg.min && v < seg.max).length);
   const gradeTotal = Math.max(gradeVals.length, 1);
 
   let rows = "";
@@ -9945,8 +9946,10 @@ window.downloadTeacherAnalysis = function () {
   const subjectName = _taActiveSubject || subjects[0];
   const subject = (DB.subjects[grade] || []).find((s) => s.name === subjectName);
   const fullScore = subject?.fullScore || 100;
-  const passLine = subject?.pass || (fullScore * 0.6);
-  const excellentLine = subject?.excellent || (fullScore * 0.9);
+  const passLine = subject?.pass != null ? subject.pass : Math.round(fullScore * 0.6);
+  const excellentLine = subject?.excellent != null ? subject.excellent : Math.round(fullScore * 0.9);
+  const goodLine = subject?.good != null ? subject.good : Math.round(fullScore * 0.75);
+  const lowLine = subject?.low != null ? subject.low : Math.round(fullScore * 0.4);
 
   const myClasses = myClassNos.filter((c) => teacherTeaches(currentUser, grade, c, subjectName));
   const myRecs = getVisibleRecords(DB.records.filter((r) => r.examId === selectedExam.id && r.classNo && myClasses.indexOf(r.classNo) >= 0 && r.scores[subjectName] != null));
@@ -9990,13 +9993,13 @@ window.downloadTeacherAnalysis = function () {
   }).sort((a, b) => b[1] - a[1]);
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([perfHeader, ...perfData]), "各班表现");
 
-  // Sheet 3: 分数段分布
+  // Sheet 3: 分数段分布（使用学科配置的分数线）
   const segments = [
-    { name: "优秀（≥90%）", min: 0.9, max: 1.01 },
-    { name: "良好（80-90%）", min: 0.8, max: 0.9 },
-    { name: "中等（70-80%）", min: 0.7, max: 0.8 },
-    { name: "及格（60-70%）", min: 0.6, max: 0.7 },
-    { name: "不及格（<60%）", min: 0, max: 0.6 }
+    { name: `优秀（≥${excellentLine}分）`, min: excellentLine, max: fullScore + 1 },
+    { name: `良好（${goodLine}-${excellentLine}分）`, min: goodLine, max: excellentLine },
+    { name: `中等（${passLine}-${goodLine}分）`, min: passLine, max: goodLine },
+    { name: `及格（${lowLine}-${passLine}分）`, min: lowLine, max: passLine },
+    { name: `不及格（<${lowLine}分）`, max: lowLine }
   ];
   const segHeader = ["班级", ...segments.map((s) => s.name + " 人数"), ...segments.map((s) => s.name + " 占比")];
   const segData = myClasses.map((c) => {
@@ -10005,11 +10008,21 @@ window.downloadTeacherAnalysis = function () {
     const total = Math.max(vals.length, 1);
     const row = [c];
     segments.forEach((seg) => {
-      const cnt = vals.filter((v) => { const rate = v / fullScore; return rate >= seg.min && rate < seg.max; }).length;
+      const cnt = vals.filter((v) => {
+        if (seg.min != null && seg.max != null) return v >= seg.min && v < seg.max;
+        if (seg.min != null) return v >= seg.min;
+        if (seg.max != null) return v < seg.max;
+        return false;
+      }).length;
       row.push(cnt);
     });
     segments.forEach((seg) => {
-      const cnt = vals.filter((v) => { const rate = v / fullScore; return rate >= seg.min && rate < seg.max; }).length;
+      const cnt = vals.filter((v) => {
+        if (seg.min != null && seg.max != null) return v >= seg.min && v < seg.max;
+        if (seg.min != null) return v >= seg.min;
+        if (seg.max != null) return v < seg.max;
+        return false;
+      }).length;
       row.push(fmt(cnt / total * 100, 1) + "%");
     });
     return row;
