@@ -29,19 +29,20 @@ const GitHubService = {
   },
   isSyncing: false,
   CORS_PROXIES: [
-    "https://corsproxy.io/?",
-    "https://api.allorigins.win/raw?url=",
     "https://api.codetabs.com/v1/proxy?quest=",
-    "https://proxy.cors.sh/",
-    "https://cors-anywhere.herokuapp.com/",
+    "https://api.allorigins.win/raw?url=",
+    "https://api.allorigins.work/raw?url=",
     "https://thingproxy.freeboard.io/fetch/",
-    "https://api.allorigins.work/raw?url="
+    "https://cors.bridged.cc/",
+    "https://api.moralis.io/v1/ipfs/",
+    "https://api.henrylin.ml/cors/"
   ],
   currentProxyIndex: 0,
   useProxy: false, // 优先直连 GitHub API（原生支持 CORS），失败时自动回退到代理
   CONFIG_FILE: "smart-edu-config.json",
   DATA_META_FILE: "smart-edu-data.json",
-  FILE_LIMIT: 280,         // 接近 300 时触发归档
+  FILE_LIMIT: 50,           // 单个 Gist 最大文件数
+  MAX_FILE_SIZE: 500 * 1024, // 单个文件最大 500KB
 
   init() {
     let token = localStorage.getItem("gh_token");
@@ -263,7 +264,7 @@ const GitHubService = {
           throw new Error(`认证失败：${errMsg}，请检查 Token 是否正确`);
         }
         if ((res.status === 413 || res.status === 429) && _attempt < MAX_ATTEMPTS - 1) {
-          const delay = Math.pow(2, _attempt) * 1000;
+          const delay = Math.min(Math.pow(2, _attempt) * 500, 5000);
           this.log(`[API] ${mode}返回 ${res.status}（${res.status === 413 ? "内容过大" : "限流"}），等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
           await new Promise(r => setTimeout(r, delay));
           return this.api(method, gistId, body, _attempt + 1);
@@ -286,7 +287,7 @@ const GitHubService = {
                              e.message.includes("CORS");
       
       if ((isTimeout || isNetworkError) && _attempt < MAX_ATTEMPTS - 1) {
-        const delay = Math.pow(2, _attempt) * 1000;
+        const delay = Math.min(Math.pow(2, _attempt) * 500, 5000);
         this.log(`[API] ${isTimeout ? "超时" : "网络错误"}(${e.message.slice(0,30)}...)，等待${delay}ms后换${_attempt === 0 ? "代理" : "其他代理"}重试...`);
         await new Promise(r => setTimeout(r, delay));
         return this.api(method, gistId, body, _attempt + 1);
@@ -364,7 +365,7 @@ const GitHubService = {
       clearTimeout(timeoutId);
       if (!raw.ok) {
         if ((raw.status === 413 || raw.status === 429) && _attempt < MAX_ATTEMPTS - 1) {
-          const delay = Math.pow(2, _attempt) * 1000;
+          const delay = Math.min(Math.pow(2, _attempt) * 500, 5000);
           await new Promise(r => setTimeout(r, delay));
           return this._fetchRawUrl(rawUrl, _attempt + 1);
         }
@@ -383,7 +384,7 @@ const GitHubService = {
                              e.message.includes("CORS");
       
       if ((isTimeout || isNetworkError) && _attempt < MAX_ATTEMPTS - 1) {
-        const delay = Math.pow(2, _attempt) * 1000;
+        const delay = Math.min(Math.pow(2, _attempt) * 500, 5000);
         await new Promise(r => setTimeout(r, delay));
         return this._fetchRawUrl(rawUrl, _attempt + 1);
       }
@@ -615,8 +616,12 @@ const GitHubService = {
   },
 
   // 从所有业务 Gist 读取所有 exam-*.json → records 数组
+  // 支持两种格式：
+  //   旧格式：exam-{examId}.json（单文件存储）
+  //   新格式：exam-{examId}-{classNo}.json（按班级拆分存储）
   async loadAllRecords() {
     const records = [];
+    const processedExams = new Set();
     // 1. 并行获取所有 Gist 的文件列表（缓存完整 info 对象）
     const gistInfos = await Promise.all(
       this.config.dataGistIds.map(async (gid) => {
@@ -630,24 +635,48 @@ const GitHubService = {
         }
       })
     );
-    // 2. 收集所有待读取的文件路径（带上 info 缓存）
-    const allFiles = [];
+    // 2. 按考试分组文件，优先读取完整文件，否则读取拆分文件
+    const examFileMap = {};
     gistInfos.forEach(({ gid, info, files }) => {
       files.forEach((fname) => {
-        allFiles.push({ gid, fname, infoCache: info });
+        const match = fname.match(/^exam-([^-]+)(?:-([^.]+))?\.json$/);
+        if (match) {
+          const examId = match[1];
+          const classNo = match[2];
+          if (!examFileMap[examId]) examFileMap[examId] = { full: null, split: [], gid, info };
+          if (classNo) {
+            examFileMap[examId].split.push(fname);
+          } else {
+            examFileMap[examId].full = fname;
+          }
+        }
       });
     });
-    // 3. 批量并发读取（最多 5 个并发，避免超时）
+    // 3. 批量并发读取
     const CONCURRENCY = 5;
-    for (let i = 0; i < allFiles.length; i += CONCURRENCY) {
-      const batch = allFiles.slice(i, i + CONCURRENCY);
+    const examIds = Object.keys(examFileMap);
+    for (let i = 0; i < examIds.length; i += CONCURRENCY) {
+      const batch = examIds.slice(i, i + CONCURRENCY);
       const batchResults = await Promise.all(
-        batch.map(({ gid, fname, infoCache }) =>
-          this.readGistFile(gid, fname, infoCache).catch((e) => {
-            this.log(`读取 ${gid}/${fname} 失败: ${e.message}`, "error");
+        batch.map(async (examId) => {
+          const entry = examFileMap[examId];
+          try {
+            if (entry.full) {
+              return await this.readGistFile(entry.gid, entry.full, entry.info);
+            } else if (entry.split.length > 0) {
+              const splitRecords = [];
+              for (const fname of entry.split) {
+                const recs = await this.readGistFile(entry.gid, fname, entry.info);
+                if (Array.isArray(recs)) splitRecords.push(...recs);
+              }
+              return splitRecords;
+            }
             return null;
-          })
-        )
+          } catch (e) {
+            this.log(`读取 ${examId} 失败: ${e.message}`, "error");
+            return null;
+          }
+        })
       );
       batchResults.forEach((recs) => {
         if (Array.isArray(recs)) records.push(...recs);
@@ -681,26 +710,46 @@ const GitHubService = {
   },
 
   // 写入一个考试的成绩文件（examId 决定文件名）
+  // 【优化】按班级拆分存储，避免单个文件过大
   async saveExamRecords(examId, records) {
     if (!examId) return false;
-    // 先确保容量：检查当前活跃 Gist 的文件数，必要时新建
     const activeGistId = await this.ensureCapacity();
     if (!activeGistId) {
       this.log("❌ 无可用业务 Gist（自动创建失败）", "error");
       return false;
     }
     try {
-      const filename = `exam-${examId}.json`;
-      // 【优化】去掉 JSON 缩进，减少传输体积
-      const files = {
-        [filename]: { content: JSON.stringify(records) }
-      };
-      await this.updateGistFiles(activeGistId, files,
-        `考试成绩更新：${examId.slice(0,10)}... · ${new Date().toLocaleString()}`);
-      return true;
+      const fullContent = JSON.stringify(records);
+      if (fullContent.length <= this.MAX_FILE_SIZE) {
+        const filename = `exam-${examId}.json`;
+        const files = {
+          [filename]: { content: fullContent }
+        };
+        await this.updateGistFiles(activeGistId, files,
+          `考试成绩更新：${examId.slice(0,10)}... · ${new Date().toLocaleString()}`);
+        return { success: true, classFiles: null };
+      } else {
+        const byClass = {};
+        records.forEach(r => {
+          const cls = r.classNo || "未知";
+          if (!byClass[cls]) byClass[cls] = [];
+          byClass[cls].push(r);
+        });
+        const classFiles = [];
+        for (const [classNo, classRecords] of Object.entries(byClass)) {
+          const filename = `exam-${examId}-${classNo}.json`;
+          const content = JSON.stringify(classRecords);
+          const files = { [filename]: { content } };
+          await this.updateGistFiles(activeGistId, files,
+            `考试成绩更新：${examId.slice(0,10)}.../${classNo} · ${new Date().toLocaleString()}`);
+          classFiles.push(filename);
+        }
+        this.log(`✅ ${examId} 按班级拆分存储完成（${classFiles.length} 个班级文件）`);
+        return { success: true, classFiles };
+      }
     } catch (e) {
       this.log(`❌ 保存 ${examId}.json 失败: ${e.message}`, "error");
-      return false;
+      return { success: false, classFiles: null };
     }
   },
 
@@ -801,7 +850,8 @@ const GitHubService = {
             const info = await this.getGistInfo(gid);
             const files = Object.keys(info.files || {}).filter(name => name.startsWith("exam-") && name.endsWith(".json"));
             const toDelete = files.filter(filename => {
-              const examId = filename.replace("exam-", "").replace(".json", "");
+              const match = filename.match(/^exam-([^-]+)/);
+              const examId = match ? match[1] : filename.replace("exam-", "").replace(".json", "");
               return !allLocalExamIds.has(examId);
             });
             if (toDelete.length > 0) {
