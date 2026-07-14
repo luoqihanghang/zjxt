@@ -221,7 +221,7 @@
   <div class="ea-body" id="eaBody">
     <div class="ea-welcome">
       <div class="ea-welcome-icon">
-        <svg viewBox="0 0 64 64" width="48" height="48">
+        <svg viewBox="0 0 64 64" width="44" height="44">
           <defs>
             <linearGradient id="eaWelcomeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
@@ -233,13 +233,9 @@
           <path d="M12 56 Q32 38 52 56 L52 60 L12 60 Z" fill="#ffffff" opacity="0.95"/>
         </svg>
       </div>
-      <div class="ea-welcome-title">您好！我是教务智能助手</div>
-      <div class="ea-welcome-desc">我可以帮您分析成绩数据、识别问题、提供洞察。可以问我各科目成绩、班级对比、学生表现等。</div>
-      <div class="ea-suggestions">
-        <div class="ea-suggestion" onclick="askAssistant('全年级各科目的优秀率是多少？')">📊 各科目优秀率</div>
-        <div class="ea-suggestion" onclick="askAssistant('哪个班级的总分均分最高？')">🏆 班级排名</div>
-        <div class="ea-suggestion" onclick="askAssistant('这次考试有哪些学生需要关注？')">👨‍🎓 关注学生</div>
-        <div class="ea-suggestion" onclick="askAssistant('分析年级整体的成绩分布情况')">📈 成绩分布</div>
+      <div class="ea-welcome-title">👋 您好！我是教务智能助手</div>
+      <div class="ea-welcome-desc" id="eaWelcomeDesc">正在分析本次考试的成绩数据，随时为您解答问题～</div>
+      <div class="ea-quick-groups" id="eaQuickGroups">
       </div>
     </div>
   </div>
