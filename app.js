@@ -4566,31 +4566,14 @@ function renderAcademicUploadScores() {
       <!-- 科目上传进度 -->
       <div id="a_subject_progress" style="margin-bottom:16px">${renderSubjectProgress()}</div>
 
-      <!-- 上传模式 -->
-      <div style="margin-bottom:16px">
-        <div style="display:flex;gap:16px;margin-bottom:12px">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="radio" name="a_mode" value="full" checked onchange="window.onAcademicModeChange()" /> 全科上传
-          </label>
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="radio" name="a_mode" value="single" onchange="window.onAcademicModeChange()" /> 单科上传
-          </label>
-        </div>
-        <div id="a_subject_select" style="display:none">
-          <div style="margin-bottom:8px;font-size:13px;color:var(--text-light)">选择要上传的科目：</div>
-          <div id="a_subject_buttons" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-        </div>
-      </div>
-
       <div class="form-group" style="display:flex;align-items:flex-end;gap:10px">
         <button class="btn btn-info" onclick="window.downloadAcademicTemplate()">⬇ 下载Excel模板</button>
-        <button class="btn btn-secondary" onclick="window.downloadAcademicSingleTemplate()" id="a_dl_single" style="display:none">⬇ 下载单科模板</button>
       </div>
 
       <div id="a_uploadArea" class="upload-area">
         <div class="ua-icon">📂</div>
-        <div class="ua-title" id="a_upload_title">点击选择 Excel 文件（可多选，支持批量上传不同科目文件）</div>
-        <div class="ua-tip" id="a_upload_tip">系统自动识别科目列，跨文件同学生自动合并分数</div>
+        <div class="ua-title" id="a_upload_title">点击选择多个 Excel 文件（每班一个，可一次框选）</div>
+        <div class="ua-tip" id="a_upload_tip">系统按「班级」列合并，自动匹配学生</div>
         <input type="file" id="a_file" accept=".xlsx,.xls" multiple style="display:none" />
       </div>
 
@@ -4606,62 +4589,16 @@ function renderAcademicUploadScores() {
         • 学号格式：<b>YYYYNN##</b>（年份前缀${DB.studentIdFormat?.yearPrefix || "2026"} + 两位班级号 + 两位班级人数顺序）<br/>
         • <b>学号列为可选</b>：留空时系统自动分配学号（如 20260101）<br/>
         • 支持同一文件中混合多个班级<br/>
-        • 科目列名支持自动识别（拼音首字母、英文缩写、模糊匹配等）<br/>
-        • 可批量上传多个不同科目的文件，系统自动合并跨文件学生分数<br/>
+        • 可批量上传多个文件（每班一个），系统按「班级」列合并<br/>
         • 留空的分数视为0分<br/>
         • 上传后成绩直接生效，如需修改可在下方「已上传成绩管理」中删除
       </p>
     </div>
   `;
 
-  // 渲染科目按钮
-  window.renderAcademicSubjectButtons = function () {
-    const examId = $("a_exam").value;
-    const recs = DB.records.filter((r) => r.examId === examId && r.grade === grade);
-    const uploadedSubjects = new Set();
-    examSubjects.forEach((s) => {
-      const hasScore = recs.some((r) => r.scores[s.name] != null && r.scores[s.name] !== "");
-      if (hasScore) uploadedSubjects.add(s.name);
-    });
-
-    const container = $("a_subject_buttons");
-    container.innerHTML = examSubjects.map((s) => {
-      const isUploaded = uploadedSubjects.has(s.name);
-      const isSelected = window._aSelectedSubject === s.name;
-      const cls = isSelected ? "btn btn-primary" : (isUploaded ? "btn btn-success" : "btn btn-secondary");
-      return `<button class="${cls}" onclick="window.selectAcademicSubject('${s.name}')" style="min-width:80px">
-        ${isSelected ? "✓" : (isUploaded ? "✓" : "○")} ${s.name}
-      </button>`;
-    }).join("");
-  };
-
-  // 初始化
-  window._aSelectedSubject = null;
-  renderAcademicSubjectButtons();
-
   // 考试切换
   window.onAcademicExamChange = function () {
     renderAcademicSubjectProgress();
-    renderAcademicSubjectButtons();
-  };
-
-  // 模式切换
-  window.onAcademicModeChange = function () {
-    const mode = document.querySelector('input[name="a_mode"]:checked').value;
-    $("a_subject_select").style.display = mode === "single" ? "block" : "none";
-    $("a_dl_single").style.display = mode === "single" ? "inline-block" : "none";
-    $("a_upload_title").textContent = mode === "single" 
-      ? "选择要上传科目的 Excel 文件" 
-      : "点击选择多个 Excel 文件（每班一个，可一次框选）";
-    window._aSelectedSubject = null;
-    renderAcademicSubjectButtons();
-  };
-
-  // 选择科目
-  window.selectAcademicSubject = function (subjectName) {
-    window._aSelectedSubject = subjectName;
-    renderAcademicSubjectButtons();
-    $("a_preview").innerHTML = "";
   };
 
   // 渲染进度
@@ -4696,23 +4633,11 @@ function renderAcademicUploadScores() {
   }
 
   const ua = $("a_uploadArea");
-  ua.onclick = () => {
-    const mode = document.querySelector('input[name="a_mode"]:checked').value;
-    if (mode === "single" && !window._aSelectedSubject) {
-      showToast("请先选择要上传的科目", "warning");
-      return;
-    }
-    $("a_file").click();
-  };
+  ua.onclick = () => { $("a_file").click(); };
   ua.addEventListener("dragover", (e) => { e.preventDefault(); ua.classList.add("dragover"); });
   ua.addEventListener("dragleave", () => ua.classList.remove("dragover"));
   ua.addEventListener("drop", (e) => {
     e.preventDefault(); ua.classList.remove("dragover");
-    const mode = document.querySelector('input[name="a_mode"]:checked').value;
-    if (mode === "single" && !window._aSelectedSubject) {
-      showToast("请先选择要上传的科目", "warning");
-      return;
-    }
     if (e.dataTransfer.files.length) handleAcademicExcelFile(e.dataTransfer.files);
   });
   $("a_file").addEventListener("change", (e) => {
@@ -4844,28 +4769,6 @@ window.downloadAcademicTemplate = function () {
   showToast("模板已下载", "success");
 };
 
-window.downloadAcademicSingleTemplate = function () {
-  if (!window._aSelectedSubject) {
-    showToast("请先选择科目", "warning");
-    return;
-  }
-  const grade = currentUser.grade;
-  const subject = window._aSelectedSubject;
-  const headers = ["学号（可留空）", "姓名", "班级", subject];
-  const rows = [headers];
-  const sampleClasses = ["1班", "2班", "3班"];
-  sampleClasses.forEach((c) => {
-    for (let i = 1; i <= 3; i++) {
-      rows.push(["", `${c}学生${i}`, c, Math.floor(Math.random() * 80 + 20)]);
-    }
-  });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, `${subject}成绩`);
-  XLSX.writeFile(wb, `${grade}_${subject}_成绩模板.xlsx`);
-  showToast(`「${subject}」模板已下载`, "success");
-};
-
 function handleAcademicExcelFile(fileList) {
   const files = Array.from(fileList);
   if (files.length === 0) return;
@@ -4878,12 +4781,9 @@ function handleAcademicExcelFile(fileList) {
     ? exam.subjects 
     : gradeSubjects.map((s) => ({ name: s.name, fullScore: s.fullScore }));
   const showStudentId = hasRoster(grade);
-  const mode = document.querySelector('input[name="a_mode"]:checked')?.value || "full";
-  const selectedSubject = window._aSelectedSubject || null;
-  const isSingleMode = mode === "single" && selectedSubject;
 
-  // 确定要解析的科目
-  const targetSubjects = isSingleMode ? [selectedSubject] : examSubjects.map((s) => s.name);
+  // 按班级上传固定为全科模式
+  const targetSubjects = examSubjects.map((s) => s.name);
 
   // 获取学生名单，构建"班级+姓名 → 学号"映射
   const rosterByClass = DB.studentRoster?.[grade] || {};
@@ -4920,7 +4820,6 @@ function handleAcademicExcelFile(fileList) {
     const gs = gradeSubjects.find((s) => s.name === sn);
     return gs && gs.fullScore ? gs.fullScore : 100;
   };
-  const seenKeys = new Set(); // 用于检测同一学生跨文件重复
 
   function parseSingleFile(file) {
     return new Promise((resolve) => {
@@ -5063,14 +4962,6 @@ function handleAcademicExcelFile(fileList) {
             });
             if (rowIdx === 1) console.log("[教务上传] 第一行解析结果:", scores);
 
-            // 检查同一学生跨文件重复
-            const dupKey = `${classNo}|${studentName}`;
-            if (seenKeys.has(dupKey)) {
-              dataErrors.push({ file: file.name, row: rowIdx + 2, student: studentName, subject: "—", problem: `该学生在其他文件中已出现（${classNo}），本次将覆盖之前的数据`, severity: "warning" });
-            } else {
-              seenKeys.add(dupKey);
-            }
-
             allParsed.push({
               classNo, studentId, studentName, scores,
               existingScores: existing ? { ...existing.scores } : {},
@@ -5093,8 +4984,6 @@ function handleAcademicExcelFile(fileList) {
       await parseSingleFile(files[i]);
     }
 
-    allParsed.push(...Object.values(parsedMap || {}));
-
     if (allParsed.length === 0) {
       showToast(conflictWarnings.length ? `未能解析：${conflictWarnings[0]}` : "未能解析有效学生", "error");
       return;
@@ -5111,9 +5000,6 @@ function handleAcademicExcelFile(fileList) {
       : "";
     const notInRosterNote = notInRosterWarnings.length > 0
       ? `<div style="padding:10px 12px;background:#fff8e1;border-left:3px solid #f9a825;border-radius:4px;font-size:12px;margin-bottom:10px">🚫 已过滤 ${notInRosterWarnings.length} 位名单外学生：${notInRosterWarnings.slice(0, 3).join("；")}${notInRosterWarnings.length > 3 ? "……" : ""}</div>`
-      : "";
-    const modeNote = isSingleMode
-      ? `<div style="padding:10px 12px;background:#e3f2fd;border-left:3px solid #1976d2;border-radius:4px;font-size:12px;margin-bottom:10px">📝 单科上传模式：仅更新「${selectedSubject}」科目数据</div>`
       : "";
 
     const previewRows = allParsed.slice(0, 40).map((r) => {
@@ -5193,9 +5079,8 @@ function handleAcademicExcelFile(fileList) {
 
     $("a_preview").innerHTML = `
       <div class="card-title" style="border:none;padding:0;margin-bottom:12px">
-        📋 已解析 ${totalFiles} 个文件 · ${allParsed.length} 名学生 · ${isSingleMode ? `（${selectedSubject}）` : ""}
+        📋 已解析 ${totalFiles} 个文件 · ${allParsed.length} 名学生
       </div>
-      ${modeNote}
       ${autoNote}
       ${notInRosterNote}
       ${conflictNote}
